@@ -1,0 +1,6 @@
+{
+  "name": "ZenCAD",
+  "description": "A minimalist, fast 2D CAD application for the browser.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
