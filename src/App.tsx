@@ -3,19 +3,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { CADCanvas } from './components/CADCanvas';
-import { Entity, Point } from './types';
-import { Minus, Circle, Square, MousePointer2, Trash2, Sparkles, MoveHorizontal } from 'lucide-react';
+import { DimensionStyleDialog } from './components/DimensionStyleDialog';
+import { Entity, Point, Layer, Measurement } from './types';
+import { Minus, Circle, Square, MousePointer2, Eraser, Sparkles, MoveHorizontal, Scissors, Ruler, Move, DraftingCompass, History, Dot, Undo, Redo } from 'lucide-react';
 
 export default function App() {
   const [selectedTool, setSelectedTool] = useState('Select');
-  const [entities, setEntities] = useState<Entity[]>([
-    { id: '1', type: 'line', color: 'white', lineWidth: 2, start: { x: 0, y: 0 }, end: { x: 100, y: 100 }, layer: 'Layer 0' }
+  const [entities, setEntities] = useState<Entity[]>([]);
+  const [layers, setLayers] = useState<Layer[]>([
+      { id: 'Layer 0', name: 'Layer 0', visible: true, frozen: false },
+      { id: 'Layer 1', name: 'Layer 1', visible: true, frozen: false }
   ]);
+  const [activeLayerId, setActiveLayerId] = useState<string>('Layer 0');
+  const [defaultLineStyle, setDefaultLineStyle] = useState({ color: '#000000', lineWidth: 1, dashed: false, mode: 'ink' as 'ink' | 'pencil' });
+  const [eraserRadius, setEraserRadius] = useState(20);
+  const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isAIDialogOpen, setIsAIDialogOpen] = useState(false);
+  const [isDimensionDialogOpen, setIsDimensionDialogOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
+  const [contextMenu, setContextMenu] = useState<{x: number, y: number, isOpen: boolean} | null>(null);
   const cadCanvasRef = useRef<any>(null);
 
   const selectedEntity = entities.find(e => e.id === selectedId);
@@ -35,7 +44,7 @@ export default function App() {
         });
         const data = await response.json();
         if (data.entities) {
-            setEntities(prev => [...prev, ...data.entities.map((e: any) => ({ ...e, id: Date.now().toString() + Math.random() }))]);
+            updateEntitiesWithHistory(prev => [...prev, ...data.entities.map((e: any) => ({ ...e, id: Date.now().toString() + Math.random() }))]);
         }
         setIsAIDialogOpen(false);
         setAiPrompt('');
@@ -45,71 +54,146 @@ export default function App() {
     }
   };
 
-  const toolbarButtons = [
-    { name: 'Select', icon: MousePointer2 },
-    { name: 'Line', icon: Minus },
-    { name: 'Circle', icon: Circle },
-    { name: 'Rectangle', icon: Square },
-    { name: 'Parallel', icon: MoveHorizontal },
-    { name: 'Delete', icon: Trash2 },
-    { name: 'AI', icon: Sparkles },
+  const categories = [
+    { name: 'Seleziona', icon: MousePointer2, tools: [{ name: 'Select', icon: MousePointer2 }] },
+    { name: 'Disegno', icon: DraftingCompass, tools: [{ name: 'Line', icon: Minus }, { name: 'Circle', icon: Circle }, { name: 'Arc', icon: History }, { name: 'Rectangle', icon: Square }, { name: 'Point', icon: Dot }, { name: 'Trim', icon: Scissors }, { name: 'Eraser', icon: Eraser }] },
+    { name: 'Modifica', icon: Scissors, tools: [{ name: 'Parallel', icon: MoveHorizontal }, { name: 'Move', icon: Move }] },
+    { name: 'Avanzate', icon: Ruler, tools: [{ name: 'Dimension', icon: Ruler }, { name: 'AI', icon: Sparkles }] },
+    { name: 'Layer', icon: Square, tools: [{ name: 'Layer 0', icon: Square }, { name: 'Layer 1', icon: Square }]},
   ];
+  const [showProperties, setShowProperties] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState(categories[0].name);
+
+  // Undo/Redo
+  const [history, setHistory] = useState<Entity[][]>([[]]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+
+  const undo = () => {
+    if (historyIndex > 0) {
+        setHistoryIndex(prev => prev - 1);
+        setEntities(history[historyIndex - 1]);
+    }
+  };
+
+  const redo = () => {
+    if (historyIndex < history.length - 1) {
+        setHistoryIndex(prev => prev + 1);
+        setEntities(history[historyIndex + 1]);
+    }
+  };
+
+  const updateEntitiesWithHistory = (newEntities: React.SetStateAction<Entity[]>) => {
+      setEntities(prev => {
+          const next = typeof newEntities === 'function' ? newEntities(prev) : newEntities;
+          const newHistory = history.slice(0, historyIndex + 1);
+          newHistory.push(next);
+          setHistory(newHistory);
+          setHistoryIndex(newHistory.length - 1);
+          return next;
+      });
+  };
+
+  // Auto-show properties when entity selected
+  useEffect(() => {
+	  if(selectedId) setShowProperties(true);
+  }, [selectedId]);
+
+  const selectedCategoryTools = categories.find(c => c.name === selectedCategory)?.tools || [];
 
   return (
-    <div className="flex flex-col h-screen bg-slate-950 text-white">
-      {/* Header */}
-      <header className="h-12 border-b border-slate-800 flex items-center px-4 font-bold text-sm bg-slate-900 justify-between">
-        <span>ZenCAD</span>
-        <span className="text-xs text-slate-500">v0.1.0</span>
+    <div className="flex flex-col h-screen bg-neutral-100 text-neutral-900">
+      {/* Ribbon */}
+      <header className="h-20 border-b border-neutral-300 bg-white flex">
+        {categories.map(cat => (
+          <button key={cat.name} onClick={() => setSelectedCategory(cat.name)} className={`px-6 flex flex-col items-center justify-center gap-1 ${selectedCategory === cat.name ? 'bg-neutral-100' : 'hover:bg-neutral-200'}`}>
+            <cat.icon size={20} />
+            <span className="text-xs">{cat.name}</span>
+          </button>
+        ))}
+        <div className="flex flex-col items-center justify-center gap-1">
+            <button onClick={undo} className="p-2 hover:bg-neutral-200"><Undo size={16}/></button>
+            <button onClick={redo} className="p-2 hover:bg-neutral-200"><Redo size={16}/></button>
+        </div>
+        <button onClick={() => setShowProperties(!showProperties)} className={`px-6 flex flex-col items-center justify-center gap-1 ${showProperties ? 'bg-neutral-100' : 'hover:bg-neutral-200'}`}>
+            <Square size={20} />
+            <span className="text-xs">Defaults</span>
+        </button>
+        <button onClick={() => setShowProperties(!showProperties)} className="flex flex-col items-center justify-center px-6 hover:bg-neutral-200">
+            <span className="text-xs text-neutral-500">Mode: {defaultLineStyle.mode}</span>
+            <span className="text-sm font-bold">{defaultLineStyle.lineWidth}</span>
+        </button>
       </header>
+      <div className="h-10 bg-white border-b border-neutral-300 flex items-center px-4 gap-2">
+         {selectedCategoryTools.map(tool => (
+            <button key={tool.name} onClick={() => setSelectedTool(tool.name)} className={`px-3 py-1 rounded flex items-center gap-1 text-sm ${selectedTool === tool.name ? 'bg-indigo-100 text-indigo-900 border border-indigo-300' : 'hover:bg-neutral-200'}`}>
+               <tool.icon size={16} />
+               {tool.name}
+            </button>
+         ))}
+      </div>
       
       {/* Main Area */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Toolbar */}
-        <aside className="w-16 border-r border-slate-800 p-2 space-y-2 bg-slate-900">
-          {toolbarButtons.map((btn) => (
-            <button 
-              key={btn.name}
-              title={btn.name}
-              onClick={() => {
-                if (btn.name === 'AI') {
-                    setIsAIDialogOpen(true);
-                } else {
-                    setSelectedTool(btn.name);
-                }
-              }}
-              className={`w-12 h-12 rounded flex items-center justify-center transition-colors ${selectedTool === btn.name ? 'bg-indigo-600' : 'bg-slate-800 hover:bg-slate-700'}`}
-            >
-              <btn.icon size={20} />
-            </button>
-          ))}
-        </aside>
-        
-        {/* Canvas Area */}
-        <main className="flex-1 overflow-hidden relative">
-          <CADCanvas ref={cadCanvasRef} entities={entities} activeTool={selectedTool} setEntities={setEntities} onSelect={setSelectedId} />
+        <main className="flex-1 overflow-hidden relative" onClick={() => setContextMenu(null)}>
+          <CADCanvas ref={cadCanvasRef} entities={entities} activeTool={selectedTool} setEntities={updateEntitiesWithHistory} onSelect={(id) => { setSelectedId(id); if(id) setShowProperties(true); }} onContextMenu={(e) => setContextMenu({ x: e.clientX, y: e.clientY, isOpen: true })} activeLayerId={activeLayerId} defaultLineStyle={defaultLineStyle} eraserRadius={eraserRadius} setEraserRadius={setEraserRadius} />
         </main>
-      </div>
 
-      {/* Properties Panel */}
-      {selectedEntity && (
-        <div className="absolute right-4 top-16 w-64 bg-slate-800 p-4 border border-slate-700 rounded shadow-lg text-sm">
-          <h3 className="font-bold mb-2">Properties: {selectedEntity.type}</h3>
-          <div className="space-y-2">
-            <label className="block">Color: <input type="color" value={selectedEntity.color} onChange={e => updateEntity(selectedEntity.id, { color: e.target.value })} /></label>
-            <label className="block">Width: <input type="range" min="1" max="10" value={selectedEntity.lineWidth} onChange={e => updateEntity(selectedEntity.id, { lineWidth: parseInt(e.target.value) })} /></label>
-            <label className="block">Dash: <input type="checkbox" checked={!!selectedEntity.dashed} onChange={e => updateEntity(selectedEntity.id, { dashed: e.target.checked })} /></label>
-            <label className="block">Layer: 
-              <select value={selectedEntity.layer} onChange={e => updateEntity(selectedEntity.id, { layer: e.target.value })}>
-                <option>Layer 0</option>
-                <option>Layer 1</option>
-                <option>Layer 2</option>
-              </select>
-            </label>
-            <button className="w-full bg-red-600 mt-4 p-1 rounded" onClick={() => { setEntities(prev => prev.filter(e => e.id !== selectedId)); setSelectedId(null); }}>Delete</button>
+        {/* Properties Panel (Drawer) */}
+        {showProperties && (
+          <div className="w-64 bg-white border-l border-neutral-300 p-4 transition-all overflow-y-auto">
+            <h3 className="font-bold mb-4 flex justify-between">
+                <span>{selectedEntity ? `Properties (${selectedEntity.type})` : 'Drawing Defaults'}</span>
+                <button onClick={() => setShowProperties(false)}>X</button>
+            </h3>
+            <div className="space-y-4">
+                {selectedEntity ? (
+                    <>
+                        <label className="block text-sm">Mode:
+                            <div className="flex gap-2">
+                                <button onClick={() => updateEntity(selectedEntity.id, { mode: 'ink' })} className={`p-2 rounded flex-1 ${selectedEntity.mode === 'ink' ? 'bg-indigo-600 text-white' : 'bg-neutral-200'}`}>Ink</button>
+                                <button onClick={() => updateEntity(selectedEntity.id, { mode: 'pencil' })} className={`p-2 rounded flex-1 ${selectedEntity.mode === 'pencil' ? 'bg-indigo-600 text-white' : 'bg-neutral-200'}`}>Pencil</button>
+                            </div>
+                        </label>
+                        <label className="block text-sm">Width: 
+                            <div className="flex gap-2">
+                                {[1, 2.5, 4].map(w => (
+                                    <button key={w} onClick={() => updateEntity(selectedEntity.id, { lineWidth: w })} className={`p-2 rounded flex-1 ${selectedEntity.lineWidth === w ? 'bg-indigo-600 text-white' : 'bg-neutral-200 text-neutral-900 border border-neutral-400'}`}>{w} mm</button>
+                                ))}
+                            </div>
+                        </label>
+                        {selectedEntity.type === 'dimension' && (
+                           <>
+                               <label className="block text-sm">Text: <input type="text" value={(selectedEntity as any).customText || ''} onChange={e => updateEntity(selectedEntity.id, { customText: e.target.value })} className="w-full bg-neutral-100 p-2 rounded" /></label>
+                               <button className="w-full bg-indigo-600 text-white p-2 text-sm rounded" onClick={() => setIsDimensionDialogOpen(true)}>Edit Style</button>
+                           </>
+                        )}
+                    </>
+                ) : (
+                    <>
+                        <label className="block text-sm">Default Mode:
+                            <div className="flex gap-2">
+                                <button onClick={() => setDefaultLineStyle({...defaultLineStyle, mode: 'ink'})} className={`p-2 rounded flex-1 ${defaultLineStyle.mode === 'ink' ? 'bg-indigo-600 text-white' : 'bg-neutral-200'}`}>Ink</button>
+                                <button onClick={() => setDefaultLineStyle({...defaultLineStyle, mode: 'pencil'})} className={`p-2 rounded flex-1 ${defaultLineStyle.mode === 'pencil' ? 'bg-indigo-600 text-white' : 'bg-neutral-200'}`}>Pencil</button>
+                            </div>
+                        </label>
+                        <label className="block text-sm">Default Width: 
+                            <div className="flex gap-2">
+                                {[1, 2.5, 4].map(w => (
+                                    <button key={w} onClick={() => setDefaultLineStyle({...defaultLineStyle, lineWidth: w})} className={`p-2 rounded flex-1 ${defaultLineStyle.lineWidth === w ? 'bg-indigo-600 text-white' : 'bg-neutral-200 text-neutral-900 border border-neutral-400'}`}>{w} mm</button>
+                                ))}
+                            </div>
+                        </label>
+                        <label className="block text-sm">Active Layer:
+                            <select value={activeLayerId} onChange={e => setActiveLayerId(e.target.value)} className="w-full bg-neutral-100 p-2 rounded text-sm mt-1">
+                                {layers.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                            </select>
+                        </label>
+                    </>
+                )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Command Bar */}
       <footer className="h-8 border-t border-slate-800 bg-slate-900 px-4 flex items-center text-sm">

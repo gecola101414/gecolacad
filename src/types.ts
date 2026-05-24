@@ -1,6 +1,6 @@
 export type Point = { x: number; y: number };
 
-export type EntityType = 'line' | 'circle' | 'rectangle';
+export type EntityType = 'line' | 'circle' | 'rectangle' | 'dimension' | 'arc' | 'point';
 
 export interface CADEntity {
   id: string;
@@ -9,6 +9,7 @@ export interface CADEntity {
   lineWidth: number;
   layer: string;
   dashed?: boolean;
+  mode: 'ink' | 'pencil';
 }
 
 export interface LineEntity extends CADEntity {
@@ -23,10 +24,46 @@ export interface CircleEntity extends CADEntity {
   radius: number;
 }
 
+export interface ArcEntity extends CADEntity {
+  type: 'arc';
+  center: Point;
+  radius: number;
+  startAngle: number;
+  endAngle: number;
+}
+
+export interface PointEntity extends CADEntity {
+  type: 'point';
+  point: Point;
+}
+
 export interface RectEntity extends CADEntity {
   type: 'rectangle';
   p1: Point;
   p2: Point;
 }
 
-export type Entity = LineEntity | CircleEntity | RectEntity;
+export interface DimensionEntity extends CADEntity {
+  type: 'dimension';
+  start: Point;
+  end: Point;
+  offset: number;
+  style: number;
+  customText?: string;
+  rotation?: number; // In degrees
+}
+
+export type Entity = LineEntity | CircleEntity | RectEntity | DimensionEntity | ArcEntity | PointEntity;
+
+export interface Measurement {
+  id: string;
+  entityId: string;
+  value: number;
+}
+
+export interface Layer {
+  id: string;
+  name: string;
+  visible: boolean;
+  frozen: boolean;
+}
