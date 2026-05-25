@@ -7,7 +7,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { CADCanvas } from './components/CADCanvas';
 import { DimensionStyleDialog } from './components/DimensionStyleDialog';
 import { Entity, Point, Layer, Measurement } from './types';
-import { Minus, Circle, Square, MousePointer2, Eraser, Sparkles, MoveHorizontal, Scissors, Ruler, Move, DraftingCompass, History, Dot, Undo, Redo, Printer } from 'lucide-react';
+import { Minus, Circle, Square, MousePointer2, Eraser, Sparkles, MoveHorizontal, Scissors, Ruler, Move, DraftingCompass, History, Dot, Undo, Redo, Printer, Crosshair } from 'lucide-react';
 
 export default function App() {
   const [selectedTool, setSelectedTool] = useState('Select');
@@ -30,13 +30,23 @@ export default function App() {
   const [pdfScale, setPdfScale] = useState<number>(100);
   const [pdfUnit, setPdfUnit] = useState<string>('m');
   const [pdfFormat, setPdfFormat] = useState<string>('a4');
+  const [rulerStyle, setRulerStyle] = useState<'tecnigrafo' | 'crosshair'>('tecnigrafo');
   const cadCanvasRef = useRef<any>(null);
 
   const handleRightClickShortcut = () => {
     setContextMenu(null);
+    setSelectedCategory('Disegno');
     setSelectedTool(prev => {
-        const nextTool = prev === 'Eraser' ? 'Line' : 'Eraser';
-        setShortcutToast(`Strumento: ${nextTool === 'Eraser' ? 'Gomma' : 'Linea'}`);
+        let nextTool = 'Line';
+        let translated = 'Linea';
+        if (prev === 'Line') {
+            nextTool = 'Trim';
+            translated = 'Forbici';
+        } else if (prev === 'Trim') {
+            nextTool = 'Eraser';
+            translated = 'Gomma';
+        }
+        setShortcutToast(`Strumento: ${translated}`);
         setTimeout(() => setShortcutToast(null), 1500);
         return nextTool;
     });
@@ -71,8 +81,19 @@ export default function App() {
 
   const categories = [
     { name: 'Seleziona', icon: MousePointer2, tools: [{ name: 'Select', icon: MousePointer2 }] },
-    { name: 'Disegno', icon: DraftingCompass, tools: [{ name: 'Line', icon: Minus }, { name: 'Circle', icon: Circle }, { name: 'Arc', icon: History }, { name: 'Rectangle', icon: Square }, { name: 'Point', icon: Dot }, { name: 'Trim', icon: Scissors }, { name: 'Eraser', icon: Eraser }, { name: 'Dimension', icon: Ruler }, { name: 'AI', icon: Sparkles }] },
-    { name: 'Modifica', icon: Scissors, tools: [{ name: 'Parallel', icon: MoveHorizontal }, { name: 'Move', icon: Move }] },
+    { name: 'Disegno', icon: DraftingCompass, tools: [
+      { name: 'Line', icon: Minus }, 
+      { name: 'Circle', icon: Circle }, 
+      { name: 'Arc', icon: History }, 
+      { name: 'Rectangle', icon: Square }, 
+      { name: 'Point', icon: Dot }, 
+      { name: 'Trim', icon: Scissors }, 
+      { name: 'Eraser', icon: Eraser }, 
+      { name: 'Parallel', icon: MoveHorizontal },
+      { name: 'Move', icon: Move },
+      { name: 'Dimension', icon: Ruler }, 
+      { name: 'AI', icon: Sparkles }
+    ] },
   ];
   const [showProperties, setShowProperties] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(categories[0].name);
@@ -186,6 +207,13 @@ export default function App() {
             <Printer size={16} />
             <span className="text-[10px] font-bold">Crea PDF</span>
         </button>
+        <button onClick={async () => {
+            const { exportDXF } = await import('./utils/dxfExport');
+            exportDXF(entities, layers, 'disegno.dxf');
+        }} className="px-4 flex flex-col items-center justify-center gap-0.5 hover:bg-neutral-200 text-blue-600 border-l border-neutral-300">
+            <span className="font-bold text-sm">DXF</span>
+            <span className="text-[10px] font-bold">Salva CAD</span>
+        </button>
       </header>
       <div className="h-8 bg-white border-b border-neutral-300 flex items-center px-4 gap-2">
          {selectedCategoryTools.map(tool => (
@@ -194,12 +222,32 @@ export default function App() {
                {tool.name}
             </button>
          ))}
+         {selectedCategory === 'Seleziona' && (
+           <>
+             <div className="h-4 w-[1px] bg-neutral-300 mx-1" />
+             <span className="text-[11px] text-neutral-500 font-medium">Menu Righelli:</span>
+             <button 
+               onClick={() => setRulerStyle('tecnigrafo')} 
+               className={`px-2 py-0.5 rounded flex items-center gap-1 text-xs transition ${rulerStyle === 'tecnigrafo' ? 'bg-amber-100 text-amber-950 border border-amber-300 font-medium' : 'hover:bg-neutral-200'}`}
+             >
+               <DraftingCompass size={12} />
+               Classico (Tecnigrafo)
+             </button>
+             <button 
+               onClick={() => setRulerStyle('crosshair')} 
+               className={`px-2 py-0.5 rounded flex items-center gap-1 text-xs transition ${rulerStyle === 'crosshair' ? 'bg-amber-100 text-amber-950 border border-amber-300 font-medium' : 'hover:bg-neutral-200'}`}
+             >
+               <Crosshair size={12} />
+               Incrocio CAD
+             </button>
+           </>
+         )}
       </div>
       
       {/* Main Area */}
       <div className="flex flex-1 overflow-hidden relative">
         <main className="flex-1 overflow-hidden relative" onClick={() => setContextMenu(null)}>
-          <CADCanvas ref={cadCanvasRef} entities={entities} activeTool={selectedTool} setEntities={updateEntitiesWithHistory} setEntitiesSilent={updateEntitiesSilent} onCommitHistory={commitToHistory} onSelect={(id) => { setSelectedId(id); if(id) setShowProperties(true); }} onContextMenu={handleRightClickShortcut} activeLayerId={activeLayerId} layers={layers} defaultLineStyle={defaultLineStyle} eraserRadius={eraserRadius} setEraserRadius={setEraserRadius} />
+          <CADCanvas ref={cadCanvasRef} entities={entities} activeTool={selectedTool} setEntities={updateEntitiesWithHistory} setEntitiesSilent={updateEntitiesSilent} onCommitHistory={commitToHistory} onSelect={(id) => { setSelectedId(id); if(id) setShowProperties(true); }} onContextMenu={handleRightClickShortcut} activeLayerId={activeLayerId} layers={layers} defaultLineStyle={defaultLineStyle} eraserRadius={eraserRadius} setEraserRadius={setEraserRadius} rulerStyle={rulerStyle} />
         </main>
 
         {shortcutToast && (

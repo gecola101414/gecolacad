@@ -1,9 +1,126 @@
 import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 'react';
-import { Entity, Point, Layer } from '../types';
+import { Entity, Point, Layer, LineEntity, CircleEntity, ArcEntity, RectEntity } from '../types';
+import { ManualInputOverlay } from './ManualInputOverlay';
 
 export interface CADCanvasAPI {
   getCurrentMousePosition: () => Point;
 }
+
+const normalizeAngle = (a: number) => {
+  let deg = a % 360;
+  if (deg < 0) deg += 360;
+  return deg;
+};
+
+const isAngleInArc = (angle: number, startAngle: number, endAngle: number) => {
+  const normAngle = normalizeAngle(angle);
+  const normStart = normalizeAngle(startAngle);
+  const normEnd = normalizeAngle(endAngle);
+  if (normStart <= normEnd) {
+      return normAngle >= normStart && normAngle <= normEnd;
+  } else {
+      return normAngle >= normStart || normAngle <= normEnd;
+  }
+};
+
+const getClockwiseDistance = (angle: number, start: number) => {
+  let d = angle - start;
+  while (d < 0) d += 360;
+  while (d >= 360) d -= 360;
+  return d;
+};
+
+const getArcSubsegmentsOutsideEraser = (
+  center: Point,
+  radiusC: number,
+  startAngle: number,
+  endAngle: number,
+  isCircle: boolean,
+  eraserCenter: Point,
+  eraserRadius: number
+): { startAngle: number; endAngle: number }[] | null => {
+  const d = Math.sqrt((center.x - eraserCenter.x) ** 2 + (center.y - eraserCenter.y) ** 2);
+  
+  if (d > radiusC + eraserRadius) {
+      return null;
+  }
+  if (d + radiusC <= eraserRadius) {
+      return [];
+  }
+  if (d + eraserRadius <= radiusC) {
+      return null;
+  }
+  
+  const x = (radiusC * radiusC - eraserRadius * eraserRadius + d * d) / (2 * d);
+  if (Math.abs(x) >= radiusC) {
+      return null;
+  }
+  
+  const alpha = Math.atan2(eraserCenter.y - center.y, eraserCenter.x - center.x);
+  const beta = Math.acos(x / radiusC);
+  
+  const I1 = normalizeAngle((alpha - beta) * 180 / Math.PI);
+  const I2 = normalizeAngle((alpha + beta) * 180 / Math.PI);
+  
+  const A = normalizeAngle(startAngle);
+  const B = normalizeAngle(endAngle);
+  const L = isCircle ? 360 : getClockwiseDistance(B, A);
+  
+  const t1 = getClockwiseDistance(I1, A);
+  const t2 = getClockwiseDistance(I2, A);
+  
+  const splits = [0, L];
+  const epsilon = 0.05;
+  
+  if (t1 > epsilon && t1 < L - epsilon) {
+      splits.push(t1);
+  }
+  if (t2 > epsilon && t2 < L - epsilon) {
+      splits.push(t2);
+  }
+  
+  splits.sort((a, b) => a - b);
+  
+  const keptIntervals: { start: number; end: number }[] = [];
+  for (let i = 0; i < splits.length - 1; i++) {
+      const s = splits[i];
+      const e = splits[i + 1];
+      if (e - s < epsilon) continue;
+      
+      const mid = (s + e) / 2;
+      const angleMid = normalizeAngle(A + mid);
+      
+      if (!isAngleInArc(angleMid, I1, I2)) {
+          keptIntervals.push({ start: s, end: e });
+      }
+  }
+  
+  if (keptIntervals.length === 0) {
+      return [];
+  }
+  if (keptIntervals.length === 1 && Math.abs((keptIntervals[0].end - keptIntervals[0].start) - L) < epsilon) {
+      return null;
+  }
+  
+  if (isCircle && keptIntervals.length > 1) {
+      const first = keptIntervals[0];
+      const last = keptIntervals[keptIntervals.length - 1];
+      if (Math.abs(first.start - 0) < epsilon && Math.abs(last.end - 360) < epsilon) {
+          const merged = { start: last.start, end: first.end + 360 };
+          const middle = keptIntervals.slice(1, keptIntervals.length - 1);
+          const finalIntervals = [...middle, merged];
+          return finalIntervals.map(interval => ({
+              startAngle: normalizeAngle(A + interval.start),
+              endAngle: normalizeAngle(A + interval.end)
+          }));
+      }
+  }
+  
+  return keptIntervals.map(interval => ({
+      startAngle: normalizeAngle(A + interval.start),
+      endAngle: normalizeAngle(A + interval.end)
+  }));
+};
 
 interface CADCanvasProps {
   entities: Entity[];
@@ -19,15 +136,16 @@ interface CADCanvasProps {
   eraserRadius: number;
   setEraserRadius: React.Dispatch<React.SetStateAction<number>>;
   onMouseMovePosition?: (pos: Point) => void;
+  rulerStyle?: 'tecnigrafo' | 'crosshair';
 }
 
-export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, eraserRadius, setEraserRadius, onMouseMovePosition }, ref) => {
+export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo' }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [view, setView] = useState({ zoom: 1, pan: { x: 0, y: 0 } });
   const [drawing, setDrawing] = useState<{start: Point, current: Point, snapType?: 'standard' | 'smart', refPoint?: Point, activeConstraint?: { axis: 'x' | 'y', value: number }} | null>(null);
   const [selectedParallelLine, setSelectedParallelLine] = useState<Entity | null>(null);
   const [highlightedTrimLine, setHighlightedTrimLine] = useState<Entity | null>(null);
-  const [highlightedTrimSegment, setHighlightedTrimSegment] = useState<{start: Point, end: Point} | null>(null);
+  const [highlightedTrimSegment, setHighlightedTrimSegment] = useState<{ type: 'line' | 'arc'; start?: Point; end?: Point; center?: Point; radius?: number; startAngle?: number; endAngle?: number } | null>(null);
   const [hoverSnap, setHoverSnap] = useState<{ point: Point; snapped: boolean; type: 'standard' | 'smart'; refPoint?: Point; constraintAxis?: 'x' | 'y' } | null>(null);
   const [dragEntityId, setDragEntityId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState<Point>({x: 0, y: 0});
@@ -37,6 +155,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const [isListening, setIsListening] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
   const [positioningDimId, setPositioningDimId] = useState<string | null>(null);
+  const [showManualInput, setShowManualInput] = useState(false);
   const lastMouseRef = useRef<Point>({ x: 0, y: 0 });
   const lastEraserExecutionTime = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -177,7 +296,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                                 };
                                 setEntities(prev => [...prev, newLine]);
                                 onSelect(null);
-                                setSelectedParallelLine(null);
+                                setParallelDistance(length);
+                                // setSelectedParallelLine(null); // kept commented to show intent
                                 if (recognitionRef.current) {
                                     try { recognitionRef.current.stop(); } catch(e) {}
                                 }
@@ -425,7 +545,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         if ((entity.id === selectedParallelLine?.id && blink)) {
           ctx.strokeStyle = 'cyan'; // Selection color, different from ink
           ctx.lineWidth = (entity.lineWidth + 4) / view.zoom;
-        } else if (activeTool === 'Eraser' && highlightedTrimSegment && entity.id === highlightedTrimLine?.id) {
+        } else if (activeTool === 'Trim' && highlightedTrimSegment && entity.id === highlightedTrimLine?.id) {
             // Eraser highlight only
         }
         
@@ -518,13 +638,23 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
         ctx.stroke();
 
-        if (activeTool === 'Eraser' && highlightedTrimSegment && entity.id === highlightedTrimLine?.id) {
-             // Draw yellow highlight
-             ctx.strokeStyle = 'cyan'; // Changed highlight color for Eraser
+        if (activeTool === 'Trim' && highlightedTrimSegment && entity.id === highlightedTrimLine?.id) {
+             // Draw red highlight for Trim
+             ctx.strokeStyle = 'rgba(255,50,50,0.8)';
              ctx.lineWidth = (entity.lineWidth + 4) / view.zoom;
              ctx.beginPath();
-             ctx.moveTo(highlightedTrimSegment.start.x, highlightedTrimSegment.start.y);
-             ctx.lineTo(highlightedTrimSegment.end.x, highlightedTrimSegment.end.y);
+             if (highlightedTrimSegment.type === 'line' && highlightedTrimSegment.start && highlightedTrimSegment.end) {
+                 ctx.moveTo(highlightedTrimSegment.start.x, highlightedTrimSegment.start.y);
+                 ctx.lineTo(highlightedTrimSegment.end.x, highlightedTrimSegment.end.y);
+             } else if (highlightedTrimSegment.type === 'arc' && highlightedTrimSegment.center && highlightedTrimSegment.radius !== undefined && highlightedTrimSegment.startAngle !== undefined && highlightedTrimSegment.endAngle !== undefined) {
+                 ctx.arc(
+                     highlightedTrimSegment.center.x,
+                     highlightedTrimSegment.center.y,
+                     highlightedTrimSegment.radius,
+                     highlightedTrimSegment.startAngle * Math.PI / 180,
+                     highlightedTrimSegment.endAngle * Math.PI / 180
+                 );
+             }
              ctx.stroke();
         }
         ctx.setLineDash([]);
@@ -532,10 +662,12 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
       // Eraser cursor
       if (activeTool === 'Eraser') {
-          ctx.strokeStyle = '#000000'; // Black circle
-          ctx.lineWidth = 1 / view.zoom;
+          ctx.strokeStyle = 'rgba(234, 179, 8, 0.9)'; // Spesso giallo
+          ctx.lineWidth = 3.5 / view.zoom;
+          ctx.fillStyle = 'rgba(254, 240, 138, 0.35)'; // Giallo tenue trasparente all'interno
           ctx.beginPath();
           ctx.arc(eraserPos.x, eraserPos.y, eraserRadius / view.zoom, 0, Math.PI * 2);
+          ctx.fill();
           ctx.stroke();
       }
 
@@ -560,7 +692,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         ctx.setLineDash([]);
         
         // Render snap indicator
-        ctx.strokeStyle = drawing.snapType === 'smart' ? 'yellow' : 'cyan';
+        ctx.strokeStyle = drawing.snapType === 'smart' ? '#22c55e' : 'cyan';
         ctx.lineWidth = 2 / view.zoom;
         ctx.beginPath();
         ctx.rect(drawing.current.x - 5/view.zoom, drawing.current.y - 5/view.zoom, 10/view.zoom, 10/view.zoom);
@@ -568,7 +700,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         
         if (drawing.snapType === 'smart' && drawing.refPoint) {
             ctx.setLineDash([5 / view.zoom, 5 / view.zoom]);
-            ctx.strokeStyle = 'yellow';
+            ctx.strokeStyle = '#22c55e';
             ctx.lineWidth = 1 / view.zoom;
             ctx.beginPath();
             ctx.moveTo(drawing.current.x, drawing.current.y);
@@ -580,7 +712,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
       // Render hover snap indicator
       if (!drawing && hoverSnap && hoverSnap.snapped) {
-        ctx.strokeStyle = hoverSnap.type === 'smart' ? 'yellow' : 'cyan';
+        ctx.strokeStyle = hoverSnap.type === 'smart' ? '#22c55e' : 'cyan';
         ctx.lineWidth = 2 / view.zoom;
         ctx.beginPath();
         ctx.rect(hoverSnap.point.x - 5/view.zoom, hoverSnap.point.y - 5/view.zoom, 10/view.zoom, 10/view.zoom);
@@ -588,7 +720,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
         if (hoverSnap.type === 'smart' && hoverSnap.refPoint) {
             ctx.setLineDash([5 / view.zoom, 5 / view.zoom]);
-            ctx.strokeStyle = 'yellow';
+            ctx.strokeStyle = '#22c55e';
             ctx.lineWidth = 1 / view.zoom;
             ctx.beginPath();
             ctx.moveTo(hoverSnap.point.x, hoverSnap.point.y);
@@ -728,8 +860,31 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             } else {
                 let hit = false;
                 if (ent.type === 'circle') {
-                    const dist = Math.sqrt((rawPoint.x - ent.center.x)**2 + (rawPoint.y - ent.center.y)**2);
-                    if (dist <= radius) hit = true;
+                    const arcSegments = getArcSubsegmentsOutsideEraser(ent.center, ent.radius, 0, 360, true, rawPoint, radius);
+                    if (arcSegments) {
+                        changed = true;
+                        return arcSegments.map((seg, i) => ({
+                            ...ent,
+                            id: i === 0 ? ent.id : Date.now().toString() + i + Math.random(),
+                            type: 'arc' as const,
+                            startAngle: seg.startAngle,
+                            endAngle: seg.endAngle
+                        }));
+                    }
+                } else if (ent.type === 'arc') {
+                    const arcSegments = getArcSubsegmentsOutsideEraser(ent.center, ent.radius, ent.startAngle, ent.endAngle, false, rawPoint, radius);
+                    if (arcSegments) {
+                        changed = true;
+                        return arcSegments.map((seg, i) => ({
+                            ...ent,
+                            id: i === 0 ? ent.id : Date.now().toString() + i + Math.random(),
+                            startAngle: seg.startAngle,
+                            endAngle: seg.endAngle
+                        }));
+                    }
+                } else if (false) {
+                    const distToCenter = Math.sqrt((rawPoint.x - ent.center.x)**2 + (rawPoint.y - ent.center.y)**2);
+                    if (Math.abs(distToCenter - ent.radius) <= radius) hit = true;
                 } else if (ent.type === 'rectangle') {
                     if (distanceToSegment(rawPoint, ent.p1, {x: ent.p2.x, y: ent.p1.y}) < radius ||
                         distanceToSegment(rawPoint, {x: ent.p2.x, y: ent.p1.y}, ent.p2) < radius ||
@@ -766,6 +921,365 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             if (setEntitiesSilent) setEntitiesSilent(newEntities);
             else setEntities(newEntities);
         }
+  };
+
+  const getIntersections = (entA: Entity, entB: Entity): Point[] => {
+    const pts: Point[] = [];
+    if (entA.id === entB.id) return pts;
+
+    // Both are lines
+    if (entA.type === 'line' && entB.type === 'line') {
+        const x1 = entA.start.x, y1 = entA.start.y, x2 = entA.end.x, y2 = entA.end.y;
+        const x3 = entB.start.x, y3 = entB.start.y, x4 = entB.end.x, y4 = entB.end.y;
+        const denom = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
+        if (denom !== 0) {
+            const t = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denom;
+            const u = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denom;
+            if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+                pts.push({ x: x1 + t * (x2 - x1), y: y1 + t * (y2 - y1) });
+            }
+        }
+    }
+    // line and circle / arc
+    else if ((entA.type === 'line' && (entB.type === 'circle' || entB.type === 'arc')) ||
+             ((entA.type === 'circle' || entA.type === 'arc') && entB.type === 'line')) {
+        const line = entA.type === 'line' ? entA : entB as LineEntity;
+        const circle = entA.type === 'line' ? entB as (CircleEntity | ArcEntity) : entA as (CircleEntity | ArcEntity);
+        
+        const d = { x: line.end.x - line.start.x, y: line.end.y - line.start.y };
+        const v = { x: line.start.x - circle.center.x, y: line.start.y - circle.center.y };
+        const a = d.x * d.x + d.y * d.y;
+        const b = 2 * (v.x * d.x + v.y * d.y);
+        const c = (v.x * v.x + v.y * v.y) - circle.radius * circle.radius;
+        if (a !== 0) {
+            const discriminant = b * b - 4 * a * c;
+            if (discriminant >= 0) {
+                const sqrtD = Math.sqrt(discriminant);
+                const t1 = (-b - sqrtD) / (2 * a);
+                const t2 = (-b + sqrtD) / (2 * a);
+                [t1, t2].forEach(t => {
+                    if (t >= 0 && t <= 1) {
+                        const p = { x: line.start.x + t * d.x, y: line.start.y + t * d.y };
+                        // If it's an arc, check if angle is inside
+                        if (circle.type === 'arc') {
+                            const angle = Math.atan2(p.y - circle.center.y, p.x - circle.center.x) * 180 / Math.PI;
+                            if (isAngleInArc(angle, circle.startAngle, circle.endAngle)) {
+                                pts.push(p);
+                            }
+                        } else {
+                            pts.push(p);
+                        }
+                    }
+                });
+            }
+        }
+    }
+    // two circles / arcs
+    else if ((entA.type === 'circle' || entA.type === 'arc') && (entB.type === 'circle' || entB.type === 'arc')) {
+        const c1 = entA as (CircleEntity | ArcEntity);
+        const c2 = entB as (CircleEntity | ArcEntity);
+        const dx = c2.center.x - c1.center.x;
+        const dy = c2.center.y - c1.center.y;
+        const dSum = Math.sqrt(dx * dx + dy * dy);
+        if (dSum > 0.001 && dSum <= c1.radius + c2.radius && dSum >= Math.abs(c1.radius - c2.radius)) {
+            const a = (c1.radius * c1.radius - c2.radius * c2.radius + dSum * dSum) / (2 * dSum);
+            const hSq = c1.radius * c1.radius - a * a;
+            const h = Math.sqrt(Math.max(0, hSq));
+            const ux = dx / dSum;
+            const uy = dy / dSum;
+            const px = -uy;
+            const py = ux;
+            
+            const p1 = { x: c1.center.x + a * ux + h * px, y: c1.center.y + a * uy + h * py };
+            const p2 = { x: c1.center.x + a * ux - h * px, y: c1.center.y + a * uy - h * py };
+            
+            [p1, p2].forEach(p => {
+                // Check if on entA
+                if (entA.type === 'arc') {
+                     const a1 = Math.atan2(p.y - c1.center.y, p.x - c1.center.x) * 180 / Math.PI;
+                     if (!isAngleInArc(a1, (entA as ArcEntity).startAngle, (entA as ArcEntity).endAngle)) return;
+                }
+                // Check if on entB
+                if (entB.type === 'arc') {
+                     const a2 = Math.atan2(p.y - c2.center.y, p.x - c2.center.x) * 180 / Math.PI;
+                     if (!isAngleInArc(a2, (entB as ArcEntity).startAngle, (entB as ArcEntity).endAngle)) return;
+                }
+                pts.push(p);
+            });
+        }
+    }
+    // rectangle and line / circle / arc
+    else if (entA.type === 'rectangle' || entB.type === 'rectangle') {
+        const rect = entA.type === 'rectangle' ? entA as RectEntity : entB as RectEntity;
+        const other = entA.type === 'rectangle' ? entB : entA;
+        
+        const x1 = Math.min(rect.p1.x, rect.p2.x);
+        const x2 = Math.max(rect.p1.x, rect.p2.x);
+        const y1 = Math.min(rect.p1.y, rect.p2.y);
+        const y2 = Math.max(rect.p1.y, rect.p2.y);
+        
+        const segs: LineEntity[] = [
+            { id: 's1', type: 'line', start: { x: x1, y: y1 }, end: { x: x2, y: y1 }, color: '', lineWidth: 1, layer: '', mode: 'ink' },
+            { id: 's2', type: 'line', start: { x: x2, y: y1 }, end: { x: x2, y: y2 }, color: '', lineWidth: 1, layer: '', mode: 'ink' },
+            { id: 's3', type: 'line', start: { x: x2, y: y2 }, end: { x: x1, y: y2 }, color: '', lineWidth: 1, layer: '', mode: 'ink' },
+            { id: 's4', type: 'line', start: { x: x1, y: y2 }, end: { x: x1, y: y1 }, color: '', lineWidth: 1, layer: '', mode: 'ink' }
+        ];
+        
+        segs.forEach(seg => {
+            const subPts = getIntersections(seg, other);
+            subPts.forEach(pt => pts.push(pt));
+        });
+    }
+    return pts;
+  };
+
+  const getTrimTargetAtPoint = (point: Point): Entity | undefined => {
+      const ent = getEntityAtPoint(point);
+      return ent && (ent.type === 'line' || ent.type === 'circle' || ent.type === 'arc') ? ent : undefined;
+  };
+
+  const computeTrimSegments = (
+    target: Entity,
+    clickPoint: Point,
+    allEntities: Entity[]
+  ): {
+    highlighted: { type: 'line' | 'arc'; start?: Point; end?: Point; center?: Point; radius?: number; startAngle?: number; endAngle?: number };
+    keep: any[];
+  } | null => {
+    if (target.type === 'line') {
+      const intersections: { t: number; p: Point }[] = [];
+      intersections.push({ t: 0, p: target.start });
+      intersections.push({ t: 1, p: target.end });
+
+      allEntities.forEach(ent => {
+        if (ent.id === target.id) return;
+        
+        const pts = getIntersections(target, ent);
+        pts.forEach(p => {
+          const d = { x: target.end.x - target.start.x, y: target.end.y - target.start.y };
+          const lenSq = d.x * d.x + d.y * d.y;
+          if (lenSq !== 0) {
+            const t = ((p.x - target.start.x) * d.x + (p.y - target.start.y) * d.y) / lenSq;
+            if (t > 0 && t < 1) {
+              intersections.push({ t, p });
+            }
+          }
+        });
+      });
+
+      intersections.sort((a, b) => a.t - b.t);
+      const d = { x: target.end.x - target.start.x, y: target.end.y - target.start.y };
+      const lenSq = d.x * d.x + d.y * d.y;
+      let tClick = 0;
+      if (lenSq !== 0) {
+        tClick = ((clickPoint.x - target.start.x) * d.x + (clickPoint.y - target.start.y) * d.y) / lenSq;
+      }
+
+      let trimStart: Point | null = null;
+      let trimEnd: Point | null = null;
+      let clickedIndex = -1;
+
+      for (let i = 0; i < intersections.length - 1; i++) {
+        if (tClick >= intersections[i].t && tClick <= intersections[i + 1].t) {
+          trimStart = intersections[i].p;
+          trimEnd = intersections[i + 1].p;
+          clickedIndex = i;
+          break;
+        }
+      }
+
+      if (trimStart && trimEnd) {
+        const keep: any[] = [];
+        for (let i = 0; i < intersections.length - 1; i++) {
+          if (i !== clickedIndex) {
+            if (intersections[i + 1].t - intersections[i].t > 0.001) {
+              keep.push({
+                ...target,
+                start: intersections[i].p,
+                end: intersections[i + 1].p,
+              });
+            }
+          }
+        }
+        return {
+          highlighted: { type: 'line', start: trimStart, end: trimEnd },
+          keep,
+        };
+      }
+    } else if (target.type === 'circle') {
+      const ptsSet: Point[] = [];
+      allEntities.forEach(ent => {
+        if (ent.id === target.id) return;
+        const pts = getIntersections(target, ent);
+        pts.forEach(p => {
+          if (!ptsSet.some(existing => Math.sqrt((existing.x - p.x)**2 + (existing.y - p.y)**2) < 0.001)) {
+            ptsSet.push(p);
+          }
+        });
+      });
+
+      const angles = ptsSet.map(p => {
+        return normalizeAngle(Math.atan2(p.y - target.center.y, p.x - target.center.x) * 180 / Math.PI);
+      });
+
+      angles.sort((a, b) => a - b);
+
+      if (angles.length < 2) {
+        return {
+          highlighted: { type: 'arc', center: target.center, radius: target.radius, startAngle: 0, endAngle: 360 },
+          keep: [],
+        };
+      }
+
+      const angleClick = normalizeAngle(Math.atan2(clickPoint.y - target.center.y, clickPoint.x - target.center.x) * 180 / Math.PI);
+
+      let startAngleSegment = 0;
+      let endAngleSegment = 0;
+      let found = false;
+
+      for (let i = 0; i < angles.length; i++) {
+        const start = angles[i];
+        const end = angles[(i + 1) % angles.length];
+        
+        if (start <= end) {
+          if (angleClick >= start && angleClick <= end) {
+            startAngleSegment = start;
+            endAngleSegment = end;
+            found = true;
+            break;
+          }
+        } else {
+          if (angleClick >= start || angleClick <= end) {
+            startAngleSegment = start;
+            endAngleSegment = end;
+            found = true;
+            break;
+          }
+        }
+      }
+
+      if (found) {
+        const keptArc = {
+          ...target,
+          type: 'arc' as const,
+          startAngle: endAngleSegment,
+          endAngle: startAngleSegment,
+        };
+
+        return {
+          highlighted: {
+            type: 'arc',
+            center: target.center,
+            radius: target.radius,
+            startAngle: startAngleSegment,
+            endAngle: endAngleSegment,
+          },
+          keep: [keptArc],
+        };
+      }
+    } else if (target.type === 'arc') {
+      const ptsSet: Point[] = [];
+      allEntities.forEach(ent => {
+        if (ent.id === target.id) return;
+        const pts = getIntersections(target, ent);
+        pts.forEach(p => {
+          if (!ptsSet.some(existing => Math.sqrt((existing.x - p.x)**2 + (existing.y - p.y)**2) < 0.001)) {
+            ptsSet.push(p);
+          }
+        });
+      });
+
+      const angles = ptsSet.map(p => {
+        return normalizeAngle(Math.atan2(p.y - target.center.y, p.x - target.center.x) * 180 / Math.PI);
+      });
+
+      const validAngles = angles.filter(a => isAngleInArc(a, target.startAngle, target.endAngle));
+
+      validAngles.sort((a, b) => getClockwiseDistance(a, target.startAngle) - getClockwiseDistance(b, target.startAngle));
+
+      const S = normalizeAngle(target.startAngle);
+      const E = normalizeAngle(target.endAngle);
+      
+      const sequence: number[] = [S];
+      validAngles.forEach(a => {
+        if (Math.abs(a - S) > 0.001 && Math.abs(a - E) > 0.001) {
+          sequence.push(a);
+        }
+      });
+      sequence.push(E);
+
+      const angleClick = normalizeAngle(Math.atan2(clickPoint.y - target.center.y, clickPoint.x - target.center.x) * 180 / Math.PI);
+
+      let clickedIndex = -1;
+      for (let i = 0; i < sequence.length - 1; i++) {
+        const start = sequence[i];
+        const end = sequence[i + 1];
+        const distClick = getClockwiseDistance(angleClick, S);
+        const d1 = getClockwiseDistance(start, S);
+        const d2 = getClockwiseDistance(end, S);
+        if (distClick >= d1 && distClick <= d2) {
+          clickedIndex = i;
+          break;
+        }
+      }
+
+      if (clickedIndex !== -1) {
+        const startAngleSegment = sequence[clickedIndex];
+        const endAngleSegment = sequence[clickedIndex + 1];
+
+        const keep: any[] = [];
+        for (let i = 0; i < sequence.length - 1; i++) {
+          if (i !== clickedIndex) {
+            const s = sequence[i];
+            const e = sequence[i + 1];
+            if (getClockwiseDistance(e, s) > 0.1) {
+              keep.push({
+                ...target,
+                type: 'arc' as const,
+                startAngle: s,
+                endAngle: e,
+              });
+            }
+          }
+        }
+
+        return {
+          highlighted: {
+            type: 'arc',
+            center: target.center,
+            radius: target.radius,
+            startAngle: startAngleSegment,
+            endAngle: endAngleSegment,
+          },
+          keep,
+        };
+      }
+    }
+
+    return null;
+  };
+
+  const executeTrim = (rawPoint: Point) => {
+    const target = getTrimTargetAtPoint(rawPoint);
+    if (!target) return;
+
+    const result = computeTrimSegments(target, rawPoint, entities);
+    if (!result) return;
+
+    setEntities(prev => {
+        const newEntities = prev.flatMap(ent => {
+            if (ent.id === target.id) {
+                if (result.keep.length === 0) return [];
+                return result.keep.map((seg, i) => ({
+                    ...seg,
+                    id: i === 0 ? ent.id : Date.now().toString() + i + Math.random()
+                }));
+            }
+            return ent;
+        });
+        onCommitHistory?.(newEntities);
+        return newEntities;
+    });
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -820,33 +1334,67 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       const wasLocked = isLocked;
       setIsLocked(false);
       
-      if (drawing && activeTool === 'Line') {
-          const finalPoint = wasLocked ? drawing.current : (e.altKey ? rawPoint : applyAngleSnapping(drawing.start, rawPoint));
-          const snappedForLine = wasLocked ? { point: finalPoint, type: 'standard' as const, refPoint: undefined } : getSnappedPoint(finalPoint, entities, activeTool, drawing);
+      if (drawing && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle')) {
+          const finalPoint = wasLocked ? drawing.current : ((e.altKey && activeTool === 'Line') ? rawPoint : (activeTool === 'Line' ? applyAngleSnapping(drawing.start, rawPoint) : rawPoint));
+          const snappedResult = wasLocked ? { point: finalPoint, type: 'standard' as const, refPoint: undefined } : getSnappedPoint(finalPoint, entities, activeTool, drawing);
           
-          const newEntity: Entity = {
-            id: Date.now().toString(),
-            type: 'line',
-            color: defaultLineStyle.color,
-            lineWidth: defaultLineStyle.lineWidth,
-            dashed: defaultLineStyle.dashed,
-            mode: defaultLineStyle.mode,
-            start: drawing.start,
-            end: snappedForLine.point,
-            layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
-          };
-          setEntities(prev => [...prev, newEntity]);
+          let newEntity: Entity | null = null;
+          if (activeTool === 'Line') {
+              newEntity = {
+                id: Date.now().toString(),
+                type: 'line',
+                color: defaultLineStyle.color,
+                lineWidth: defaultLineStyle.lineWidth,
+                dashed: defaultLineStyle.dashed,
+                mode: defaultLineStyle.mode,
+                start: drawing.start,
+                end: snappedResult.point,
+                layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
+              };
+          } else if (activeTool === 'Circle') {
+              const radius = Math.sqrt(Math.pow(snappedResult.point.x - drawing.start.x, 2) + Math.pow(snappedResult.point.y - drawing.start.y, 2));
+              newEntity = {
+                id: Date.now().toString(),
+                type: 'circle',
+                color: defaultLineStyle.color,
+                lineWidth: defaultLineStyle.lineWidth,
+                dashed: defaultLineStyle.dashed,
+                mode: defaultLineStyle.mode,
+                center: drawing.start,
+                radius: radius,
+                layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
+              };
+          } else if (activeTool === 'Rectangle') {
+              newEntity = {
+                id: Date.now().toString(),
+                type: 'rectangle',
+                color: defaultLineStyle.color,
+                lineWidth: defaultLineStyle.lineWidth,
+                dashed: defaultLineStyle.dashed,
+                mode: defaultLineStyle.mode,
+                p1: drawing.start,
+                p2: snappedResult.point,
+                layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
+              };
+          }
+          if (newEntity) {
+              setEntities(prev => [...prev, newEntity!]);
+          }
           
-          // Start next segment
-          setDrawing({ 
-            start: snappedForLine.point, 
-            current: snappedForLine.point, 
-            snapType: snappedForLine.type, 
-            refPoint: snappedForLine.refPoint,
-            activeConstraint: undefined
-          });
-          if (recognitionRef.current && !isListening) {
-            try { recognitionRef.current.start(); } catch(e) {}
+          if (activeTool === 'Line') {
+              // Start next segment
+              setDrawing({ 
+                start: snappedResult.point, 
+                current: snappedResult.point, 
+                snapType: snappedResult.type, 
+                refPoint: snappedResult.refPoint,
+                activeConstraint: undefined
+              });
+              if (recognitionRef.current && !isListening) {
+                try { recognitionRef.current.start(); } catch(e) {}
+              }
+          } else {
+              setDrawing(null);
           }
           return;
       }
@@ -891,7 +1439,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
     } else if (activeTool === 'Parallel') {
       const found = getLineAtPoint(rawPoint);
-      if (found) {
+      if (found && found.id !== selectedParallelLine?.id) {
           setSelectedParallelLine(found);
           if (recognitionRef.current && !isListening) {
             try {
@@ -900,6 +1448,34 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                  console.error('Failed to start recognition', e);
             }
           }
+      } else if (selectedParallelLine && parallelDistance > 0) {
+          const line = selectedParallelLine;
+          const length = parallelDistance;
+          
+          const dxLine = line.end.x - line.start.x;
+          const dyLine = line.end.y - line.start.y;
+          const L = Math.sqrt(dxLine * dxLine + dyLine * dyLine);
+          const normX = -dyLine / L;
+          const normY = dxLine / L;
+          
+          const vecMouse = { x: rawPoint.x - line.start.x, y: rawPoint.y - line.start.y };
+          const dir = (vecMouse.x * normX + vecMouse.y * normY) >= 0 ? 1 : -1;
+          
+          const offsetX = normX * length * dir;
+          const offsetY = normY * length * dir;
+          
+          const newEntity: Entity = {
+              id: Date.now().toString(),
+              type: 'line',
+              color: defaultLineStyle.color,
+              lineWidth: defaultLineStyle.lineWidth,
+              dashed: defaultLineStyle.dashed,
+              mode: defaultLineStyle.mode,
+              start: { x: line.start.x + offsetX, y: line.start.y + offsetY },
+              end: { x: line.end.x + offsetX, y: line.end.y + offsetY },
+              layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
+          };
+          setEntities(prev => { onCommitHistory?.(prev); return [...prev, newEntity]; });
       }
     } else if (activeTool === 'Dimension') {
         const clickedEntity = getEntityAtPoint(rawPoint);
@@ -908,26 +1484,39 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         } else {
             const found = getLineAtPoint(rawPoint);
             if (found && found.type === 'line') {
-                const newDim: Entity = {
-                    id: Date.now().toString(),
-                    type: 'dimension',
-                    color: found.color || defaultLineStyle.color,
-                    lineWidth: 1,
-                    mode: 'ink',
-                    start: found.start,
-                    end: found.end,
-                    offset: 0,
-                    style: 1,
-                    layer: 'Misure'
-                };
-                setEntities(prev => [...prev, newDim]);
-                setPositioningDimId(newDim.id);
+                const existingDim = entities.find(e => 
+                    e.type === 'dimension' && 
+                    ((e.start.x === found.start.x && e.start.y === found.start.y && e.end.x === found.end.x && e.end.y === found.end.y) ||
+                     (e.start.x === found.end.x && e.start.y === found.end.y && e.end.x === found.start.x && e.end.y === found.start.y))
+                );
+
+                if (existingDim) {
+                    setPositioningDimId(existingDim.id);
+                } else {
+                    const newDim: Entity = {
+                        id: Date.now().toString(),
+                        type: 'dimension',
+                        color: found.color || defaultLineStyle.color,
+                        lineWidth: 1,
+                        mode: 'ink',
+                        start: found.start,
+                        end: found.end,
+                        offset: 0,
+                        style: 1,
+                        layer: 'Misure'
+                    };
+                    setEntities(prev => [...prev, newDim]);
+                    setPositioningDimId(newDim.id);
+                }
             }
         }
     } else if (activeTool === 'Eraser') {
         const rawPoint = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
         setEraserPos(rawPoint);
         executeEraser(rawPoint, true);
+    } else if (activeTool === 'Trim') {
+        const rawPoint = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
+        executeTrim(rawPoint);
     }
   };
 
@@ -1057,53 +1646,20 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     } else if (activeTool === 'Eraser') {
         const rawPoint = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
         setEraserPos(rawPoint);
-
-        const line = getLineAtPoint(rawPoint);
-        setHighlightedTrimLine(line || null);
-        
+        setHighlightedTrimLine(null);
+        setHighlightedTrimSegment(null);
         if (e.buttons === 1) {
-             executeEraser(rawPoint, false);
+            executeEraser(rawPoint, false);
         }
+    } else if (activeTool === 'Trim') {
+        const rawPoint = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
+        const target = getTrimTargetAtPoint(rawPoint);
+        setHighlightedTrimLine(target || null);
         
-        if (line && line.type === 'line') {
-             // Calculate intersection to define highlighted segment
-             const getIntersection = (l1: any, l2: any): Point | null => {
-                const x1 = l1.start.x, y1 = l1.start.y, x2 = l1.end.x, y2 = l1.end.y;
-                const x3 = l2.start.x, y3 = l2.start.y, x4 = l2.end.x, y4 = l2.end.y;
-                const denom = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
-                if (denom === 0) return null;
-                const ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denom;
-                const ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denom;
-                if (ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1) {
-                    return { x: x1 + ua * (x2 - x1), y: y1 + ua * (y2 - y1) };
-                }
-                return null;
-            };
-
-            let closestIntersection: Point | null = null;
-            let minDistance = Infinity;
-
-            entities.forEach(ent => {
-                if (ent.id !== line.id && ent.type === 'line') {
-                    const intersection = getIntersection(line, ent);
-                    if (intersection) {
-                        const dist = Math.sqrt((rawPoint.x - intersection.x)**2 + (rawPoint.y - intersection.y)**2);
-                        if (dist < minDistance) {
-                            minDistance = dist;
-                            closestIntersection = intersection;
-                        }
-                    }
-                }
-            });
-
-            if (closestIntersection) {
-                const distStart = Math.sqrt((rawPoint.x - line.start.x)**2 + (rawPoint.y - line.start.y)**2);
-                const distEnd = Math.sqrt((rawPoint.x - line.end.x)**2 + (rawPoint.y - line.end.y)**2);
-                
-                setHighlightedTrimSegment({
-                    start: distStart < distEnd ? line.start : closestIntersection,
-                    end: distStart < distEnd ? closestIntersection : line.end
-                });
+        if (target) {
+            const result = computeTrimSegments(target, rawPoint, entities);
+            if (result) {
+                setHighlightedTrimSegment(result.highlighted);
             } else {
                 setHighlightedTrimSegment(null);
             }
@@ -1125,65 +1681,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   };
 
   const handleMouseUp = (e: React.MouseEvent) => {
-    if (drawing && (activeTool === 'Circle' || activeTool === 'Rectangle')) {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      const rawPoint = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
-      
-      let finalPoint = rawPoint;
-      if (isLocked) {
-        finalPoint = drawing.current;
-      }
-
-      const snapped = getSnappedPoint(finalPoint, entities, activeTool, drawing);
-      
-      let newEntity: Entity;
-
-      if (activeTool === 'Circle') {
-        const radius = Math.sqrt(Math.pow(snapped.point.x - drawing.start.x, 2) + Math.pow(snapped.point.y - drawing.start.y, 2));
-        newEntity = {
-          id: Date.now().toString(),
-          type: 'circle',
-          color: defaultLineStyle.color,
-          lineWidth: defaultLineStyle.lineWidth,
-          dashed: defaultLineStyle.dashed,
-          mode: defaultLineStyle.mode,
-          center: drawing.start,
-          radius: radius,
-          layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
-        };
-      } else if (activeTool === 'Point') {
-          newEntity = {
-            id: Date.now().toString(),
-            type: 'point',
-            color: defaultLineStyle.color,
-            lineWidth: defaultLineStyle.lineWidth,
-            mode: defaultLineStyle.mode,
-            point: snapped.point,
-            layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
-          };
-      } else {
-        newEntity = {
-          id: Date.now().toString(),
-          type: 'rectangle',
-          color: defaultLineStyle.color,
-          lineWidth: defaultLineStyle.lineWidth,
-          dashed: defaultLineStyle.dashed,
-          mode: defaultLineStyle.mode,
-          p1: drawing.start,
-          p2: snapped.point,
-          layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
-        };
-      }
-
-      setEntities(prev => [...prev, newEntity]);
-      setDrawing(null);
-      setIsLocked(false);
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch(e) {}
-      }
-    } else if (activeTool === 'Move') {
+    if (activeTool === 'Move') {
         setDragEntityId(null);
         setEntities(prev => { onCommitHistory?.(prev); return prev; });
     } else if (activeTool === 'Eraser') {
@@ -1196,6 +1694,14 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
+    if (drawing && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle')) {
+        setShowManualInput(true);
+        return;
+    }
+    if (activeTool === 'Parallel' && selectedParallelLine) {
+        setShowManualInput(true);
+        return;
+    }
     if (drawing) {
         setDrawing(null);
         return;
@@ -1219,52 +1725,131 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  const handleManualCommit = (tool: string, data: any) => {
+    if (tool === 'Line' && drawing) {
+        const L = data.val1;
+        const A = data.val2;
+        const finalPoint = {
+            x: drawing.start.x + L * Math.cos(A * Math.PI / 180),
+            y: drawing.start.y + L * Math.sin(A * Math.PI / 180)
+        };
+        const newEntity: Entity = {
+            id: Date.now().toString(),
+            type: 'line',
+            color: defaultLineStyle.color,
+            lineWidth: defaultLineStyle.lineWidth,
+            dashed: defaultLineStyle.dashed,
+            mode: defaultLineStyle.mode,
+            start: drawing.start,
+            end: finalPoint,
+            layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
+        };
+        setEntities(prev => { onCommitHistory?.(prev); return [...prev, newEntity]; });
+        setDrawing({ start: finalPoint, current: finalPoint, snapType: 'standard' });
+    } else if (tool === 'Circle' && drawing) {
+        const R = data.val1;
+        const newEntity: Entity = {
+            id: Date.now().toString(),
+            type: 'circle',
+            color: defaultLineStyle.color,
+            lineWidth: defaultLineStyle.lineWidth,
+            dashed: defaultLineStyle.dashed,
+            mode: defaultLineStyle.mode,
+            center: drawing.start,
+            radius: R,
+            layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
+        };
+        setEntities(prev => { onCommitHistory?.(prev); return [...prev, newEntity]; });
+        setDrawing(null);
+    } else if (tool === 'Rectangle' && drawing) {
+        const finalPoint = { x: drawing.start.x + data.val1, y: drawing.start.y + data.val2 };
+        const newEntity: Entity = {
+            id: Date.now().toString(),
+            type: 'rectangle',
+            color: defaultLineStyle.color,
+            lineWidth: defaultLineStyle.lineWidth,
+            dashed: defaultLineStyle.dashed,
+            mode: defaultLineStyle.mode,
+            p1: drawing.start,
+            p2: finalPoint,
+            layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
+        };
+        setEntities(prev => { onCommitHistory?.(prev); return [...prev, newEntity]; });
+        setDrawing(null);
+    } else if (tool === 'Parallel' && selectedParallelLine) {
+        const line = selectedParallelLine;
+        const length = data.val1;
+        
+        const dxLine = line.end.x - line.start.x;
+        const dyLine = line.end.y - line.start.y;
+        const L = Math.sqrt(dxLine * dxLine + dyLine * dyLine);
+        const normX = -dyLine / L;
+        const normY = dxLine / L;
+        
+        const vecMouse = { x: lastMouseRef.current.x - line.start.x, y: lastMouseRef.current.y - line.start.y };
+        const dir = (vecMouse.x * normX + vecMouse.y * normY) >= 0 ? 1 : -1;
+        
+        const offsetX = normX * length * dir;
+        const offsetY = normY * length * dir;
+        
+        const newEntity: Entity = {
+            id: Date.now().toString(),
+            type: 'line',
+            color: defaultLineStyle.color,
+            lineWidth: defaultLineStyle.lineWidth,
+            dashed: defaultLineStyle.dashed,
+            mode: defaultLineStyle.mode,
+            start: { x: line.start.x + offsetX, y: line.start.y + offsetY },
+            end: { x: line.end.x + offsetX, y: line.end.y + offsetY },
+            layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
+        };
+        setEntities(prev => { onCommitHistory?.(prev); return [...prev, newEntity]; });
+        setParallelDistance(length);
+        // Do not clear selectedParallelLine, allowing the user to create multiple parallel lines to the same segment.
+    }
+  };
+
+  const tecnigrafoSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg"><rect x="38" y="108" width="90" height="16" fill="rgba(212,163,115,0.7)" stroke="#8b5a2b" stroke-width="1"/><rect x="38" y="108" width="90" height="6" fill="rgba(255,255,255,0.7)" stroke="#8b5a2b" stroke-width="0.5"/><line x1="40" y1="108" x2="40" y2="112" stroke="black" stroke-width="1"/><line x1="50" y1="108" x2="50" y2="114" stroke="black" stroke-width="1.5"/><line x1="60" y1="108" x2="60" y2="112" stroke="black" stroke-width="1"/><line x1="70" y1="108" x2="70" y2="112" stroke="black" stroke-width="1"/><line x1="80" y1="108" x2="80" y2="114" stroke="black" stroke-width="1.5"/><line x1="90" y1="108" x2="90" y2="112" stroke="black" stroke-width="1"/><line x1="100" y1="108" x2="100" y2="112" stroke="black" stroke-width="1"/><line x1="110" y1="108" x2="110" y2="114" stroke="black" stroke-width="1.5"/><line x1="120" y1="108" x2="120" y2="112" stroke="black" stroke-width="1"/><rect x="4" y="0" width="16" height="90" fill="rgba(212,163,115,0.7)" stroke="#8b5a2b" stroke-width="1"/><rect x="14" y="0" width="6" height="90" fill="rgba(255,255,255,0.7)" stroke="#8b5a2b" stroke-width="0.5"/><line x1="20" y1="88" x2="16" y2="88" stroke="black" stroke-width="1"/><line x1="20" y1="78" x2="14" y2="78" stroke="black" stroke-width="1.5"/><line x1="20" y1="68" x2="16" y2="68" stroke="black" stroke-width="1"/><line x1="20" y1="58" x2="16" y2="58" stroke="black" stroke-width="1"/><line x1="20" y1="48" x2="14" y2="48" stroke="black" stroke-width="1.5"/><line x1="20" y1="38" x2="16" y2="38" stroke="black" stroke-width="1"/><line x1="20" y1="28" x2="16" y2="28" stroke="black" stroke-width="1"/><line x1="20" y1="18" x2="14" y2="18" stroke="black" stroke-width="1.5"/><line x1="20" y1="8" x2="16" y2="8" stroke="black" stroke-width="1"/><circle cx="20" cy="108" r="18" fill="transparent" stroke="rgba(50,50,50,0.6)" stroke-width="1"/><line x1="8" y1="108" x2="32" y2="108" stroke="rgba(255,0,0,0.8)" stroke-width="1"/><line x1="20" y1="96" x2="20" y2="120" stroke="rgba(255,0,0,0.8)" stroke-width="1"/></svg>`);
+
+  const scissorsSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="5" cy="7.5" r="3" stroke="#64748b" stroke-width="1.5"/><circle cx="5" cy="16.5" r="3" stroke="#64748b" stroke-width="1.5"/><path d="M7.5 9L12 12L22 9" stroke="#64748b" stroke-width="1.5" stroke-linecap="round"/><path d="M7.5 15L12 12L22 15" stroke="#64748b" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="12" r="1.2" fill="#475569"/></svg>`);
+
+  const crosshairSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="96" height="96" viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg"><line x1="0" y1="48" x2="96" y2="48" stroke="rgba(255,40,40,0.85)" stroke-width="1.5"/><line x1="48" y1="0" x2="48" y2="96" stroke="rgba(255,40,40,0.85)" stroke-width="1.5"/><circle cx="48" cy="48" r="4" fill="transparent" stroke="rgba(0,0,0,0.6)" stroke-width="1"/></svg>`);
+
   return (
-    <div ref={containerRef} className="w-full h-full cursor-crosshair relative" onWheel={handleWheel} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onContextMenu={handleContextMenu}>
+    <div 
+      ref={containerRef} 
+      className="w-full h-full relative" 
+      style={{ cursor: activeTool === 'Eraser' ? 'none' : activeTool === 'Trim' ? `url("${scissorsSvg}") 16 16, crosshair` : rulerStyle === 'crosshair' ? `url("${crosshairSvg}") 48 48, crosshair` : `url("${tecnigrafoSvg}") 20 108, crosshair` }}
+      onWheel={handleWheel} 
+      onMouseDown={handleMouseDown} 
+      onMouseMove={handleMouseMove} 
+      onMouseUp={handleMouseUp} 
+      onContextMenu={handleContextMenu}
+    >
       <canvas ref={canvasRef} />
       
-      {/* Visual Overlay: Angle preview for 'Line' tool */}
-      {drawing && activeTool === 'Line' && (
-        <div style={{
-            position: 'absolute',
-            left: canvasToScreen(drawing.current.x, drawing.current.y).x + 10 + 'px',
-            top: canvasToScreen(drawing.current.x, drawing.current.y).y + 10 + 'px',
-        }} className="bg-slate-800 text-white p-2 rounded text-sm pointer-events-none flex flex-col gap-1">
-            {(() => {
-                const L = Math.sqrt(Math.pow(drawing.current.x - drawing.start.x, 2) + Math.pow(drawing.current.y - drawing.start.y, 2));
-                const numValue = Math.round(L * 100) / 100;
-                const valueStr = Number.isInteger(numValue) ? numValue.toString() : numValue.toFixed(2).replace('.', ',');
-                return <span>L: {valueStr}</span>;
-            })()}
-            {(() => {
-                const A = (Math.atan2(drawing.current.y - drawing.start.y, drawing.current.x - drawing.start.x) * 180 / Math.PI + 360) % 360;
-                const aNum = Math.round(A * 10) / 10;
-                const aStr = Number.isInteger(aNum) ? aNum.toString() : aNum.toFixed(1).replace('.', ',');
-                return <span>A: {aStr}°</span>;
-            })()}
-        </div>
+      {drawing && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle') && (
+        <ManualInputOverlay
+            type={activeTool.toLowerCase() as any}
+            drawing={drawing}
+            canvasToScreen={canvasToScreen}
+            onCommit={(data) => { setShowManualInput(false); handleManualCommit(activeTool, data); }}
+            isOpen={showManualInput}
+            onClose={() => setShowManualInput(false)}
+        />
       )}
 
-      {/* Visual Overlay: Distance preview for 'Parallel' tool */}
       {selectedParallelLine && activeTool === 'Parallel' && (
-        <div style={{
-            position: 'absolute',
-            left: canvasToScreen(lastMouseRef.current.x, lastMouseRef.current.y).x + 10 + 'px',
-            top: canvasToScreen(lastMouseRef.current.x, lastMouseRef.current.y).y + 10 + 'px',
-        }} className="bg-slate-800 text-cyan-400 p-2 rounded text-sm pointer-events-none">
-             Dist: {(() => {
-                const line = selectedParallelLine;
-                const dxLine = line.end.x - line.start.x;
-                const dyLine = line.end.y - line.start.y;
-                const L = Math.sqrt(dxLine * dxLine + dyLine * dyLine);
-                const normX = -dyLine / L;
-                const normY = dxLine / L;
-                const vecMouse = { x: lastMouseRef.current.x - line.start.x, y: lastMouseRef.current.y - line.start.y };
-                const numValue = Math.round(Math.abs(vecMouse.x * normX + vecMouse.y * normY) * 100) / 100;
-                return Number.isInteger(numValue) ? numValue.toString() : numValue.toFixed(2).replace('.', ',');
-             })()}
-        </div>
+        <ManualInputOverlay
+            type="parallel"
+            parallelLine={{ start: selectedParallelLine.start, end: selectedParallelLine.end, mouse: lastMouseRef.current }}
+            canvasToScreen={canvasToScreen}
+            onCommit={(data) => { setShowManualInput(false); handleManualCommit('Parallel', data); }}
+            isOpen={showManualInput}
+            onClose={() => setShowManualInput(false)}
+        />
       )}
+
       {isListening && (
         <div className="absolute top-2 left-2 bg-red-500 text-white p-2 rounded text-sm animate-pulse">
             Ascolto...
