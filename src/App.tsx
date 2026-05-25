@@ -3,18 +3,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { CADCanvas } from './components/CADCanvas';
 import { DimensionStyleDialog } from './components/DimensionStyleDialog';
 import { Entity, Point, Layer, Measurement } from './types';
-import { Minus, Circle, Square, MousePointer2, Eraser, Sparkles, MoveHorizontal, Scissors, Ruler, Move, DraftingCompass, History, Dot, Undo, Redo } from 'lucide-react';
+import { Minus, Circle, Square, MousePointer2, Eraser, Sparkles, MoveHorizontal, Scissors, Ruler, Move, DraftingCompass, History, Dot, Undo, Redo, Printer } from 'lucide-react';
 
 export default function App() {
   const [selectedTool, setSelectedTool] = useState('Select');
   const [entities, setEntities] = useState<Entity[]>([]);
   const [layers, setLayers] = useState<Layer[]>([
       { id: 'Layer 0', name: 'Layer 0', visible: true, frozen: false },
-      { id: 'Layer 1', name: 'Layer 1', visible: true, frozen: false }
+      { id: 'Misure', name: 'Misure', visible: true, frozen: false },
+      { id: 'Spessori', name: 'Spessori', visible: true, frozen: false }
   ]);
   const [activeLayerId, setActiveLayerId] = useState<string>('Layer 0');
   const [defaultLineStyle, setDefaultLineStyle] = useState({ color: '#000000', lineWidth: 1, dashed: false, mode: 'ink' as 'ink' | 'pencil' });
@@ -25,7 +26,21 @@ export default function App() {
   const [isDimensionDialogOpen, setIsDimensionDialogOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [contextMenu, setContextMenu] = useState<{x: number, y: number, isOpen: boolean} | null>(null);
+  const [shortcutToast, setShortcutToast] = useState<string | null>(null);
+  const [pdfScale, setPdfScale] = useState<number>(100);
+  const [pdfUnit, setPdfUnit] = useState<string>('m');
+  const [pdfFormat, setPdfFormat] = useState<string>('a4');
   const cadCanvasRef = useRef<any>(null);
+
+  const handleRightClickShortcut = () => {
+    setContextMenu(null);
+    setSelectedTool(prev => {
+        const nextTool = prev === 'Eraser' ? 'Line' : 'Eraser';
+        setShortcutToast(`Strumento: ${nextTool === 'Eraser' ? 'Gomma' : 'Linea'}`);
+        setTimeout(() => setShortcutToast(null), 1500);
+        return nextTool;
+    });
+  };
 
   const selectedEntity = entities.find(e => e.id === selectedId);
 
@@ -56,10 +71,8 @@ export default function App() {
 
   const categories = [
     { name: 'Seleziona', icon: MousePointer2, tools: [{ name: 'Select', icon: MousePointer2 }] },
-    { name: 'Disegno', icon: DraftingCompass, tools: [{ name: 'Line', icon: Minus }, { name: 'Circle', icon: Circle }, { name: 'Arc', icon: History }, { name: 'Rectangle', icon: Square }, { name: 'Point', icon: Dot }, { name: 'Trim', icon: Scissors }, { name: 'Eraser', icon: Eraser }] },
+    { name: 'Disegno', icon: DraftingCompass, tools: [{ name: 'Line', icon: Minus }, { name: 'Circle', icon: Circle }, { name: 'Arc', icon: History }, { name: 'Rectangle', icon: Square }, { name: 'Point', icon: Dot }, { name: 'Trim', icon: Scissors }, { name: 'Eraser', icon: Eraser }, { name: 'Dimension', icon: Ruler }, { name: 'AI', icon: Sparkles }] },
     { name: 'Modifica', icon: Scissors, tools: [{ name: 'Parallel', icon: MoveHorizontal }, { name: 'Move', icon: Move }] },
-    { name: 'Avanzate', icon: Ruler, tools: [{ name: 'Dimension', icon: Ruler }, { name: 'AI', icon: Sparkles }] },
-    { name: 'Layer', icon: Square, tools: [{ name: 'Layer 0', icon: Square }, { name: 'Layer 1', icon: Square }]},
   ];
   const [showProperties, setShowProperties] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(categories[0].name);
@@ -80,6 +93,19 @@ export default function App() {
         setHistoryIndex(prev => prev + 1);
         setEntities(history[historyIndex + 1]);
     }
+  };
+
+  const updateEntitiesSilent = (newEntities: React.SetStateAction<Entity[]>) => {
+      setEntities(newEntities);
+  };
+  
+  const commitToHistory = (snapshotToSave?: Entity[]) => {
+      setHistory(prevHistory => {
+          const newHistory = prevHistory.slice(0, historyIndex + 1);
+          newHistory.push(snapshotToSave || entities);
+          setHistoryIndex(newHistory.length - 1);
+          return newHistory;
+      });
   };
 
   const updateEntitiesWithHistory = (newEntities: React.SetStateAction<Entity[]>) => {
@@ -103,40 +129,84 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-neutral-100 text-neutral-900">
       {/* Ribbon */}
-      <header className="h-20 border-b border-neutral-300 bg-white flex">
+      <header className="h-14 border-b border-neutral-300 bg-white flex">
         {categories.map(cat => (
-          <button key={cat.name} onClick={() => setSelectedCategory(cat.name)} className={`px-6 flex flex-col items-center justify-center gap-1 ${selectedCategory === cat.name ? 'bg-neutral-100' : 'hover:bg-neutral-200'}`}>
-            <cat.icon size={20} />
-            <span className="text-xs">{cat.name}</span>
+          <button key={cat.name} onClick={() => setSelectedCategory(cat.name)} className={`px-4 flex flex-col items-center justify-center gap-0.5 ${selectedCategory === cat.name ? 'bg-neutral-100' : 'hover:bg-neutral-200'}`}>
+            <cat.icon size={16} />
+            <span className="text-[10px]">{cat.name}</span>
           </button>
         ))}
-        <div className="flex flex-col items-center justify-center gap-1">
-            <button onClick={undo} className="p-2 hover:bg-neutral-200"><Undo size={16}/></button>
-            <button onClick={redo} className="p-2 hover:bg-neutral-200"><Redo size={16}/></button>
+        <div className="flex flex-col items-center justify-center gap-0.5">
+            <button onClick={undo} className="p-1 hover:bg-neutral-200"><Undo size={12}/></button>
+            <button onClick={redo} className="p-1 hover:bg-neutral-200"><Redo size={12}/></button>
         </div>
-        <button onClick={() => setShowProperties(!showProperties)} className={`px-6 flex flex-col items-center justify-center gap-1 ${showProperties ? 'bg-neutral-100' : 'hover:bg-neutral-200'}`}>
-            <Square size={20} />
-            <span className="text-xs">Defaults</span>
+        <button onClick={() => setShowProperties(!showProperties)} className={`px-4 flex flex-col items-center justify-center gap-0.5 ${showProperties ? 'bg-neutral-100' : 'hover:bg-neutral-200'}`}>
+            <Square size={16} />
+            <span className="text-[10px]">Defaults</span>
         </button>
-        <button onClick={() => setShowProperties(!showProperties)} className="flex flex-col items-center justify-center px-6 hover:bg-neutral-200">
-            <span className="text-xs text-neutral-500">Mode: {defaultLineStyle.mode}</span>
-            <span className="text-sm font-bold">{defaultLineStyle.lineWidth}</span>
+        <button onClick={() => setShowProperties(!showProperties)} className="flex flex-col items-center justify-center px-4 hover:bg-neutral-200">
+            <span className="text-[10px] text-neutral-500">Mode: {defaultLineStyle.mode}</span>
+            <span className="text-xs font-bold">{defaultLineStyle.lineWidth}</span>
+        </button>
+        <div className="flex-1"></div>
+        <div className="flex items-center gap-4 mr-4">
+            <div className="flex items-center gap-1">
+                <span className="text-xs text-neutral-600 font-medium">Scala 1:</span>
+                <input 
+                    type="number" 
+                    value={pdfScale || ''} 
+                    onChange={e => setPdfScale(Number(e.target.value))} 
+                    className="w-16 h-7 border border-neutral-300 rounded px-1 text-xs text-center" 
+                />
+            </div>
+            <select 
+                value={pdfUnit} 
+                onChange={e => setPdfUnit(e.target.value)} 
+                className="h-7 text-xs border border-neutral-300 rounded px-2"
+            >
+                <option value="mm">mm</option>
+                <option value="cm">cm</option>
+                <option value="m">m</option>
+            </select>
+            <select 
+                value={pdfFormat} 
+                onChange={e => setPdfFormat(e.target.value)} 
+                className="h-7 text-xs border border-neutral-300 rounded px-2"
+            >
+                <option value="a4">A4</option>
+                <option value="a3">A3</option>
+                <option value="a2">A2</option>
+                <option value="a1">A1</option>
+            </select>
+        </div>
+        <button onClick={async () => {
+            const { exportNativePDF } = await import('./utils/pdfExport');
+            exportNativePDF(entities, pdfFormat, pdfScale || 100, pdfUnit);
+        }} className="px-4 flex flex-col items-center justify-center gap-0.5 hover:bg-neutral-200 text-indigo-600 border-l border-neutral-300">
+            <Printer size={16} />
+            <span className="text-[10px] font-bold">Crea PDF</span>
         </button>
       </header>
-      <div className="h-10 bg-white border-b border-neutral-300 flex items-center px-4 gap-2">
+      <div className="h-8 bg-white border-b border-neutral-300 flex items-center px-4 gap-2">
          {selectedCategoryTools.map(tool => (
-            <button key={tool.name} onClick={() => setSelectedTool(tool.name)} className={`px-3 py-1 rounded flex items-center gap-1 text-sm ${selectedTool === tool.name ? 'bg-indigo-100 text-indigo-900 border border-indigo-300' : 'hover:bg-neutral-200'}`}>
-               <tool.icon size={16} />
+            <button key={tool.name} onClick={() => setSelectedTool(tool.name)} className={`px-2 py-0.5 rounded flex items-center gap-1 text-xs ${selectedTool === tool.name ? 'bg-indigo-100 text-indigo-900 border border-indigo-300' : 'hover:bg-neutral-200'}`}>
+               <tool.icon size={12} />
                {tool.name}
             </button>
          ))}
       </div>
       
       {/* Main Area */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
         <main className="flex-1 overflow-hidden relative" onClick={() => setContextMenu(null)}>
-          <CADCanvas ref={cadCanvasRef} entities={entities} activeTool={selectedTool} setEntities={updateEntitiesWithHistory} onSelect={(id) => { setSelectedId(id); if(id) setShowProperties(true); }} onContextMenu={(e) => setContextMenu({ x: e.clientX, y: e.clientY, isOpen: true })} activeLayerId={activeLayerId} defaultLineStyle={defaultLineStyle} eraserRadius={eraserRadius} setEraserRadius={setEraserRadius} />
+          <CADCanvas ref={cadCanvasRef} entities={entities} activeTool={selectedTool} setEntities={updateEntitiesWithHistory} setEntitiesSilent={updateEntitiesSilent} onCommitHistory={commitToHistory} onSelect={(id) => { setSelectedId(id); if(id) setShowProperties(true); }} onContextMenu={handleRightClickShortcut} activeLayerId={activeLayerId} layers={layers} defaultLineStyle={defaultLineStyle} eraserRadius={eraserRadius} setEraserRadius={setEraserRadius} />
         </main>
+
+        {shortcutToast && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-neutral-800 text-white px-4 py-2 rounded-md shadow-lg pointer-events-none z-50 text-sm animate-pulse">
+            {shortcutToast}
+          </div>
+        )}
 
         {/* Properties Panel (Drawer) */}
         {showProperties && (
@@ -183,11 +253,22 @@ export default function App() {
                                 ))}
                             </div>
                         </label>
-                        <label className="block text-sm">Active Layer:
+                        <label className="block text-sm mb-2">Active Layer:
                             <select value={activeLayerId} onChange={e => setActiveLayerId(e.target.value)} className="w-full bg-neutral-100 p-2 rounded text-sm mt-1">
                                 {layers.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                             </select>
                         </label>
+                        <div className="space-y-2 mt-4">
+                            <h4 className="text-sm font-bold text-neutral-700">Layers</h4>
+                            {layers.map(l => (
+                                <div key={l.id} className="flex items-center justify-between bg-neutral-100 p-2 rounded text-sm">
+                                    <span className="flex-1">{l.name}</span>
+                                    <button onClick={() => setLayers(layers.map(layer => layer.id === l.id ? { ...layer, visible: !layer.visible } : layer))} className={`px-2 py-1 rounded text-xs ${l.visible ? 'bg-indigo-100 text-indigo-700' : 'bg-neutral-300 text-neutral-600'}`}>
+                                        {l.visible ? 'Visibile' : 'Nascosto'}
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
                     </>
                 )}
             </div>
