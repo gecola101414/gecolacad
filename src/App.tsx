@@ -333,6 +333,21 @@ export default function App() {
 
         <div className="ml-auto flex items-center gap-2">
           <div className="h-4 w-[1px] bg-neutral-300" />
+          <div className="flex gap-1 rounded bg-neutral-200 p-0.5">
+            <button
+              onClick={() => setDefaultLineStyle({...defaultLineStyle, mode: 'pencil'})}
+              className={`px-3 py-1 rounded text-[10px] font-bold ${defaultLineStyle.mode === 'pencil' ? 'bg-white shadow-sm' : 'text-neutral-500'}`}
+            >
+              Standard
+            </button>
+            <button
+              onClick={() => setDefaultLineStyle({...defaultLineStyle, mode: 'ink'})}
+              className={`px-3 py-1 rounded text-[10px] font-bold ${defaultLineStyle.mode === 'ink' ? 'bg-white shadow-sm' : 'text-neutral-500'}`}
+            >
+              Schizzo
+            </button>
+          </div>
+          <div className="h-4 w-[1px] bg-neutral-300" />
           <button
             onClick={() => setOrthoMode(!orthoMode)}
             className={`px-3 py-1 rounded flex items-center gap-1.5 text-xs transition border font-semibold ${
@@ -396,7 +411,7 @@ export default function App() {
               {selectedEntity ? (
                 <>
                   <label className="block text-sm">
-                    Mode:
+                    Stile Linea:
                     <div className="flex gap-2">
                       <button
                         onClick={() =>
@@ -404,7 +419,7 @@ export default function App() {
                         }
                         className={`p-2 rounded flex-1 ${selectedEntity.mode === "ink" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
                       >
-                        Ink
+                        Stile Schizzo
                       </button>
                       <button
                         onClick={() =>
@@ -412,7 +427,7 @@ export default function App() {
                         }
                         className={`p-2 rounded flex-1 ${selectedEntity.mode === "pencil" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
                       >
-                        Pencil
+                        Stile Standard
                       </button>
                     </div>
                   </label>
@@ -459,7 +474,7 @@ export default function App() {
               ) : (
                 <>
                   <label className="block text-sm">
-                    Default Mode:
+                    Stile Default:
                     <div className="flex gap-2">
                       <button
                         onClick={() =>
@@ -470,7 +485,7 @@ export default function App() {
                         }
                         className={`p-2 rounded flex-1 ${defaultLineStyle.mode === "ink" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
                       >
-                        Ink
+                        Stile Schizzo
                       </button>
                       <button
                         onClick={() =>
@@ -481,7 +496,7 @@ export default function App() {
                         }
                         className={`p-2 rounded flex-1 ${defaultLineStyle.mode === "pencil" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
                       >
-                        Pencil
+                        Stile Standard
                       </button>
                     </div>
                   </label>

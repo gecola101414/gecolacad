@@ -1,5 +1,12 @@
 export type Point = { x: number; y: number };
 
+export interface InkPoint {
+  x: number;
+  y: number;
+  width: number;
+  alpha: number;
+}
+
 export type EntityType = 'line' | 'circle' | 'rectangle' | 'dimension' | 'arc' | 'point';
 
 export interface CADEntity {
@@ -16,6 +23,7 @@ export interface LineEntity extends CADEntity {
   type: 'line';
   start: Point;
   end: Point;
+  inkPoints?: InkPoint[];
 }
 
 export interface CircleEntity extends CADEntity {
