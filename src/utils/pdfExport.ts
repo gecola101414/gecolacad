@@ -82,7 +82,33 @@ export const exportNativePDF = (entities: Entity[], format: string, scaleDenom: 
       }
 
       if (entity.type === 'line') {
-          pdf.line(tx(entity.start.x), ty(entity.start.y), tx(entity.end.x), ty(entity.end.y));
+          if (entity.inkPoints && entity.inkPoints.length > 1) {
+              let lastX = entity.start.x;
+              let lastY = entity.start.y;
+              for(let i=0; i<entity.inkPoints.length; i++) {
+                  const pt = entity.inkPoints[i];
+                  const t = i / (entity.inkPoints.length - 1);
+                  const bx = entity.start.x + (entity.end.x - entity.start.x) * t;
+                  const by = entity.start.y + (entity.end.y - entity.start.y) * t;
+                  const px = bx + pt.x;
+                  const py = by + pt.y;
+                  
+                  // Apply width and alpha from inkPoint
+                  const lw = Math.max(0.05, pt.width * scale * 0.5);
+                  pdf.setLineWidth(lw);
+                  const gray = Math.round((1 - Math.min(1, pt.alpha)) * 255);
+                  pdf.setDrawColor(gray, gray, gray);
+                  
+                  pdf.line(tx(lastX), ty(lastY), tx(px), ty(py));
+                  lastX = px;
+                  lastY = py;
+              }
+              // Reset to default
+              pdf.setDrawColor(0, 0, 0);
+              pdf.setLineWidth(lw);
+          } else {
+              pdf.line(tx(entity.start.x), ty(entity.start.y), tx(entity.end.x), ty(entity.end.y));
+          }
       } else if (entity.type === 'circle') {
           pdf.circle(tx(entity.center.x), ty(entity.center.y), ts(entity.radius), 'S');
       } else if (entity.type === 'rectangle') {

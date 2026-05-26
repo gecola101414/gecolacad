@@ -7,6 +7,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { CADCanvas } from "./components/CADCanvas";
 import { DimensionStyleDialog } from "./components/DimensionStyleDialog";
 import { Entity, Point, Layer, Measurement } from "./types";
+import { mergeAllSegments } from "./utils/entityUtils";
 import {
   Minus,
   Circle,
@@ -26,6 +27,22 @@ import {
   Printer,
   Crosshair,
 } from "lucide-react";
+
+const ParallelIcon = ({ size = 16 }: { size?: number }) => (
+  <svg 
+    width={size} 
+    height={size} 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    stroke="currentColor" 
+    strokeWidth="2" 
+    strokeLinecap="round" 
+    strokeLinejoin="round"
+  >
+    <path d="M5 20L15 4" />
+    <path d="M9 20L19 4" />
+  </svg>
+);
 
 export default function App() {
   const [selectedTool, setSelectedTool] = useState("Select");
@@ -64,23 +81,57 @@ export default function App() {
 
   const cadCanvasRef = useRef<any>(null);
 
-  const handleRightClickShortcut = () => {
-    setContextMenu(null);
-    setSelectedCategory("Disegno");
-    setSelectedTool((prev) => {
-      let nextTool = "Line";
-      let translated = "Linea";
-      if (prev === "Line") {
-        nextTool = "Trim";
-        translated = "Forbici";
-      } else if (prev === "Trim") {
-        nextTool = "Eraser";
-        translated = "Gomma";
-      }
-      setShortcutToast(`Strumento: ${translated}`);
+  const [toolboxPos, setToolboxPos] = useState(() => {
+    const saved = localStorage.getItem('toolboxPos');
+    return saved ? JSON.parse(saved) : { top: 16, right: 16 };
+  });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragRef = useRef({ startX: 0, startY: 0, startTop: 0, startRight: 0 });
+
+  const startDragging = (e: React.MouseEvent) => {
+    setIsDragging(true);
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startTop: toolboxPos.top,
+      startRight: toolboxPos.right,
+    };
+  };
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const deltaX = e.clientX - dragRef.current.startX;
+      const deltaY = e.clientY - dragRef.current.startY;
+      setToolboxPos({
+        top: dragRef.current.startTop + deltaY,
+        right: dragRef.current.startRight - deltaX,
+      });
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+      localStorage.setItem('toolboxPos', JSON.stringify(toolboxPos));
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, toolboxPos]);
+
+  const handleRightClickShortcut = (e: React.MouseEvent) => {
+    if (selectedTool !== "Line") {
+      setSelectedCategory("Disegno");
+      setSelectedTool("Line");
+      setShortcutToast("Strumento: Linea");
       setTimeout(() => setShortcutToast(null), 1500);
-      return nextTool;
-    });
+    } else {
+      setContextMenu({ x: e.clientX, y: e.clientY, isOpen: true });
+    }
   };
 
   const selectedEntity = entities.find((e) => e.id === selectedId);
@@ -138,7 +189,7 @@ export default function App() {
         { name: "Point", icon: Dot },
         { name: "Trim", icon: Scissors },
         { name: "Eraser", icon: Eraser },
-        { name: "Parallel", icon: MoveHorizontal },
+        { name: "Parallel", icon: ParallelIcon },
         { name: "Move", icon: Move },
         { name: "Dimension", icon: Ruler },
         { name: "AI", icon: Sparkles },
@@ -210,7 +261,12 @@ export default function App() {
         {categories.map((cat) => (
           <button
             key={cat.name}
-            onClick={() => setSelectedCategory(cat.name)}
+            onClick={() => {
+              setSelectedCategory(cat.name);
+              if (cat.name === "Disegno") {
+                setSelectedTool("Line");
+              }
+            }}
             className={`px-4 flex flex-col items-center justify-center gap-0.5 ${selectedCategory === cat.name ? "bg-neutral-100" : "hover:bg-neutral-200"}`}
           >
             <cat.icon size={16} />
@@ -389,6 +445,39 @@ export default function App() {
             orthoMode={orthoMode}
           />
         </main>
+
+        {contextMenu && contextMenu.isOpen && (
+          <div
+            className="absolute z-50 bg-white border border-neutral-300 rounded shadow-lg p-1 cursor-move"
+            style={{ top: toolboxPos.top, right: toolboxPos.right }}
+            onMouseDown={startDragging}
+          >
+            <button
+              className="block w-full text-left px-4 py-2 hover:bg-neutral-200 text-sm"
+              onClick={() => { setSelectedTool("Trim"); setContextMenu(null); }}
+            >
+              Forbici
+            </button>
+            <button
+              className="block w-full text-left px-4 py-2 hover:bg-neutral-200 text-sm"
+              onClick={() => { setSelectedTool("Eraser"); setContextMenu(null); }}
+            >
+              Gomma
+            </button>
+            <button
+              className="block w-full text-left px-4 py-2 hover:bg-neutral-200 text-sm"
+              onClick={() => { setSelectedTool("Dimension"); setContextMenu(null); }}
+            >
+              Righello
+            </button>
+            <button
+              className="block w-full text-left px-4 py-2 hover:bg-neutral-200 text-sm"
+              onClick={() => { setSelectedTool("DeleteEntity"); setContextMenu(null); }}
+            >
+              Cancellino
+            </button>
+          </div>
+        )}
 
         {shortcutToast && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-neutral-800 text-white px-4 py-2 rounded-md shadow-lg pointer-events-none z-50 text-sm animate-pulse">
