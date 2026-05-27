@@ -18,6 +18,7 @@ export interface CADEntity {
   dashed?: boolean;
   mode: 'ink' | 'pencil';
   groupId?: string;
+  opacity?: number;
 }
 
 export interface LineEntity extends CADEntity {
@@ -25,6 +26,7 @@ export interface LineEntity extends CADEntity {
   start: Point;
   end: Point;
   inkPoints?: InkPoint[];
+  isFreehand?: boolean;
 }
 
 export interface CircleEntity extends CADEntity {

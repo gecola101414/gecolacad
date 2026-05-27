@@ -28,6 +28,7 @@ import {
   Crosshair,
   Trash2,
   Link,
+  Copy,
 } from "lucide-react";
 
 const ParallelIcon = ({ size = 16 }: { size?: number }) => (
@@ -164,6 +165,7 @@ export default function App() {
         { name: "Parallel", icon: ParallelIcon },
         { name: "Join", icon: Link },
         { name: "Move", icon: Move },
+        { name: "Copy", icon: Copy },
         { name: "Dimension", icon: Ruler },
         { name: "Cancella", icon: Trash2 },
       ],
@@ -400,6 +402,7 @@ export default function App() {
             ref={cadCanvasRef}
             entities={entities}
             activeTool={selectedTool}
+            setActiveTool={setSelectedTool}
             setEntities={updateEntitiesWithHistory}
             setEntitiesSilent={updateEntitiesSilent}
             onCommitHistory={commitToHistory}
