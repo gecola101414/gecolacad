@@ -26,6 +26,8 @@ import {
   Redo,
   Printer,
   Crosshair,
+  Trash2,
+  Link,
 } from "lucide-react";
 
 const ParallelIcon = ({ size = 16 }: { size?: number }) => (
@@ -62,9 +64,7 @@ export default function App() {
   const [eraserRadius, setEraserRadius] = useState(20);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [isAIDialogOpen, setIsAIDialogOpen] = useState(false);
   const [isDimensionDialogOpen, setIsDimensionDialogOpen] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState("");
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -142,36 +142,6 @@ export default function App() {
     );
   };
 
-  const handleAICommand = async () => {
-    if (!aiPrompt) return;
-    const basePosition = cadCanvasRef.current?.getCurrentMousePosition() || {
-      x: 0,
-      y: 0,
-    };
-    try {
-      const response = await fetch("/api/ai-draw", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: aiPrompt, basePosition }),
-      });
-      const data = await response.json();
-      if (data.entities) {
-        updateEntitiesWithHistory((prev) => [
-          ...prev,
-          ...data.entities.map((e: any) => ({
-            ...e,
-            id: Date.now().toString() + Math.random(),
-          })),
-        ]);
-      }
-      setIsAIDialogOpen(false);
-      setAiPrompt("");
-    } catch (e) {
-      console.error(e);
-      alert("Failed to create AI object");
-    }
-  };
-
   const categories = [
     {
       name: "Seleziona",
@@ -190,9 +160,10 @@ export default function App() {
         { name: "Trim", icon: Scissors },
         { name: "Eraser", icon: Eraser },
         { name: "Parallel", icon: ParallelIcon },
+        { name: "Join", icon: Link },
         { name: "Move", icon: Move },
         { name: "Dimension", icon: Ruler },
-        { name: "AI", icon: Sparkles },
+        { name: "Cancella", icon: Trash2 },
       ],
     },
   ];
@@ -472,7 +443,7 @@ export default function App() {
             </button>
             <button
               className="block w-full text-left px-4 py-2 hover:bg-neutral-200 text-sm"
-              onClick={() => { setSelectedTool("DeleteEntity"); setContextMenu(null); }}
+              onClick={() => { setSelectedTool("Cancella"); setContextMenu(null); }}
             >
               Cancellino
             </button>
@@ -667,35 +638,6 @@ export default function App() {
           placeholder="Type a command (f.ex. L, C, R)..."
         />
       </footer>
-
-      {isAIDialogOpen && (
-        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-          <div className="bg-slate-800 p-6 rounded shadow-xl w-96 border border-slate-700">
-            <h3 className="text-xl font-bold mb-4">AI Drawing</h3>
-            <input
-              type="text"
-              value={aiPrompt}
-              onChange={(e) => setAiPrompt(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 p-2 rounded mb-4"
-              placeholder="Descrivi l'oggetto..."
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={() => setIsAIDialogOpen(false)}
-                className="flex-1 bg-slate-700 p-2 rounded"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleAICommand}
-                className="flex-1 bg-indigo-600 p-2 rounded"
-              >
-                Create
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

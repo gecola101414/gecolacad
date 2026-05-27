@@ -17,6 +17,7 @@ export interface CADEntity {
   layer: string;
   dashed?: boolean;
   mode: 'ink' | 'pencil';
+  groupId?: string;
 }
 
 export interface LineEntity extends CADEntity {
