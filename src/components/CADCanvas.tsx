@@ -12,6 +12,22 @@ const normalizeAngle = (a: number) => {
   return deg;
 };
 
+const getIntersection = (a: Point, b: Point, c: Point, d: Point): Point | null => {
+    const denom = (b.x - a.x) * (d.y - c.y) - (b.y - a.y) * (d.x - c.x);
+    if (Math.abs(denom) < 1e-10) return null; // Parallel
+
+    const t = ((c.x - a.x) * (d.y - c.y) - (c.y - a.y) * (d.x - c.x)) / denom;
+    const u = ((c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x)) / denom;
+
+    if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+        return {
+            x: a.x + t * (b.x - a.x),
+            y: a.y + t * (b.y - a.y)
+        };
+    }
+    return null;
+}
+
 const isAngleInArc = (angle: number, startAngle: number, endAngle: number) => {
   const normAngle = normalizeAngle(angle);
   const normStart = normalizeAngle(startAngle);
@@ -133,6 +149,7 @@ interface CADCanvasProps {
   activeLayerId: string;
   layers: Layer[];
   defaultLineStyle: { color: string, lineWidth: number, dashed: boolean, mode: 'ink' | 'pencil' };
+  setDefaultLineStyle: React.Dispatch<React.SetStateAction<{ color: string, lineWidth: number, dashed: boolean, mode: 'ink' | 'pencil' }>>;
   eraserRadius: number;
   setEraserRadius: React.Dispatch<React.SetStateAction<number>>;
   onMouseMovePosition?: (pos: Point) => void;
@@ -140,7 +157,7 @@ interface CADCanvasProps {
   orthoMode?: boolean;
 }
 
-export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false }, ref) => {
+export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [view, setView] = useState({ zoom: 1, pan: { x: 0, y: 0 } });
   const [drawing, setDrawing] = useState<{
@@ -192,6 +209,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     hasDoubleSmart?: boolean;
   } | null>(null);
   const [dragEntityId, setDragEntityId] = useState<string | null>(null);
+  const dragEntityIdRef = useRef<string | null>(null);
+  useEffect(() => { dragEntityIdRef.current = dragEntityId; }, [dragEntityId]);
   const [dragEntityIds, setDragEntityIds] = useState<string[]>([]);
   const [activeMoveSnapPoint, setActiveMoveSnapPoint] = useState<Point | null>(null);
   const [selectionWindow, setSelectionWindow] = useState<{ start: Point; current: Point } | null>(null);
@@ -205,6 +224,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const [positioningDimId, setPositioningDimId] = useState<string | null>(null);
   const [showManualInput, setShowManualInput] = useState(false);
   const lastMouseRef = useRef<Point>({ x: 0, y: 0 });
+  const previousMouseRef = useRef<Point>({ x: 0, y: 0 });
   const lastEraserExecutionTime = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -264,7 +284,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
      setHighlightedTrimLine(null);
      setHighlightedTrimSegment(null);
      setDragEntityId(null);
-     setDragEntityIds([]);
+     if (activeTool !== 'Move') {
+         setDragEntityIds([]);
+     }
      setSelectionWindow(null);
      setPositioningDimId(null);
      setParallelMouse(null);
@@ -407,6 +429,21 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
       }
     });
+
+    // Add intersection points for lines
+    for (let i = 0; i < visibleEntities.length; i++) {
+        for (let j = i + 1; j < visibleEntities.length; j++) {
+            const ent1 = visibleEntities[i];
+            const ent2 = visibleEntities[j];
+
+            if (ent1.type === 'line' && ent2.type === 'line') {
+                const intersection = getIntersection(ent1.start, ent1.end, ent2.start, ent2.end);
+                if (intersection) {
+                    snaps.push({ point: intersection, type: 'standard', refPoint: intersection });
+                }
+            }
+        }
+    }
 
     const isDrawingTool = ['Line', 'Circle', 'Arc', 'Rectangle', 'Point', 'Dimension'].includes(activeTool);
     if (isDrawingTool && (drawing ? true : isShiftPressedRef.current)) {
@@ -2369,6 +2406,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         if (dragEntityId) {
             // Already moving (sticky or deliberate click-to-drop)
             setDragEntityId(null);
+            dragEntityIdRef.current = null;
             setActiveMoveSnapPoint(null);
             setEntities(prev => { onCommitHistory?.(prev); return [...prev]; });
             return;
@@ -2387,19 +2425,27 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 setDragEntityIds(targetIds);
             }
             setDragEntityId(target.id);
+            dragEntityIdRef.current = target.id;
+            setSelectionWindow(null);
+            console.log("Move started: dragEntityId set to", target.id);
             lastMouseRef.current = snap.snapped ? snap.point : rawPoint;
+            previousMouseRef.current = snap.snapped ? snap.point : rawPoint;
             setActiveMoveSnapPoint(null);
         } else if (dragEntityIds.length > 0) {
             // Case 2: Something is selected, click ANYWHERE (snap or raw) to start move
             // This satisfies "take it from any point and move it"
             setDragEntityId(dragEntityIds[0]); // Using first id as flag for handleMouseMove
+            dragEntityIdRef.current = dragEntityIds[0];
+            setSelectionWindow(null);
             lastMouseRef.current = snap.snapped ? snap.point : rawPoint;
+            previousMouseRef.current = snap.snapped ? snap.point : rawPoint;
             setActiveMoveSnapPoint(null);
         } else {
             // Case 3: Nothing selected and clicked empty space -> Start selection window
             setDragEntityIds([]);
             setSelectionWindow({ start: rawPoint, current: rawPoint });
             lastMouseRef.current = rawPoint;
+            previousMouseRef.current = rawPoint;
             setActiveMoveSnapPoint(null);
         }
     } else if (activeTool === 'Join') {
@@ -2520,12 +2566,12 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    console.log("handleMouseMove: entered, tool:", activeTool, "dragId:", dragEntityIdRef.current);
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const rawPoint = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
     onMouseMovePosition?.(rawPoint);
-    lastMouseRef.current = rawPoint;
 
     if (selectionWindow) {
         setSelectionWindow({ ...selectionWindow, current: rawPoint });
@@ -2685,12 +2731,13 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             });
         }
     }
-} else if (activeTool === 'Move' && dragEntityId) {
-    const targetIds = dragEntityIds.length > 0 ? dragEntityIds : [dragEntityId!];
+} else if (activeTool === 'Move' && dragEntityIdRef.current) {
+    const targetIds = dragEntityIds.length > 0 ? dragEntityIds : [dragEntityIdRef.current!];
     
     // 1. Nominal movement from cursor
-    let deltaX = rawPoint.x - lastMouseRef.current.x;
-    let deltaY = rawPoint.y - lastMouseRef.current.y;
+    let deltaX = rawPoint.x - previousMouseRef.current.x;
+    let deltaY = rawPoint.y - previousMouseRef.current.y;
+    console.log("Move debug: delta", deltaX, deltaY, "previousMouse", previousMouseRef.current, "rawPoint", rawPoint);
 
     // 2. Multi-point Snap Challenge
     const threshold = 15 / view.zoom;
@@ -2742,7 +2789,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         if (setEntitiesSilent) setEntitiesSilent(updater);
         else setEntities(updater);
         
-        lastMouseRef.current = { x: lastMouseRef.current.x + deltaX, y: lastMouseRef.current.y + deltaY };
+        previousMouseRef.current = rawPoint;
         return; 
     }
 } else if (activeTool === 'Parallel' && selectedParallelLine) {
@@ -2821,8 +2868,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         return;
     }
 
-    if (activeTool === 'Move' && dragEntityId) {
+    if (activeTool === 'Move' && dragEntityIdRef.current) {
         setDragEntityId(null);
+        dragEntityIdRef.current = null;
         setActiveMoveSnapPoint(null);
         setEntities(prev => { onCommitHistory?.(prev); return [...prev]; });
         return;
@@ -2896,7 +2944,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     if (confirmJoin()) return;
-    if (drawing || selectedParallelLine || highlightedTrimSegment || dragEntityIds.length > 0) {
+    
+    // 1. If currently drawing: This is the 'undo'
+    if (drawing) {
         setDrawing(null);
         setIsLocked(false);
         setHighlightedTrimSegment(null);
@@ -2906,6 +2956,26 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         setActiveMoveSnapPoint(null);
         return;
     }
+
+    // 2. If other actions are in progress: cancel them
+    if (selectedParallelLine || highlightedTrimSegment || dragEntityIds.length > 0) {
+        setDrawing(null);
+        setIsLocked(false);
+        setHighlightedTrimSegment(null);
+        setSelectedParallelLine(null);
+        setDragEntityIds([]);
+        setDragEntityId(null);
+        setActiveMoveSnapPoint(null);
+        return;
+    }
+
+    // 3. If in drawing mode: Toggle style
+    const drawingTools = ['Line', 'Circle', 'Arc', 'Rectangle', 'Point', 'Dimension'];
+    if (drawingTools.includes(activeTool)) {
+        setDefaultLineStyle(prev => ({ ...prev, mode: prev.mode === 'ink' ? 'pencil' : 'ink' }));
+        return;
+    }
+
     onContextMenu?.(e);
   };
 
@@ -2933,7 +3003,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             setSelectedParallelLine(null);
             setActiveMoveSnapPoint(null);
             setDragEntityIds([]);
-            setTrackingPoint(null);
         } else if (e.key === 'Enter') {
             if (activeTool === 'Join') confirmJoin();
         }

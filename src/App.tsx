@@ -65,11 +65,11 @@ export default function App() {
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isDimensionDialogOpen, setIsDimensionDialogOpen] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{
+  /* const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
     isOpen: boolean;
-  } | null>(null);
+  } | null>(null); */
   const [shortcutToast, setShortcutToast] = useState<string | null>(null);
   const [pdfScale, setPdfScale] = useState<number>(100);
   const [pdfUnit, setPdfUnit] = useState<string>("m");
@@ -129,9 +129,11 @@ export default function App() {
       setSelectedTool("Line");
       setShortcutToast("Strumento: Linea");
       setTimeout(() => setShortcutToast(null), 1500);
-    } else {
+    } 
+    // Removed context menu display
+    /* else {
       setContextMenu({ x: e.clientX, y: e.clientY, isOpen: true });
-    }
+    } */
   };
 
   const selectedEntity = entities.find((e) => e.id === selectedId);
@@ -393,7 +395,6 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden relative">
         <main
           className="flex-1 overflow-hidden relative"
-          onClick={() => setContextMenu(null)}
         >
           <CADCanvas
             ref={cadCanvasRef}
@@ -410,45 +411,13 @@ export default function App() {
             activeLayerId={activeLayerId}
             layers={layers}
             defaultLineStyle={defaultLineStyle}
+            setDefaultLineStyle={setDefaultLineStyle}
             eraserRadius={eraserRadius}
             setEraserRadius={setEraserRadius}
             rulerStyle={rulerStyle}
             orthoMode={orthoMode}
           />
         </main>
-
-        {contextMenu && contextMenu.isOpen && (
-          <div
-            className="absolute z-50 bg-white border border-neutral-300 rounded shadow-lg p-1 cursor-move"
-            style={{ top: toolboxPos.top, right: toolboxPos.right }}
-            onMouseDown={startDragging}
-          >
-            <button
-              className="block w-full text-left px-4 py-2 hover:bg-neutral-200 text-sm"
-              onClick={() => { setSelectedTool("Trim"); setContextMenu(null); }}
-            >
-              Forbici
-            </button>
-            <button
-              className="block w-full text-left px-4 py-2 hover:bg-neutral-200 text-sm"
-              onClick={() => { setSelectedTool("Eraser"); setContextMenu(null); }}
-            >
-              Gomma
-            </button>
-            <button
-              className="block w-full text-left px-4 py-2 hover:bg-neutral-200 text-sm"
-              onClick={() => { setSelectedTool("Dimension"); setContextMenu(null); }}
-            >
-              Righello
-            </button>
-            <button
-              className="block w-full text-left px-4 py-2 hover:bg-neutral-200 text-sm"
-              onClick={() => { setSelectedTool("Cancella"); setContextMenu(null); }}
-            >
-              Cancellino
-            </button>
-          </div>
-        )}
 
         {shortcutToast && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-neutral-800 text-white px-4 py-2 rounded-md shadow-lg pointer-events-none z-50 text-sm animate-pulse">
