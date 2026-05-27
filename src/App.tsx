@@ -233,6 +233,9 @@ export default function App() {
     <div className="flex flex-col h-screen bg-neutral-100 text-neutral-900">
       {/* Ribbon */}
       <header className="h-14 border-b border-neutral-300 bg-white flex">
+        <div className="flex items-center px-4 border-r border-neutral-300 bg-neutral-900 text-white select-none mr-1">
+          <span className="font-sans font-black tracking-wider text-sm">GECOLA <span className="text-amber-400">CAD</span></span>
+        </div>
         {categories.map((cat) => (
           <button
             key={cat.name}
@@ -420,6 +423,13 @@ export default function App() {
             rulerStyle={rulerStyle}
             orthoMode={orthoMode}
           />
+          
+          {/* Subtle watermark overlay for licensing & authenticity */}
+          <div className="absolute bottom-4 left-4 bg-white/70 backdrop-blur-sm border border-neutral-300/60 px-3 py-1.5 rounded shadow-sm text-[10px] text-neutral-600 font-mono pointer-events-none select-none flex flex-col z-10">
+            <span className="font-sans font-black text-neutral-800 tracking-wider">GECOLA CAD v1.4</span>
+            <span className="text-[9px]">Diritti riservati a Gimondo Ing. Domenico -</span>
+            <span className="text-[9px]">AETERNA@2026</span>
+          </div>
         </main>
 
         {shortcutToast && (
@@ -601,12 +611,12 @@ export default function App() {
 
       {/* Command Bar */}
       <footer className="h-8 border-t border-slate-800 bg-slate-900 px-4 flex items-center text-sm">
-        <span className="text-slate-500 mr-2 uppercase tracking-wide font-mono">
+        <span className="text-slate-500 mr-2 uppercase tracking-wide font-mono text-xs">
           Command:
         </span>
         <input
           type="text"
-          className="bg-transparent flex-1 outline-none font-mono"
+          className="bg-transparent flex-1 outline-none font-mono text-xs text-white"
           placeholder="Type a command (f.ex. L, C, R)..."
         />
       </footer>
