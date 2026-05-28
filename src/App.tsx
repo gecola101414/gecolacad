@@ -34,6 +34,11 @@ import {
   Copy,
   Layers,
   Pen,
+  Lightbulb,
+  LightbulbOff,
+  Snowflake,
+  Plus,
+  Check,
 } from "lucide-react";
 
 const ParallelIcon = ({ size = 16 }: { size?: number }) => (
@@ -59,6 +64,7 @@ export default function App() {
     { id: "Layer 0", name: "Layer 0", visible: true, frozen: false },
     { id: "Misure", name: "Misure", visible: true, frozen: false },
     { id: "Spessori", name: "Spessori", visible: true, frozen: false },
+    { id: "Schizzo", name: "Schizzo", visible: true, frozen: false },
   ]);
   const [activeLayerId, setActiveLayerId] = useState<string>("Layer 0");
   const [defaultLineStyle, setDefaultLineStyle] = useState({
@@ -84,7 +90,8 @@ export default function App() {
     { id: "tav4", name: "Tavola n. 4", format: "A1", scale: 500, unit: "cm", position: { x: 40, y: 30 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 4", autore: "Ing. Domenico Gimondo", data: "2026" } },
     { id: "tav5", name: "Tavola n. 5", format: "A0", scale: 1000, unit: "cm", position: { x: 0, y: 0 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 5", autore: "Ing. Domenico Gimondo", data: "2026" } },
   ]);
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'defaults' | 'tavole'>('defaults');
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'defaults' | 'tavole' | 'layers'>('defaults');
+  const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [editingCartiglioTavolaId, setEditingCartiglioTavolaId] = useState<string | null>(null);
   const [doubleClickedTavolaId, setDoubleClickedTavolaId] = useState<string | null>(null);
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
@@ -264,14 +271,42 @@ export default function App() {
             <span className="text-[10px]">{cat.name}</span>
           </button>
         ))}
-        <div className="flex flex-col items-center justify-center gap-0.5">
-          <button onClick={undo} className="p-1 hover:bg-neutral-200">
-            <Undo size={12} />
+        <button
+          onClick={() => setShowProperties(!showProperties)}
+          className="flex flex-col items-center justify-center px-4 hover:bg-neutral-200 border-l border-neutral-300"
+        >
+          <span className="text-[10px] text-neutral-500">
+            Mode: {defaultLineStyle.mode}
+          </span>
+          <span className="text-xs font-bold">
+            {defaultLineStyle.lineWidth}
+          </span>
+        </button>
+
+        <div className="flex items-center justify-center px-4 gap-3 border-l border-neutral-300 bg-neutral-50/50">
+          <button onClick={undo} title="Annulla" className="p-1.5 bg-white rounded shadow-sm border border-neutral-200 hover:bg-neutral-100 hover:text-indigo-600 transition-colors text-neutral-600">
+            <Undo size={16} />
           </button>
-          <button onClick={redo} className="p-1 hover:bg-neutral-200">
-            <Redo size={12} />
+          <button onClick={redo} title="Ripristina" className="p-1.5 bg-white rounded shadow-sm border border-neutral-200 hover:bg-neutral-100 hover:text-indigo-600 transition-colors text-neutral-600">
+            <Redo size={16} />
           </button>
         </div>
+
+        <button
+          onClick={() => {
+            if (activeSidebarTab === 'layers' && showProperties) {
+              setShowProperties(false);
+            } else {
+              setActiveSidebarTab('layers');
+              setShowProperties(true);
+            }
+          }}
+          className={`px-4 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 ${showProperties && activeSidebarTab === 'layers' ? "bg-indigo-50 text-indigo-700 font-bold" : "hover:bg-neutral-200 text-neutral-600"}`}
+        >
+          <Layers size={16} />
+          <span className="text-[10px]">Layer</span>
+        </button>
+
         <button
           onClick={() => {
             if (activeSidebarTab === 'defaults' && showProperties) {
@@ -281,21 +316,10 @@ export default function App() {
               setShowProperties(true);
             }
           }}
-          className={`px-4 flex flex-col items-center justify-center gap-0.5 ${showProperties && activeSidebarTab === 'defaults' ? "bg-neutral-100 text-indigo-600 font-bold" : "hover:bg-neutral-200"}`}
+          className={`px-4 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 ${showProperties && activeSidebarTab === 'defaults' ? "bg-neutral-100 text-indigo-600 font-bold" : "hover:bg-neutral-200"}`}
         >
           <Square size={16} />
           <span className="text-[10px]">Proprietà</span>
-        </button>
-        <button
-          onClick={() => setShowProperties(!showProperties)}
-          className="flex flex-col items-center justify-center px-4 hover:bg-neutral-200"
-        >
-          <span className="text-[10px] text-neutral-500">
-            Mode: {defaultLineStyle.mode}
-          </span>
-          <span className="text-xs font-bold">
-            {defaultLineStyle.lineWidth}
-          </span>
         </button>
         <div className="flex-1"></div>
         <button
@@ -619,7 +643,7 @@ export default function App() {
           <div className="w-80 bg-white border-l border-neutral-300 p-4 transition-all overflow-y-auto flex flex-col h-full">
             <h3 className="font-bold mb-4 flex justify-between items-center text-neutral-800 border-b border-neutral-100 pb-2">
               <span className="text-xs font-black uppercase tracking-wider font-mono">
-                {activeSidebarTab === "tavole" ? "Gestione Tavole di Stampa" : "Proprietà Disegno"}
+                {activeSidebarTab === "tavole" ? "Gestione Tavole" : activeSidebarTab === "layers" ? "Gestione Layers" : "Proprietà Disegno"}
               </span>
               <button 
                 onClick={() => setShowProperties(false)} 
@@ -742,50 +766,93 @@ export default function App() {
                         ))}
                       </div>
                     </label>
-                    <label className="block text-sm mb-2">
-                      Active Layer:
-                      <select
-                        value={activeLayerId}
-                        onChange={(e) => setActiveLayerId(e.target.value)}
-                        className="w-full bg-neutral-100 p-2 rounded text-xs mt-1 font-semibold"
-                      >
-                        {layers.map((l) => (
-                          <option key={l.id} value={l.id}>
-                            {l.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <div className="space-y-2 mt-4">
-                      <h4 className="text-xs font-bold text-neutral-700 uppercase tracking-wider">
-                        Layers
-                      </h4>
-                      {layers.map((l) => (
-                        <div
-                          key={l.id}
-                          className="flex items-center justify-between bg-neutral-100 p-2 rounded text-xs"
-                        >
-                          <span className="flex-1 font-semibold">{l.name}</span>
-                          <button
-                            onClick={() =>
-                              setLayers(
-                                layers.map((layer) =>
-                                  layer.id === l.id
-                                    ? { ...layer, visible: !layer.visible }
-                                    : layer,
-                                ),
-                              )
-                            }
-                            className={`px-2 py-1 rounded text-[10px] font-bold ${l.visible ? "bg-indigo-100 text-indigo-700" : "bg-neutral-300 text-neutral-600"}`}
-                          >
-                            {l.visible ? "Visibile" : "Nascosto"}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
                   </>
                 )
-              ) : (
+              ) : activeSidebarTab === 'layers' ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between mb-2 pb-2 border-b border-neutral-200">
+                        <h4 className="text-[10px] font-black text-neutral-800 uppercase tracking-wider font-mono">
+                          Gestione Layers
+                        </h4>
+                        <button 
+                          onClick={() => {
+                             const newId = `Layer ${layers.length}`;
+                             setLayers([...layers, { id: newId, name: newId, visible: true, frozen: false }]);
+                             setActiveLayerId(newId);
+                          }}
+                          className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-md transition-colors"
+                          title="Nuovo Layer"
+                        >
+                          <Plus size={14} />
+                        </button>
+                    </div>
+                    <div className="space-y-1.5 max-h-[500px] overflow-y-auto pr-1">
+                        {layers.map((l) => (
+                          <div
+                            key={l.id}
+                            className={`flex items-center gap-1 p-1.5 rounded-lg border transition-all ${activeLayerId === l.id ? "bg-white border-indigo-300 shadow-sm ring-1 ring-indigo-100" : "bg-neutral-50/50 border-neutral-200/60 hover:bg-white hover:border-neutral-300"}`}
+                          >
+                            <div className="flex-1 px-2 py-1 flex items-center min-w-0">
+                              {editingLayerId === l.id ? (
+                                <input
+                                  autoFocus
+                                  type="text"
+                                  className="w-full text-xs border border-indigo-300 rounded px-1 outline-none font-bold text-indigo-700"
+                                  value={l.name}
+                                  onChange={(e) => setLayers(layers.map((layer) => layer.id === l.id ? { ...layer, name: e.target.value } : layer))}
+                                  onBlur={() => setEditingLayerId(null)}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') setEditingLayerId(null); }}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              ) : (
+                                <button 
+                                  onClick={() => setActiveLayerId(l.id)}
+                                  className={`flex-1 text-left truncate focus:outline-none flex flex-col items-start ${activeLayerId === l.id ? "text-indigo-700 font-bold" : "text-neutral-600 font-semibold"}`}
+                                  title="Imposta come corrente. Doppio click per rinominare."
+                                  onDoubleClick={() => setEditingLayerId(l.id)}
+                                >
+                                  <span className="truncate w-full">{l.name}</span>
+                                  {activeLayerId === l.id && <span className="block text-[8px] uppercase tracking-wider text-indigo-400 mt-0.5">Corrente</span>}
+                                </button>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-0.5 px-1">
+                                <button
+                                  onClick={() =>
+                                    setLayers(
+                                      layers.map((layer) =>
+                                        layer.id === l.id
+                                          ? { ...layer, visible: !layer.visible }
+                                          : layer,
+                                      ),
+                                    )
+                                  }
+                                  title={l.visible ? "Spegni (Nascondi)" : "Accendi (Mostra)"}
+                                  className={`p-1.5 rounded-md transition-colors ${l.visible ? "text-amber-500 hover:bg-amber-50" : "text-neutral-300 hover:bg-neutral-100"}`}
+                                >
+                                  {l.visible ? <Lightbulb size={14} /> : <LightbulbOff size={14} />}
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    setLayers(
+                                      layers.map((layer) =>
+                                        layer.id === l.id
+                                          ? { ...layer, frozen: !layer.frozen }
+                                          : layer,
+                                      ),
+                                    )
+                                  }
+                                  title={l.frozen ? "Scongela (Sblocca)" : "Congela (Blocca)"}
+                                  className={`p-1.5 rounded-md transition-colors ${l.frozen ? "text-blue-500 bg-blue-50 hover:bg-blue-100 border border-blue-200" : "text-neutral-300 hover:bg-neutral-100 border border-transparent"}`}
+                                >
+                                  <Snowflake size={14} />
+                                </button>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                ) : activeSidebarTab === 'tavole' ? (
                 <>
                   <p className="text-xs text-neutral-500 mb-4 font-normal leading-relaxed">
                     Trascina i riquadri blu (tavola n. 1..5) sul foglio per selezionare l'area di stampa reale da esportare in PDF.
@@ -940,7 +1007,7 @@ export default function App() {
                     ))}
                   </div>
                 </>
-              )}
+              ) : null}
             </div>
           </div>
         )}

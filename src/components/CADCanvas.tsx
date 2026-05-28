@@ -450,7 +450,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
     return entities.filter(ent => {
         const layer = layers.find(l => l.id === ent.layer);
-        if (layer && !layer.visible) return false;
+        if (layer && (!layer.visible || layer.frozen)) return false;
         
         if (isCrossing) {
             // Crossing selection (Right to Left): select if any part is inside/touches
@@ -515,10 +515,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     const snaps: {point: Point, type: 'standard' | 'smart', refPoint?: Point, refEntityId?: string, constraintAxis?: 'x' | 'y'}[] = [];
     const keyPoints: Point[] = [];
     
-    // Only snap to visible layers
+    // Only snap to visible and non-frozen layers
     const visibleEntities = entities.filter(ent => {
         const layer = layers.find(l => l.id === ent.layer);
-        return !(layer && !layer.visible);
+        return !(layer && (!layer.visible || layer.frozen));
     });
 
     visibleEntities.forEach(entity => {
@@ -753,7 +753,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
     for (const ent of entities) {
       const layer = layers.find(l => l.id === ent.layer);
-      if (layer && !layer.visible) continue;
+      if (layer && (!layer.visible || layer.frozen)) continue;
 
       let hit = false;
       if (ent.type === 'line') {
@@ -899,6 +899,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         ctx.strokeStyle = (entity.mode === 'ink') ? '#555555' : '#000000';
         ctx.lineWidth = Math.max(0.8, entity.lineWidth / view.zoom); // Ensure visibility
         ctx.globalAlpha = entity.opacity !== undefined ? entity.opacity : 1.0;
+        if (layer && layer.frozen) {
+            ctx.globalAlpha *= 0.4;
+        }
         ctx.shadowBlur = 0; // Remove blur for sharp lines
 
         if (isFlashing) {
@@ -925,6 +928,18 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             // Eraser highlight only
         }
         
+        let isHighlighted = false;
+        let highlightColor = ctx.strokeStyle;
+        if (isFlashing) {
+             isHighlighted = true;
+        } else if ((entity.id === selectedParallelLine?.id && blink)) {
+             isHighlighted = true;
+        } else if ((dragEntityIds.includes(entity.id) || entity.id === highlightedTrimLine?.id) && (activeTool === 'Move' || activeTool === 'Cancella' || activeTool === 'Join' || activeTool === 'Copy')) {
+             isHighlighted = true;
+        } else if (copySourceEntityIds.includes(entity.id) && activeTool === 'Copy') {
+             isHighlighted = true;
+        }
+
         if (entity.dashed) {
           ctx.setLineDash([5 / view.zoom, 5 / view.zoom]);
         } else {
@@ -947,7 +962,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
      
                       ctx.beginPath();
                       ctx.lineWidth = Math.max(0.2, pt.width * (entity.lineWidth / view.zoom));
-                      ctx.strokeStyle = `rgba(85, 85, 85, ${pt.alpha})`;
+                      ctx.strokeStyle = isHighlighted ? highlightColor : `rgba(85, 85, 85, ${pt.alpha})`;
                       ctx.moveTo(lastX, lastY);
                       ctx.lineTo(px, py);
                       ctx.stroke();
@@ -975,7 +990,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
                       ctx.beginPath();
                       ctx.lineWidth = Math.max(0.2, (0.5 + Math.random() * 0.5) * (entity.lineWidth / view.zoom));
-                      ctx.strokeStyle = `rgba(85, 85, 85, ${0.3 + Math.random() * 0.4})`;
+                      ctx.strokeStyle = isHighlighted ? highlightColor : `rgba(85, 85, 85, ${0.3 + Math.random() * 0.4})`;
                       ctx.moveTo(lastX, lastY);
                       ctx.lineTo(px, py);
                       ctx.stroke();
