@@ -9,6 +9,12 @@ export interface TavolaExport {
   unit: 'm' | 'cm' | 'mm';
   position: { x: number; y: number };
   visible: boolean;
+  datiCartiglio?: {
+    progetto?: string;
+    titolo?: string;
+    autore?: string;
+    data?: string;
+  };
 }
 
 export const exportNativePDF = (

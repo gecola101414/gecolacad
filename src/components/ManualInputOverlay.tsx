@@ -4,7 +4,7 @@ import { Point } from '../types';
 interface ManualInputOverlayProps {
     type: 'line' | 'circle' | 'rectangle' | 'parallel';
     drawing?: { start: Point, current: Point };
-    parallelLine?: { start: Point, end: Point, mouse: Point };
+    parallelLine?: { start: Point, end: Point, mouse: Point, distance?: number };
     canvasToScreen: (x: number, y: number) => { x: number, y: number };
     onCommit: (data: any) => void;
     isOpen: boolean;
@@ -34,14 +34,20 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
         screenPos = canvasToScreen(drawing.current.x, drawing.current.y);
     } else if (type === 'parallel') {
         if (!parallelLine) return null;
-        const { start, end, mouse } = parallelLine;
-        const dxLine = end.x - start.x;
-        const dyLine = end.y - start.y;
-        const L = Math.sqrt(dxLine * dxLine + dyLine * dyLine);
-        const normX = -dyLine / L;
-        const normY = dxLine / L;
-        const vecMouse = { x: mouse.x - start.x, y: mouse.y - start.y };
-        initVal1 = Math.abs(vecMouse.x * normX + vecMouse.y * normY); // Distance
+        const { start, end, mouse, distance } = parallelLine;
+        if (distance !== undefined) {
+            initVal1 = distance;
+        } else {
+            const dxLine = end.x - start.x;
+            const dyLine = end.y - start.y;
+            const L = Math.sqrt(dxLine * dxLine + dyLine * dyLine);
+            if (L > 0) {
+                const normX = -dyLine / L;
+                const normY = dxLine / L;
+                const vecMouse = { x: mouse.x - start.x, y: mouse.y - start.y };
+                initVal1 = Math.abs(vecMouse.x * normX + vecMouse.y * normY); // Distance
+            }
+        }
         screenPos = canvasToScreen(mouse.x, mouse.y);
     }
 
