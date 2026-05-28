@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 'react';
-import { Entity, Point, Layer, LineEntity, CircleEntity, ArcEntity, RectEntity, InkPoint } from '../types';
+import { Entity, Point, Layer, LineEntity, CircleEntity, ArcEntity, RectEntity, InkPoint, Tavola } from '../types';
 import { ManualInputOverlay } from './ManualInputOverlay';
 
 export interface CADCanvasAPI {
@@ -219,6 +219,28 @@ const getArcSubsegmentsInsideAndOutsideEraser = (
   };
 };
 
+export const getPaperSizeMm = (format: string): { w: number; h: number } => {
+  switch (format.toUpperCase()) {
+    case 'A4': return { w: 297, h: 210 };
+    case 'A3': return { w: 420, h: 297 };
+    case 'A2': return { w: 594, h: 420 };
+    case 'A1': return { w: 841, h: 594 };
+    case 'A0': return { w: 1189, h: 841 };
+    default: return { w: 297, h: 210 };
+  }
+};
+
+export const getTavolaDimensions = (tavola: { format: string; scale: number; unit: string }) => {
+  const paper = getPaperSizeMm(tavola.format || 'A4');
+  let factor = 1000;
+  if (tavola.unit === 'cm') factor = 10;
+  if (tavola.unit === 'mm') factor = 1;
+  const scale = tavola.scale || 100;
+  const w = paper.w * (scale / factor);
+  const h = paper.h * (scale / factor);
+  return { w, h };
+};
+
 interface CADCanvasProps {
   entities: Entity[];
   activeTool: string;
@@ -237,11 +259,18 @@ interface CADCanvasProps {
   onMouseMovePosition?: (pos: Point) => void;
   rulerStyle?: 'tecnigrafo' | 'crosshair';
   orthoMode?: boolean;
+  tavole?: Tavola[];
+  onUpdateTavole?: (tavole: Tavola[]) => void;
 }
 
-export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false }, ref) => {
+export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, tavole, onUpdateTavole }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [view, setView] = useState({ zoom: 1, pan: { x: 0, y: 0 } });
+  const [dragTavolaId, setDragTavolaId] = useState<string | null>(null);
+  const [hoverTavolaEdge, setHoverTavolaEdge] = useState(false);
+  const dragTavolaIdRef = useRef<string | null>(null);
+  useEffect(() => { dragTavolaIdRef.current = dragTavolaId; }, [dragTavolaId]);
+
   const [copySourceEntityIds, setCopySourceEntityIds] = useState<string[]>([]);
   const [clonedEntityIds, setClonedEntityIds] = useState<Set<string>>(new Set());
   const holdTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -1573,6 +1602,136 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
       }
 
+      // Draw visible Tavole (Sheet templates) in CAD model units
+      if (tavole) {
+        tavole.forEach(tav => {
+          if (!tav.visible) return;
+          
+          ctx.save();
+          
+          const { w, h } = getTavolaDimensions(tav);
+          
+          // Draw thin dashed sheet outline
+          ctx.strokeStyle = '#2563eb';
+          ctx.lineWidth = 1.5 / view.zoom;
+          ctx.setLineDash([5 / view.zoom, 4 / view.zoom]);
+          ctx.strokeRect(tav.position.x, tav.position.y, w, h);
+          
+          // Draw printable margin (5mm offset standard frame border)
+          let mFactor = 5;
+          let scaleFactor = 1000;
+          if (tav.unit === 'cm') scaleFactor = 10;
+          if (tav.unit === 'mm') scaleFactor = 1;
+          const marginOffset = mFactor * (tav.scale / scaleFactor);
+          
+          ctx.strokeStyle = '#3b82f6';
+          ctx.lineWidth = 0.8 / view.zoom;
+          ctx.setLineDash([]);
+          ctx.strokeRect(
+            tav.position.x + marginOffset, 
+            tav.position.y + marginOffset, 
+            w - 2 * marginOffset, 
+            h - 2 * marginOffset
+          );
+          
+          // Draw a beautiful CAD Title Block (cartiglio) in the bottom-right corner
+          const cartiglioW = 120 * (tav.scale / scaleFactor);
+          const cartiglioH = 40 * (tav.scale / scaleFactor);
+          const cartX = tav.position.x + w - marginOffset - cartiglioW;
+          const cartY = tav.position.y + h - marginOffset - cartiglioH;
+          
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+          ctx.fillRect(cartX, cartY, cartiglioW, cartiglioH);
+          ctx.strokeStyle = '#2563eb';
+          ctx.lineWidth = 1.2 / view.zoom;
+          ctx.strokeRect(cartX, cartY, cartiglioW, cartiglioH);
+          
+          // Partition lines of Title Block
+          ctx.beginPath();
+          ctx.strokeStyle = '#2563eb';
+          ctx.lineWidth = 0.7 / view.zoom;
+          // Horizontal lines
+          ctx.moveTo(cartX, cartY + cartiglioH * 0.4);
+          ctx.lineTo(cartX + cartiglioW, cartY + cartiglioH * 0.4);
+          ctx.moveTo(cartX, cartY + cartiglioH * 0.7);
+          ctx.lineTo(cartX + cartiglioW, cartY + cartiglioH * 0.7);
+          // Vertical partition
+          ctx.moveTo(cartX + cartiglioW * 0.5, cartY + cartiglioH * 0.4);
+          ctx.lineTo(cartX + cartiglioW * 0.5, cartY + cartiglioH);
+          ctx.stroke();
+          
+          // Fill Titles metadata
+          ctx.fillStyle = '#1e3a8a';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          
+          // Choose standard readable fonts inside box
+          const textScale = tav.scale / scaleFactor;
+          const headingSz = Math.max(3.5, 2.8 * textScale);
+          const valueSz = Math.max(5, 4.2 * textScale);
+          
+          ctx.font = `bold ${headingSz}px sans-serif`;
+          ctx.fillText(`PROGETTO:`, cartX + 2 * textScale, cartY + 2 * textScale);
+          ctx.font = `bold ${Math.max(6, 6 * textScale)}px sans-serif`;
+          const MAX_PROGETTO_LEN = 35;
+          let pString = tav.datiCartiglio?.progetto || "GECOLA CAD";
+          if(pString.length > MAX_PROGETTO_LEN) pString = pString.substring(0, MAX_PROGETTO_LEN) + "...";
+          ctx.fillText(pString, cartX + 2 * textScale, cartY + 6.5 * textScale);
+          
+          ctx.font = `bold ${headingSz}px sans-serif`;
+          ctx.fillText(`TAVOLA:`, cartX + 2 * textScale, cartY + cartiglioH * 0.42);
+          ctx.font = `bold ${valueSz}px sans-serif`;
+          const MAX_TITOLO_LEN = 20;
+          let tString = tav.datiCartiglio?.titolo || tav.name;
+          if(tString.length > MAX_TITOLO_LEN) tString = tString.substring(0, MAX_TITOLO_LEN) + "...";
+          ctx.fillText(tString, cartX + 2 * textScale, cartY + cartiglioH * 0.5);
+          
+          ctx.font = `bold ${headingSz}px sans-serif`;
+          ctx.fillText(`SCALA:`, cartX + cartiglioW * 0.53, cartY + cartiglioH * 0.42);
+          ctx.font = `bold ${valueSz}px sans-serif`;
+          ctx.fillText(`1:${tav.scale}`, cartX + cartiglioW * 0.53, cartY + cartiglioH * 0.5);
+          
+          ctx.font = `bold ${headingSz}px sans-serif`;
+          ctx.fillText(`AUTORE:`, cartX + 2 * textScale, cartY + cartiglioH * 0.72);
+          ctx.font = `bold ${valueSz}px sans-serif`;
+          const MAX_AUTORE_LEN = 20;
+          let aString = tav.datiCartiglio?.autore || "Domenico Gimondo";
+          if(aString.length > MAX_AUTORE_LEN) aString = aString.substring(0, MAX_AUTORE_LEN) + "...";
+          ctx.fillText(aString, cartX + 2 * textScale, cartY + cartiglioH * 0.81);
+          
+          ctx.font = `bold ${headingSz}px sans-serif`;
+          ctx.fillText(`DATA:`, cartX + cartiglioW * 0.53, cartY + cartiglioH * 0.72);
+          ctx.font = `bold ${valueSz}px sans-serif`;
+          const MAX_DATA_LEN = 15;
+          let dString = tav.datiCartiglio?.data || "";
+          if(dString.length > MAX_DATA_LEN) dString = dString.substring(0, MAX_DATA_LEN) + "...";
+          ctx.fillText(dString, cartX + cartiglioW * 0.53, cartY + cartiglioH * 0.81);
+          
+          // Top-left tab label
+          ctx.fillStyle = 'rgba(37, 99, 235, 0.9)';
+          const badgeH = 18 / view.zoom;
+          const badgeW = 120 / view.zoom;
+          ctx.fillRect(tav.position.x, tav.position.y - badgeH, badgeW, badgeH);
+          
+          ctx.fillStyle = '#ffffff';
+          ctx.font = `bold ${10 / view.zoom}px sans-serif`;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(
+            ` ${tav.name} (${tav.format} - 1:${tav.scale})`, 
+            tav.position.x + 4 / view.zoom, 
+            tav.position.y - badgeH / 2
+          );
+          
+          if (dragTavolaIdRef.current === tav.id) {
+            ctx.fillStyle = 'rgba(37, 99, 235, 0.08)';
+            ctx.fillRect(tav.position.x, tav.position.y, w, h);
+          }
+          
+          ctx.restore();
+        });
+      }
+
       ctx.restore();
       
       // Render selection window
@@ -2444,6 +2603,38 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     const rect = canvas.getBoundingClientRect();
     const rawPoint = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
     lastMouseRef.current = rawPoint;
+
+    // --- TAVOLA GESTURE DRAG INTERCEPT ---
+    let hitTavolaId: string | null = null;
+    if (tavole) {
+      for (const tav of tavole) {
+        if (!tav.visible) continue;
+        const { w, h } = getTavolaDimensions(tav);
+        
+        let scaleFactor = 1000;
+        if (tav.unit === 'cm') scaleFactor = 10;
+        if (tav.unit === 'mm') scaleFactor = 1;
+
+        const nearEdge = 
+          (Math.abs(rawPoint.x - tav.position.x) < 15 / view.zoom && rawPoint.y >= tav.position.y && rawPoint.y <= tav.position.y + h) ||
+          (Math.abs(rawPoint.x - (tav.position.x + w)) < 15 / view.zoom && rawPoint.y >= tav.position.y && rawPoint.y <= tav.position.y + h) ||
+          (Math.abs(rawPoint.y - tav.position.y) < 15 / view.zoom && rawPoint.x >= tav.position.x && rawPoint.x <= tav.position.x + w) ||
+          (Math.abs(rawPoint.y - (tav.position.y + h)) < 15 / view.zoom && rawPoint.x >= tav.position.x && rawPoint.x <= tav.position.x + w);
+
+        if (nearEdge) {
+          hitTavolaId = tav.id;
+          break;
+        }
+      }
+    }
+
+    if (hitTavolaId) {
+      setDragTavolaId(hitTavolaId);
+      dragTavolaIdRef.current = hitTavolaId;
+      lastMouseRef.current = rawPoint;
+      previousMouseRef.current = rawPoint;
+      return; 
+    }
     
     // --- LONG PRESS GESTURE (3 SECONDS) ---
     if (holdTimerRef.current) {
@@ -3145,6 +3336,47 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     const rawPoint = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
     onMouseMovePosition?.(rawPoint);
 
+    let isNearEdge = false;
+    if (tavole && !dragTavolaIdRef.current) {
+        for (const tav of tavole) {
+            if (!tav.visible) continue;
+            const { w, h } = getTavolaDimensions(tav);
+            const near = 
+              (Math.abs(rawPoint.x - tav.position.x) < 15 / view.zoom && rawPoint.y >= tav.position.y && rawPoint.y <= tav.position.y + h) ||
+              (Math.abs(rawPoint.x - (tav.position.x + w)) < 15 / view.zoom && rawPoint.y >= tav.position.y && rawPoint.y <= tav.position.y + h) ||
+              (Math.abs(rawPoint.y - tav.position.y) < 15 / view.zoom && rawPoint.x >= tav.position.x && rawPoint.x <= tav.position.x + w) ||
+              (Math.abs(rawPoint.y - (tav.position.y + h)) < 15 / view.zoom && rawPoint.x >= tav.position.x && rawPoint.x <= tav.position.x + w);
+            if (near) {
+                isNearEdge = true;
+                break;
+            }
+        }
+    }
+    setHoverTavolaEdge(isNearEdge);
+
+    // --- TAVOLA GESTURE DRAG UPDATE ---
+    if (dragTavolaIdRef.current && onUpdateTavole && tavole) {
+      const deltaX = rawPoint.x - previousMouseRef.current.x;
+      const deltaY = rawPoint.y - previousMouseRef.current.y;
+      
+      const newTavole = tavole.map(tav => {
+        if (tav.id === dragTavolaIdRef.current) {
+          return {
+            ...tav,
+            position: {
+              x: tav.position.x + deltaX,
+              y: tav.position.y + deltaY
+            }
+          };
+        }
+        return tav;
+      });
+      onUpdateTavole(newTavole);
+      previousMouseRef.current = rawPoint;
+      lastMouseRef.current = rawPoint;
+      return;
+    }
+
     if (selectionWindow) {
         setSelectionWindow({ ...selectionWindow, current: rawPoint });
         return;
@@ -3623,6 +3855,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         clearTimeout(holdTimerRef.current);
         holdTimerRef.current = null;
       }
+      if (dragTavolaIdRef.current) {
+        setDragTavolaId(null);
+        dragTavolaIdRef.current = null;
+      }
       if (dragEntityId && (activeTool === 'Move' || activeTool === 'Copy')) {
         if (activeTool === 'Copy' && isStickyCopyRef.current) {
           if (!dragHasMovedRef.current) {
@@ -3640,7 +3876,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     };
     window.addEventListener('mouseup', handleGlobalMouseUp);
     return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
-  }, [dragEntityId, activeTool, onCommitHistory]);
+  }, [dragEntityId, activeTool, onCommitHistory, dragTavolaId]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -3759,7 +3995,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     <div 
       ref={containerRef} 
       className="w-full h-full relative" 
-      style={{ cursor: (activeTool === 'Eraser' || (activeTool === 'Parallel' && selectedParallelLine)) ? 'none' : activeTool === 'Trim' ? `url("${scissorsSvg}") 16 16, crosshair` : defaultLineStyle.mode === 'ink' ? `url("${pencilSvg}") 0 0, crosshair` : rulerStyle === 'crosshair' ? `url("${crosshairSvg}") 48 48, crosshair` : `url("${tecnigrafoSvg}") 20 108, crosshair` }}
+      style={{ cursor: dragTavolaId ? 'grabbing' : hoverTavolaEdge ? 'grab' : (activeTool === 'Eraser' || (activeTool === 'Parallel' && selectedParallelLine)) ? 'none' : activeTool === 'Trim' ? `url("${scissorsSvg}") 16 16, crosshair` : defaultLineStyle.mode === 'ink' ? `url("${pencilSvg}") 0 0, crosshair` : rulerStyle === 'crosshair' ? `url("${crosshairSvg}") 48 48, crosshair` : `url("${tecnigrafoSvg}") 20 108, crosshair` }}
       onWheel={handleWheel} 
       onMouseDown={handleMouseDown} 
       onMouseMove={handleMouseMove} 

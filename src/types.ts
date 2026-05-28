@@ -78,3 +78,21 @@ export interface Layer {
   visible: boolean;
   frozen: boolean;
 }
+
+export interface TavolaData {
+  progetto: string;
+  titolo: string;
+  autore: string;
+  data: string;
+}
+
+export interface Tavola {
+  id: string;
+  name: string;
+  format: 'A0' | 'A1' | 'A2' | 'A3' | 'A4';
+  scale: number;
+  unit: 'm' | 'cm' | 'mm';
+  position: { x: number; y: number };
+  visible: boolean;
+  datiCartiglio: TavolaData;
+}

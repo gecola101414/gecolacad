@@ -6,7 +6,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { CADCanvas } from "./components/CADCanvas";
 import { DimensionStyleDialog } from "./components/DimensionStyleDialog";
-import { Entity, Point, Layer, Measurement } from "./types";
+import { Entity, Point, Layer, Measurement, Tavola } from "./types";
 import { mergeAllSegments } from "./utils/entityUtils";
 import {
   Minus,
@@ -29,6 +29,8 @@ import {
   Trash2,
   Link,
   Copy,
+  Layers,
+  Pen,
 } from "lucide-react";
 
 const ParallelIcon = ({ size = 16 }: { size?: number }) => (
@@ -72,11 +74,17 @@ export default function App() {
     isOpen: boolean;
   } | null>(null); */
   const [shortcutToast, setShortcutToast] = useState<string | null>(null);
-  const [pdfScale, setPdfScale] = useState<number>(100);
-  const [pdfUnit, setPdfUnit] = useState<string>("m");
-  const [pdfFormat, setPdfFormat] = useState<string>("a4");
+  const [tavole, setTavole] = useState<Tavola[]>([
+    { id: "tav1", name: "Tavola n. 1", format: "A4", scale: 100, unit: "cm", position: { x: -30, y: -20 }, visible: true, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 1", autore: "Ing. Domenico Gimondo", data: "2026" } },
+    { id: "tav2", name: "Tavola n. 2", format: "A3", scale: 100, unit: "cm", position: { x: 30, y: -20 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 2", autore: "Ing. Domenico Gimondo", data: "2026" } },
+    { id: "tav3", name: "Tavola n. 3", format: "A2", scale: 200, unit: "cm", position: { x: -40, y: 30 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 3", autore: "Ing. Domenico Gimondo", data: "2026" } },
+    { id: "tav4", name: "Tavola n. 4", format: "A1", scale: 500, unit: "cm", position: { x: 40, y: 30 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 4", autore: "Ing. Domenico Gimondo", data: "2026" } },
+    { id: "tav5", name: "Tavola n. 5", format: "A0", scale: 1000, unit: "cm", position: { x: 0, y: 0 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 5", autore: "Ing. Domenico Gimondo", data: "2026" } },
+  ]);
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'defaults' | 'tavole'>('defaults');
+  const [editingCartiglioTavolaId, setEditingCartiglioTavolaId] = useState<string | null>(null);
   const [rulerStyle, setRulerStyle] = useState<"tecnigrafo" | "crosshair">(
-    "tecnigrafo",
+    "crosshair",
   );
   const [orthoMode, setOrthoMode] = useState(false);
 
@@ -171,7 +179,7 @@ export default function App() {
       ],
     },
   ];
-  const [showProperties, setShowProperties] = useState(false);
+  const [showProperties, setShowProperties] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState(categories[0].name);
 
   // Undo/Redo
@@ -260,11 +268,18 @@ export default function App() {
           </button>
         </div>
         <button
-          onClick={() => setShowProperties(!showProperties)}
-          className={`px-4 flex flex-col items-center justify-center gap-0.5 ${showProperties ? "bg-neutral-100" : "hover:bg-neutral-200"}`}
+          onClick={() => {
+            if (activeSidebarTab === 'defaults' && showProperties) {
+              setShowProperties(false);
+            } else {
+              setActiveSidebarTab('defaults');
+              setShowProperties(true);
+            }
+          }}
+          className={`px-4 flex flex-col items-center justify-center gap-0.5 ${showProperties && activeSidebarTab === 'defaults' ? "bg-neutral-100 text-indigo-600 font-bold" : "hover:bg-neutral-200"}`}
         >
           <Square size={16} />
-          <span className="text-[10px]">Defaults</span>
+          <span className="text-[10px]">Proprietà</span>
         </button>
         <button
           onClick={() => setShowProperties(!showProperties)}
@@ -278,47 +293,19 @@ export default function App() {
           </span>
         </button>
         <div className="flex-1"></div>
-        <div className="flex items-center gap-4 mr-4">
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-neutral-600 font-medium">
-              Scala 1:
-            </span>
-            <input
-              type="number"
-              value={pdfScale || ""}
-              onChange={(e) => setPdfScale(Number(e.target.value))}
-              className="w-16 h-7 border border-neutral-300 rounded px-1 text-xs text-center"
-            />
-          </div>
-          <select
-            value={pdfUnit}
-            onChange={(e) => setPdfUnit(e.target.value)}
-            className="h-7 text-xs border border-neutral-300 rounded px-2"
-          >
-            <option value="mm">mm</option>
-            <option value="cm">cm</option>
-            <option value="m">m</option>
-          </select>
-          <select
-            value={pdfFormat}
-            onChange={(e) => setPdfFormat(e.target.value)}
-            className="h-7 text-xs border border-neutral-300 rounded px-2"
-          >
-            <option value="a4">A4</option>
-            <option value="a3">A3</option>
-            <option value="a2">A2</option>
-            <option value="a1">A1</option>
-          </select>
-        </div>
         <button
-          onClick={async () => {
-            const { exportNativePDF } = await import("./utils/pdfExport");
-            exportNativePDF(entities, pdfFormat, pdfScale || 100, pdfUnit);
+          onClick={() => {
+            if (activeSidebarTab === 'tavole' && showProperties) {
+              setShowProperties(false);
+            } else {
+              setActiveSidebarTab('tavole');
+              setShowProperties(true);
+            }
           }}
-          className="px-4 flex flex-col items-center justify-center gap-0.5 hover:bg-neutral-200 text-indigo-600 border-l border-neutral-300"
+          className={`px-4 flex flex-col items-center justify-center gap-0.5 ${showProperties && activeSidebarTab === 'tavole' ? "bg-indigo-50 border-x border-indigo-200" : "hover:bg-neutral-200 border-l border-neutral-300"}`}
         >
-          <Printer size={16} />
-          <span className="text-[10px] font-bold">Crea PDF</span>
+          <Layers size={16} className={`${activeSidebarTab === 'tavole' && showProperties ? "text-indigo-600 animate-pulse" : "text-neutral-500"}`} />
+          <span className={`text-[10px] font-bold ${activeSidebarTab === 'tavole' && showProperties ? "text-indigo-700" : "text-neutral-600"}`}>Tavole CAD</span>
         </button>
         <button
           onClick={async () => {
@@ -422,6 +409,8 @@ export default function App() {
             setEraserRadius={setEraserRadius}
             rulerStyle={rulerStyle}
             orthoMode={orthoMode}
+            tavole={tavole}
+            onUpdateTavole={setTavole}
           />
           
           {/* Subtle watermark overlay for licensing & authenticity */}
@@ -440,165 +429,314 @@ export default function App() {
 
         {/* Properties Panel (Drawer) */}
         {showProperties && (
-          <div className="w-64 bg-white border-l border-neutral-300 p-4 transition-all overflow-y-auto">
-            <h3 className="font-bold mb-4 flex justify-between">
-              <span>
-                {selectedEntity
-                  ? `Properties (${selectedEntity.type})`
-                  : "Drawing Defaults"}
+          <div className="w-80 bg-white border-l border-neutral-300 p-4 transition-all overflow-y-auto flex flex-col h-full">
+            <h3 className="font-bold mb-4 flex justify-between items-center text-neutral-800 border-b border-neutral-100 pb-2">
+              <span className="text-xs font-black uppercase tracking-wider font-mono">
+                {activeSidebarTab === "tavole" ? "Gestione Tavole di Stampa" : "Proprietà Disegno"}
               </span>
-              <button onClick={() => setShowProperties(false)}>X</button>
+              <button 
+                onClick={() => setShowProperties(false)} 
+                className="text-neutral-400 hover:text-neutral-600 font-bold font-mono text-sm p-1"
+              >
+                ✕
+              </button>
             </h3>
-            <div className="space-y-4">
-              {selectedEntity ? (
-                <>
-                  <label className="block text-sm">
-                    Stile Linea:
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() =>
-                          updateEntity(selectedEntity.id, { mode: "ink" })
-                        }
-                        className={`p-2 rounded flex-1 ${selectedEntity.mode === "ink" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
-                      >
-                        Stile Schizzo
-                      </button>
-                      <button
-                        onClick={() =>
-                          updateEntity(selectedEntity.id, { mode: "pencil" })
-                        }
-                        className={`p-2 rounded flex-1 ${selectedEntity.mode === "pencil" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
-                      >
-                        Stile Standard
-                      </button>
-                    </div>
-                  </label>
-                  <label className="block text-sm">
-                    Width:
-                    <div className="flex gap-2">
-                      {[1, 2.5, 4].map((w) => (
+
+            <div className="space-y-4 flex-1">
+              {activeSidebarTab === "defaults" ? (
+                selectedEntity ? (
+                  <>
+                    <label className="block text-sm">
+                      Stile Linea:
+                      <div className="flex gap-2 mt-1">
                         <button
-                          key={w}
                           onClick={() =>
-                            updateEntity(selectedEntity.id, { lineWidth: w })
+                            updateEntity(selectedEntity.id, { mode: "ink" })
                           }
-                          className={`p-2 rounded flex-1 ${selectedEntity.lineWidth === w ? "bg-indigo-600 text-white" : "bg-neutral-200 text-neutral-900 border border-neutral-400"}`}
+                          className={`p-2 rounded flex-1 text-xs font-bold transition-all ${selectedEntity.mode === "ink" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
                         >
-                          {w} mm
+                          Stile Schizzo
                         </button>
-                      ))}
-                    </div>
-                  </label>
-                  {selectedEntity.type === "dimension" && (
-                    <>
-                      <label className="block text-sm">
-                        Text:{" "}
-                        <input
-                          type="text"
-                          value={(selectedEntity as any).customText || ""}
-                          onChange={(e) =>
-                            updateEntity(selectedEntity.id, {
-                              customText: e.target.value,
-                            })
-                          }
-                          className="w-full bg-neutral-100 p-2 rounded"
-                        />
-                      </label>
-                      <button
-                        className="w-full bg-indigo-600 text-white p-2 text-sm rounded"
-                        onClick={() => setIsDimensionDialogOpen(true)}
-                      >
-                        Edit Style
-                      </button>
-                    </>
-                  )}
-                </>
-              ) : (
-                <>
-                  <label className="block text-sm">
-                    Stile Default:
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() =>
-                          setDefaultLineStyle({
-                            ...defaultLineStyle,
-                            mode: "ink",
-                          })
-                        }
-                        className={`p-2 rounded flex-1 ${defaultLineStyle.mode === "ink" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
-                      >
-                        Stile Schizzo
-                      </button>
-                      <button
-                        onClick={() =>
-                          setDefaultLineStyle({
-                            ...defaultLineStyle,
-                            mode: "pencil",
-                          })
-                        }
-                        className={`p-2 rounded flex-1 ${defaultLineStyle.mode === "pencil" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
-                      >
-                        Stile Standard
-                      </button>
-                    </div>
-                  </label>
-                  <label className="block text-sm">
-                    Default Width:
-                    <div className="flex gap-2">
-                      {[1, 2.5, 4].map((w) => (
                         <button
-                          key={w}
+                          onClick={() =>
+                            updateEntity(selectedEntity.id, { mode: "pencil" })
+                          }
+                          className={`p-2 rounded flex-1 text-xs font-bold transition-all ${selectedEntity.mode === "pencil" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
+                        >
+                          Stile Standard
+                        </button>
+                      </div>
+                    </label>
+                    <label className="block text-sm">
+                      Width:
+                      <div className="flex gap-2 mt-1">
+                        {[1, 2.5, 4].map((w) => (
+                          <button
+                            key={w}
+                            onClick={() =>
+                              updateEntity(selectedEntity.id, { lineWidth: w })
+                            }
+                            className={`p-2 rounded flex-1 text-xs font-bold ${selectedEntity.lineWidth === w ? "bg-indigo-600 text-white" : "bg-neutral-200 text-neutral-900 border border-neutral-400"}`}
+                          >
+                            {w} mm
+                          </button>
+                        ))}
+                      </div>
+                    </label>
+                    {selectedEntity.type === "dimension" && (
+                      <>
+                        <label className="block text-sm">
+                          Text:{" "}
+                          <input
+                            type="text"
+                            value={(selectedEntity as any).customText || ""}
+                            onChange={(e) =>
+                              updateEntity(selectedEntity.id, {
+                                customText: e.target.value,
+                              })
+                            }
+                            className="w-full bg-neutral-100 p-2 mt-1 rounded text-xs"
+                          />
+                        </label>
+                        <button
+                          className="w-full bg-indigo-600 text-white p-2 text-xs font-bold rounded"
+                          onClick={() => setIsDimensionDialogOpen(true)}
+                        >
+                          Edit Style
+                        </button>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <label className="block text-sm">
+                      Stile Default:
+                      <div className="flex gap-2 mt-1">
+                        <button
                           onClick={() =>
                             setDefaultLineStyle({
                               ...defaultLineStyle,
-                              lineWidth: w,
+                              mode: "ink",
                             })
                           }
-                          className={`p-2 rounded flex-1 ${defaultLineStyle.lineWidth === w ? "bg-indigo-600 text-white" : "bg-neutral-200 text-neutral-900 border border-neutral-400"}`}
+                          className={`p-2 rounded flex-1 text-xs font-bold ${defaultLineStyle.mode === "ink" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
                         >
-                          {w} mm
+                          Stile Schizzo
                         </button>
-                      ))}
-                    </div>
-                  </label>
-                  <label className="block text-sm mb-2">
-                    Active Layer:
-                    <select
-                      value={activeLayerId}
-                      onChange={(e) => setActiveLayerId(e.target.value)}
-                      className="w-full bg-neutral-100 p-2 rounded text-sm mt-1"
-                    >
-                      {layers.map((l) => (
-                        <option key={l.id} value={l.id}>
-                          {l.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="space-y-2 mt-4">
-                    <h4 className="text-sm font-bold text-neutral-700">
-                      Layers
-                    </h4>
-                    {layers.map((l) => (
-                      <div
-                        key={l.id}
-                        className="flex items-center justify-between bg-neutral-100 p-2 rounded text-sm"
-                      >
-                        <span className="flex-1">{l.name}</span>
                         <button
                           onClick={() =>
-                            setLayers(
-                              layers.map((layer) =>
-                                layer.id === l.id
-                                  ? { ...layer, visible: !layer.visible }
-                                  : layer,
-                              ),
-                            )
+                            setDefaultLineStyle({
+                              ...defaultLineStyle,
+                              mode: "pencil",
+                            })
                           }
-                          className={`px-2 py-1 rounded text-xs ${l.visible ? "bg-indigo-100 text-indigo-700" : "bg-neutral-300 text-neutral-600"}`}
+                          className={`p-2 rounded flex-1 text-xs font-bold ${defaultLineStyle.mode === "pencil" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
                         >
-                          {l.visible ? "Visibile" : "Nascosto"}
+                          Stile Standard
                         </button>
+                      </div>
+                    </label>
+                    <label className="block text-sm">
+                      Default Width:
+                      <div className="flex gap-2 mt-1">
+                        {[1, 2.5, 4].map((w) => (
+                          <button
+                            key={w}
+                            onClick={() =>
+                              setDefaultLineStyle({
+                                ...defaultLineStyle,
+                                lineWidth: w,
+                              })
+                            }
+                            className={`p-2 rounded flex-1 text-xs font-bold ${defaultLineStyle.lineWidth === w ? "bg-indigo-600 text-white" : "bg-neutral-200 text-neutral-900 border border-neutral-400"}`}
+                          >
+                            {w} mm
+                          </button>
+                        ))}
+                      </div>
+                    </label>
+                    <label className="block text-sm mb-2">
+                      Active Layer:
+                      <select
+                        value={activeLayerId}
+                        onChange={(e) => setActiveLayerId(e.target.value)}
+                        className="w-full bg-neutral-100 p-2 rounded text-xs mt-1 font-semibold"
+                      >
+                        {layers.map((l) => (
+                          <option key={l.id} value={l.id}>
+                            {l.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="space-y-2 mt-4">
+                      <h4 className="text-xs font-bold text-neutral-700 uppercase tracking-wider">
+                        Layers
+                      </h4>
+                      {layers.map((l) => (
+                        <div
+                          key={l.id}
+                          className="flex items-center justify-between bg-neutral-100 p-2 rounded text-xs"
+                        >
+                          <span className="flex-1 font-semibold">{l.name}</span>
+                          <button
+                            onClick={() =>
+                              setLayers(
+                                layers.map((layer) =>
+                                  layer.id === l.id
+                                    ? { ...layer, visible: !layer.visible }
+                                    : layer,
+                                ),
+                              )
+                            }
+                            className={`px-2 py-1 rounded text-[10px] font-bold ${l.visible ? "bg-indigo-100 text-indigo-700" : "bg-neutral-300 text-neutral-600"}`}
+                          >
+                            {l.visible ? "Visibile" : "Nascosto"}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )
+              ) : (
+                <>
+                  <p className="text-xs text-neutral-500 mb-4 font-normal leading-relaxed">
+                    Trascina i riquadri blu (tavola n. 1..5) sul foglio per selezionare l'area di stampa reale da esportare in PDF.
+                  </p>
+
+                  <div className="space-y-4">
+                    {tavole.map((tav) => (
+                      <div key={tav.id} className="border border-neutral-200 rounded-lg p-3 bg-neutral-50/50 hover:bg-neutral-50 transition-all shadow-xs">
+                        {/* Title and Visibility */}
+                        <div className="flex items-center justify-between mb-2 pb-1 border-b border-neutral-200/50">
+                          <span className="text-xs font-black text-neutral-800 font-mono tracking-tight">{tav.name}</span>
+                          <div className="flex gap-1 items-center">
+                            <button
+                              onClick={() => {
+                                setEditingCartiglioTavolaId(editingCartiglioTavolaId === tav.id ? null : tav.id);
+                              }}
+                              className={`p-1 rounded text-xs transition-all ${editingCartiglioTavolaId === tav.id ? "bg-indigo-100 text-indigo-700" : "text-neutral-500 hover:bg-neutral-200"}`}
+                              title="Modifica Cartiglio"
+                            >
+                              <Pen size={12} />
+                            </button>
+                            <button
+                              onClick={() => {
+                                setTavole(tavole.map(t => t.id === tav.id ? { ...t, visible: !t.visible } : t));
+                              }}
+                              className={`px-2 py-1 rounded text-[10px] font-bold transition-all ${tav.visible ? "bg-indigo-600 text-white shadow-xs" : "bg-neutral-200 text-neutral-600"}`}
+                            >
+                              {tav.visible ? "Visibile" : "Nascosto"}
+                            </button>
+                          </div>
+                        </div>
+
+                        {editingCartiglioTavolaId === tav.id && (
+                          <div className="mb-3 space-y-1.5 p-2 bg-white border border-neutral-200 rounded text-xs">
+                            <div className="flex flex-col gap-0.5">
+                              <label className="text-[8px] font-bold text-neutral-500 uppercase">Progetto</label>
+                              <input 
+                                type="text"
+                                className="border border-neutral-300 rounded px-1.5 py-0.5 w-full bg-neutral-50 focus:bg-white"
+                                value={tav.datiCartiglio.progetto}
+                                onChange={(e) => setTavole(tavole.map(t => t.id === tav.id ? {...t, datiCartiglio: {...t.datiCartiglio, progetto: e.target.value}} : t))}
+                              />
+                            </div>
+                            <div className="flex flex-col gap-0.5">
+                              <label className="text-[8px] font-bold text-neutral-500 uppercase">Titolo</label>
+                              <input 
+                                type="text"
+                                className="border border-neutral-300 rounded px-1.5 py-0.5 w-full bg-neutral-50 focus:bg-white"
+                                value={tav.datiCartiglio.titolo}
+                                onChange={(e) => setTavole(tavole.map(t => t.id === tav.id ? {...t, datiCartiglio: {...t.datiCartiglio, titolo: e.target.value}} : t))}
+                              />
+                            </div>
+                            <div className="flex flex-col gap-0.5">
+                              <label className="text-[8px] font-bold text-neutral-500 uppercase">Autore</label>
+                              <input 
+                                type="text"
+                                className="border border-neutral-300 rounded px-1.5 py-0.5 w-full bg-neutral-50 focus:bg-white"
+                                value={tav.datiCartiglio.autore}
+                                onChange={(e) => setTavole(tavole.map(t => t.id === tav.id ? {...t, datiCartiglio: {...t.datiCartiglio, autore: e.target.value}} : t))}
+                              />
+                            </div>
+                            <div className="flex flex-col gap-0.5">
+                              <label className="text-[8px] font-bold text-neutral-500 uppercase">Data</label>
+                              <input 
+                                type="text"
+                                className="border border-neutral-300 rounded px-1.5 py-0.5 w-full bg-neutral-50 focus:bg-white"
+                                value={tav.datiCartiglio.data}
+                                onChange={(e) => setTavole(tavole.map(t => t.id === tav.id ? {...t, datiCartiglio: {...t.datiCartiglio, data: e.target.value}} : t))}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Controls (Format / Scale / Unit) Grid */}
+                        <div className="grid grid-cols-3 gap-1.5 mt-2">
+                          {/* Paper format selector */}
+                          <div>
+                            <label className="block text-[8px] text-neutral-500 font-bold uppercase tracking-wider mb-0.5">Foglio</label>
+                            <select
+                              value={tav.format}
+                              onChange={(e) => {
+                                setTavole(tavole.map(t => t.id === tav.id ? { ...t, format: e.target.value as any } : t));
+                              }}
+                              className="w-full bg-white border border-neutral-300 text-xs rounded p-1 font-semibold"
+                            >
+                              <option value="A4">A4</option>
+                              <option value="A3">A3</option>
+                              <option value="A2">A2</option>
+                              <option value="A1">A1</option>
+                              <option value="A0">A0</option>
+                            </select>
+                          </div>
+
+                          {/* Scale selector */}
+                          <div>
+                            <label className="block text-[8px] text-neutral-500 font-bold uppercase tracking-wider mb-0.5">Scala 1:</label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={tav.scale}
+                              onChange={(e) => {
+                                const val = Math.max(1, Number(e.target.value));
+                                setTavole(tavole.map(t => t.id === tav.id ? { ...t, scale: val } : t));
+                              }}
+                              className="w-full bg-white border border-neutral-300 text-xs rounded p-1 text-center font-black"
+                            />
+                          </div>
+
+                          {/* Unit selector */}
+                          <div>
+                            <label className="block text-[8px] text-neutral-500 font-bold uppercase tracking-wider mb-0.5">Unità</label>
+                            <select
+                              value={tav.unit}
+                              onChange={(e) => {
+                                setTavole(tavole.map(t => t.id === tav.id ? { ...t, unit: e.target.value as any } : t));
+                              }}
+                              className="w-full bg-white border border-neutral-300 text-xs rounded p-1 font-semibold"
+                            >
+                              <option value="m">Metri (m)</option>
+                              <option value="cm">Cm (cm)</option>
+                              <option value="mm">Mm (mm)</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Action buttons (printable preview) */}
+                        <div className="flex gap-2 mt-3 pt-2">
+                          <button
+                            onClick={async () => {
+                              const { exportNativePDF } = await import("./utils/pdfExport");
+                              exportNativePDF(entities, tav.format, tav.scale, tav.unit, tav);
+                            }}
+                            className="flex-1 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold py-1.5 px-2 rounded-md text-[10px] transition-colors flex items-center justify-center gap-1 shadow-sm uppercase tracking-wider"
+                          >
+                            <Printer size={10} className="stroke-white" />
+                            <span>Salva PDF</span>
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>

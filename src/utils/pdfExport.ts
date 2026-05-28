@@ -1,48 +1,94 @@
 import { jsPDF } from 'jspdf';
 import { Entity } from '../types';
 
-export const exportNativePDF = (entities: Entity[], format: string, scaleDenom: number, unit: string) => {
-  if (entities.length === 0) return;
+export interface TavolaExport {
+  id: string;
+  name: string;
+  format: 'A0' | 'A1' | 'A2' | 'A3' | 'A4';
+  scale: number;
+  unit: 'm' | 'cm' | 'mm';
+  position: { x: number; y: number };
+  visible: boolean;
+}
+
+export const exportNativePDF = (
+  entities: Entity[], 
+  format: string, 
+  scaleDenom: number, 
+  unit: string,
+  tavola?: TavolaExport
+) => {
+  if (entities.length === 0 && !tavola) return;
 
   // Find bounding box
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
-  entities.forEach(ent => {
-    if (ent.type === 'line' || ent.type === 'dimension') {
-      minX = Math.min(minX, ent.start.x, ent.end.x);
-      minY = Math.min(minY, ent.start.y, ent.end.y);
-      maxX = Math.max(maxX, ent.start.x, ent.end.x);
-      maxY = Math.max(maxY, ent.start.y, ent.end.y);
-    } else if (ent.type === 'circle' || ent.type === 'arc') {
-      minX = Math.min(minX, ent.center.x - ent.radius);
-      minY = Math.min(minY, ent.center.y - ent.radius);
-      maxX = Math.max(maxX, ent.center.x + ent.radius);
-      maxY = Math.max(maxY, ent.center.y + ent.radius);
-    } else if (ent.type === 'rectangle') {
-      minX = Math.min(minX, ent.p1.x, ent.p2.x);
-      minY = Math.min(minY, ent.p1.y, ent.p2.y);
-      maxX = Math.max(maxX, ent.p1.x, ent.p2.x);
-      maxY = Math.max(maxY, ent.p1.y, ent.p2.y);
-    } else if (ent.type === 'point') {
-        const p = ent.point || (ent as any).position;
-        if (p) {
-            minX = Math.min(minX, p.x);
-            minY = Math.min(minY, p.y);
-            maxX = Math.max(maxX, p.x);
-            maxY = Math.max(maxY, p.y);
+  if (tavola) {
+      const getPaperSizeMmLocal = (fmt: string) => {
+        switch (fmt.toUpperCase()) {
+          case 'A4': return { w: 297, h: 210 };
+          case 'A3': return { w: 420, h: 297 };
+          case 'A2': return { w: 594, h: 420 };
+          case 'A1': return { w: 841, h: 594 };
+          case 'A0': return { w: 1189, h: 841 };
+          default: return { w: 297, h: 210 };
         }
-    }
-  });
+      };
+      
+      const pSize = getPaperSizeMmLocal(tavola.format);
+      let factor = 1000;
+      if (tavola.unit === 'cm') factor = 10;
+      if (tavola.unit === 'mm') factor = 1;
+      
+      const drawingWidth = pSize.w * (tavola.scale / factor);
+      const drawingHeight = pSize.h * (tavola.scale / factor);
+      
+      minX = tavola.position.x;
+      minY = tavola.position.y;
+      maxX = minX + drawingWidth;
+      maxY = minY + drawingHeight;
+  } else {
+      entities.forEach(ent => {
+        if (ent.type === 'line' || ent.type === 'dimension') {
+          minX = Math.min(minX, ent.start.x, ent.end.x);
+          minY = Math.min(minY, ent.start.y, ent.end.y);
+          maxX = Math.max(maxX, ent.start.x, ent.end.x);
+          maxY = Math.max(maxY, ent.start.y, ent.end.y);
+        } else if (ent.type === 'circle' || ent.type === 'arc') {
+          minX = Math.min(minX, ent.center.x - ent.radius);
+          minY = Math.min(minY, ent.center.y - ent.radius);
+          maxX = Math.max(maxX, ent.center.x + ent.radius);
+          maxY = Math.max(maxY, ent.center.y + ent.radius);
+        } else if (ent.type === 'rectangle') {
+          minX = Math.min(minX, ent.p1.x, ent.p2.x);
+          minY = Math.min(minY, ent.p1.y, ent.p2.y);
+          maxX = Math.max(maxX, ent.p1.x, ent.p2.x);
+          maxY = Math.max(maxY, ent.p1.y, ent.p2.y);
+        } else if (ent.type === 'point') {
+            const p = ent.point || (ent as any).position;
+            if (p) {
+                minX = Math.min(minX, p.x);
+                minY = Math.min(minY, p.y);
+                maxX = Math.max(maxX, p.x);
+                maxY = Math.max(maxY, p.y);
+            }
+        }
+      });
+  }
 
   if (minX === Infinity) return;
 
   const drawingWidth = maxX - minX;
   const drawingHeight = maxY - minY;
 
+  const chosenFormat = tavola ? tavola.format : format;
+  const chosenScaleDenom = tavola ? tavola.scale : scaleDenom;
+  const chosenUnit = tavola ? tavola.unit : unit;
+
   const pdf = new jsPDF({
     orientation: drawingWidth > drawingHeight ? 'landscape' : 'portrait',
     unit: 'mm',
-    format: format.toLowerCase()
+    format: chosenFormat.toLowerCase()
   });
 
   const unitToMm = {
@@ -50,8 +96,8 @@ export const exportNativePDF = (entities: Entity[], format: string, scaleDenom: 
       cm: 10,
       m: 1000
   };
-  const multiplier = unitToMm[unit as keyof typeof unitToMm] || 1;
-  const scale = multiplier / scaleDenom;
+  const multiplier = unitToMm[chosenUnit as keyof typeof unitToMm] || 1;
+  const scale = multiplier / chosenScaleDenom;
   
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
@@ -90,8 +136,8 @@ export const exportNativePDF = (entities: Entity[], format: string, scaleDenom: 
                   const t = i / (entity.inkPoints.length - 1);
                   const bx = entity.start.x + (entity.end.x - entity.start.x) * t;
                   const by = entity.start.y + (entity.end.y - entity.start.y) * t;
-                  const px = bx + pt.x;
-                  const py = by + pt.y;
+                  const px = entity.isFreehand ? pt.x : bx + pt.x;
+                  const py = entity.isFreehand ? pt.y : by + pt.y;
                   
                   // Apply width and alpha from inkPoint
                   const lw = Math.max(0.05, pt.width * scale * 0.5);
@@ -218,5 +264,89 @@ export const exportNativePDF = (entities: Entity[], format: string, scaleDenom: 
       }
   });
 
-  pdf.save('disegno.pdf');
+  if (tavola) {
+      const getPaperSizeMmLocal = (fmt: string) => {
+        switch (fmt.toUpperCase()) {
+          case 'A4': return { w: 297, h: 210 };
+          case 'A3': return { w: 420, h: 297 };
+          case 'A2': return { w: 594, h: 420 };
+          case 'A1': return { w: 841, h: 594 };
+          case 'A0': return { w: 1189, h: 841 };
+          default: return { w: 297, h: 210 };
+        }
+      };
+      
+      const pSize = getPaperSizeMmLocal(tavola.format);
+      
+      // Draw standard inner margin line (5mm on paper)
+      pdf.setDrawColor(37, 99, 235);
+      pdf.setLineWidth(0.4);
+      pdf.setLineDashPattern([], 0);
+      
+      const marginMm = 5;
+      pdf.rect(marginMm, marginMm, pSize.w - 2 * marginMm, pSize.h - 2 * marginMm, 'S');
+      
+      // Draw Title Block background and borders
+      const cartW = 120;
+      const cartH = 40;
+      const cartX = pSize.w - marginMm - cartW;
+      const cartY = pSize.h - marginMm - cartH;
+      
+      pdf.setFillColor(255, 255, 255);
+      pdf.rect(cartX, cartY, cartW, cartH, 'FD');
+      
+      // Secondary subdivision lines
+      pdf.setLineWidth(0.2);
+      pdf.line(cartX, cartY + cartH * 0.4, cartX + cartW, cartY + cartH * 0.4);
+      pdf.line(cartX, cartY + cartH * 0.7, cartX + cartW, cartY + cartH * 0.7);
+      pdf.line(cartX + cartW * 0.5, cartY + cartH * 0.4, cartX + cartW * 0.5, cartY + cartH);
+      
+      // Title Block Info
+      pdf.setTextColor(30, 58, 138);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(5);
+      pdf.text("PROGETTO:", cartX + 2.5, cartY + 4);
+      
+      pdf.setFontSize(8);
+      const MAX_PROGETTO_LEN = 35;
+      let pString = tavola.datiCartiglio?.progetto || "GECOLA CAD";
+      if(pString.length > MAX_PROGETTO_LEN) pString = pString.substring(0, MAX_PROGETTO_LEN) + "...";
+      pdf.text(pString, cartX + 2.5, cartY + 10);
+      
+      pdf.setFontSize(5);
+      pdf.text("TAVOLA:", cartX + 2.5, cartY + cartH * 0.4 + 4);
+      
+      pdf.setFontSize(8);
+      const MAX_TITOLO_LEN = 20;
+      let tString = tavola.datiCartiglio?.titolo || tavola.name;
+      if(tString.length > MAX_TITOLO_LEN) tString = tString.substring(0, MAX_TITOLO_LEN) + "...";
+      pdf.text(tString, cartX + 2.5, cartY + cartH * 0.4 + 10);
+      
+      pdf.setFontSize(5);
+      pdf.text("SCALA:", cartX + cartW * 0.5 + 2.5, cartY + cartH * 0.4 + 4);
+      
+      pdf.setFontSize(8);
+      pdf.text(`1:${tavola.scale}`, cartX + cartW * 0.5 + 2.5, cartY + cartH * 0.4 + 10);
+      
+      pdf.setFontSize(5);
+      pdf.text("AUTORE:", cartX + 2.5, cartY + cartH * 0.7 + 4);
+      
+      pdf.setFontSize(8);
+      const MAX_AUTORE_LEN = 20;
+      let aString = tavola.datiCartiglio?.autore || "Domenico Gimondo";
+      if(aString.length > MAX_AUTORE_LEN) aString = aString.substring(0, MAX_AUTORE_LEN) + "...";
+      pdf.text(aString, cartX + 2.5, cartY + cartH * 0.7 + 10);
+      
+      pdf.setFontSize(5);
+      pdf.text("DATA:", cartX + cartW * 0.5 + 2.5, cartY + cartH * 0.7 + 4);
+      
+      pdf.setFontSize(8);
+      const MAX_DATA_LEN = 15;
+      let dString = tavola.datiCartiglio?.data || "";
+      if(dString.length > MAX_DATA_LEN) dString = dString.substring(0, MAX_DATA_LEN) + "...";
+      pdf.text(dString, cartX + cartW * 0.5 + 2.5, cartY + cartH * 0.7 + 10);
+  }
+
+  const exportName = tavola ? `${tavola.name}.pdf` : 'disegno.pdf';
+  pdf.save(exportName);
 };
