@@ -182,13 +182,17 @@ export const exportNativePDF = (
             const p1 = { x: entity.start.x + nx * entity.offset, y: entity.start.y + ny * entity.offset };
             const p2 = { x: entity.end.x + nx * entity.offset, y: entity.end.y + ny * entity.offset };
             
+            // Define a fixed scale factor equivalent to a 200 unit length dimension
+            const scaleFactor = 2.0;
+
+            pdf.setLineWidth(0.1 * Math.max(1, scaleFactor * 0.5));
+
             // Dimension line
             pdf.line(tx(p1.x), ty(p1.y), tx(p2.x), ty(p2.y));
 
-            // Extension lines (gampette)
-            const p_gap = 2; // Fixed gap in drawing units
-            const legBehind = 20; 
-            const legAhead = 8;
+            // Extension lines (gampette) proportional to length
+            const legBehind = 20 * scaleFactor; 
+            const legAhead = 8 * scaleFactor;
             const offsetDir = entity.offset >= 0 ? 1 : -1;
             
             pdf.line(
@@ -205,8 +209,8 @@ export const exportNativePDF = (
                 ty(p2.y + ny * legAhead * offsetDir)
             );
 
-            // Inclined intersection slashes
-            const slashSize = 5;
+            // Inclined intersection slashes proportional to length
+            const slashSize = 5 * scaleFactor;
             pdf.line(
                 tx(p1.x - nx * slashSize - ny * slashSize), 
                 ty(p1.y - ny * slashSize + nx * slashSize), 
@@ -223,7 +227,8 @@ export const exportNativePDF = (
             // Text
             pdf.setTextColor(0, 0, 0);
             pdf.setFont("helvetica", "normal");
-            pdf.setFontSize(ts(12) * (72 / 25.4)); // Fixed 12 drawing units converted to PDF Points
+            const fontSize = Math.max(2, 12 * scaleFactor);
+            pdf.setFontSize(ts(fontSize) * (72 / 25.4)); // Scaled drawing units converted to PDF Points
             
             const numValue = Math.round(L * 100) / 100;
             const valueStr = Number.isInteger(numValue) ? numValue.toString() : numValue.toFixed(2).replace('.', ',');
@@ -236,9 +241,9 @@ export const exportNativePDF = (
                 angle += Math.PI;
             }
             
-            // Translate the text 3 drawing units perpendicularly (upwards relative to text)
-            const textX = (p1.x + p2.x) / 2 + 3 * Math.sin(angle);
-            const textY = (p1.y + p2.y) / 2 - 3 * Math.cos(angle);
+            // Translate the text 3 drawing units (scaled) perpendicularly (upwards relative to text)
+            const textX = (p1.x + p2.x) / 2 + (3 * scaleFactor) * Math.sin(angle);
+            const textY = (p1.y + p2.y) / 2 - (3 * scaleFactor) * Math.cos(angle);
             
             pdf.text(textToPrint, tx(textX), ty(textY), { angle: 360 - (angle * 180 / Math.PI), align: 'center', baseline: 'bottom' });
 

@@ -999,16 +999,19 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             const p1 = { x: entity.start.x + nx * entity.offset, y: entity.start.y + ny * entity.offset };
             const p2 = { x: entity.end.x + nx * entity.offset, y: entity.end.y + ny * entity.offset };
             
+            // Define a fixed scale factor equivalent to a 200 unit length dimension
+            const scaleFactor = 2.0;
+
             // Thinner line for dimensions
-            ctx.lineWidth = 0.5 / view.zoom;
+            ctx.lineWidth = (0.5 / view.zoom) * (Math.max(1, scaleFactor * 0.5));
             
             // Dimension line
             ctx.moveTo(p1.x, p1.y);
             ctx.lineTo(p2.x, p2.y);
 
-            // Extension lines (gampette)
-            const legBehind = 20;
-            const legAhead = 8;
+            // Extension lines (gampette) proportional to length
+            const legBehind = 20 * scaleFactor;
+            const legAhead = 8 * scaleFactor;
             const offsetDir = entity.offset >= 0 ? 1 : -1;
             
             ctx.moveTo(p1.x - nx * legBehind * offsetDir, p1.y - ny * legBehind * offsetDir);
@@ -1017,8 +1020,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             ctx.moveTo(p2.x - nx * legBehind * offsetDir, p2.y - ny * legBehind * offsetDir);
             ctx.lineTo(p2.x + nx * legAhead * offsetDir, p2.y + ny * legAhead * offsetDir);
 
-            // Inclined intersection slashes
-            const slashSize = 5;
+            // Inclined intersection slashes proportional to length
+            const slashSize = 5 * scaleFactor;
             // Slash at p1
             ctx.moveTo(p1.x - nx * slashSize - ny * slashSize, p1.y - ny * slashSize + nx * slashSize);
             ctx.lineTo(p1.x + nx * slashSize + ny * slashSize, p1.y + ny * slashSize - nx * slashSize);
@@ -1031,7 +1034,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             // Text
             ctx.save();
             ctx.fillStyle = 'black'; // Text should be black too
-            ctx.font = `12px sans-serif`;
+            const fontSize = Math.max(2, 12 * scaleFactor);
+            ctx.font = `${fontSize}px sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'bottom';
             const midX = (p1.x + p2.x) / 2;
@@ -1047,7 +1051,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 angle += Math.PI;
             }
             ctx.rotate(angle);
-            ctx.translate(0, -3); // Offset slightly above the dimension line
+            ctx.translate(0, -3 * scaleFactor); // Offset slightly above the dimension line proportional to length
             
             const numValue = Math.round(L * 100) / 100; // Round to max 2 decimal places to prevent float issues
             const valueStr = Number.isInteger(numValue) ? numValue.toString() : numValue.toFixed(2).replace('.', ',');

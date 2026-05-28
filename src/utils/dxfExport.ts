@@ -53,6 +53,9 @@ export function exportDXF(entities: Entity[], layers: Layer[], filename: string 
             // main dim line
             d.drawLine(p1.x, -p1.y, p2.x, -p2.y);
             
+            // Define a fixed scale factor equivalent to a 200 unit length dimension
+            const scaleFactor = 2.0;
+            
             // Text
             const numValue = Math.round(L * 100) / 100;
             const valueStr = Number.isInteger(numValue) ? numValue.toString() : numValue.toFixed(2).replace('.', ',');
@@ -65,7 +68,7 @@ export function exportDXF(entities: Entity[], layers: Layer[], filename: string 
             if (angle > 90 && angle <= 270) {
                angle += 180;
             }
-            d.drawText(mx, -my + 5, 12, -angle, textStr);
+            d.drawText(mx, -my + (5 * scaleFactor), Math.max(2, 12 * scaleFactor), -angle, textStr);
         }
     });
 
