@@ -266,7 +266,7 @@ interface CADCanvasProps {
 
 export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, tavole, onUpdateTavole, onDoubleClickTavola }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [view, setView] = useState({ zoom: 1, pan: { x: 0, y: 0 } });
+  const [view, setView] = useState({ zoom: 0.15, pan: { x: window.innerWidth > 0 ? (window.innerWidth / 2) - 150 : 250, y: window.innerHeight > 0 ? (window.innerHeight / 2) - 220 : 80 } });
   const [dragTavolaId, setDragTavolaId] = useState<string | null>(null);
   const [hoverTavolaEdge, setHoverTavolaEdge] = useState(false);
   const dragTavolaIdRef = useRef<string | null>(null);

@@ -91,7 +91,7 @@ export default function App() {
   const [rulerStyle, setRulerStyle] = useState<"tecnigrafo" | "crosshair">(
     "crosshair",
   );
-  const [orthoMode, setOrthoMode] = useState(false);
+  const [orthoMode, setOrthoMode] = useState(true);
 
   const cadCanvasRef = useRef<any>(null);
 
