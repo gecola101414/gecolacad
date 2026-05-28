@@ -4,7 +4,10 @@
  */
 
 import React, { useState, useRef, useEffect } from "react";
+import { Document, Page, pdfjs } from 'react-pdf';
 import { CADCanvas } from "./components/CADCanvas";
+
+pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 import { DimensionStyleDialog } from "./components/DimensionStyleDialog";
 import { Entity, Point, Layer, Measurement, Tavola } from "./types";
 import { mergeAllSegments } from "./utils/entityUtils";
@@ -50,7 +53,7 @@ const ParallelIcon = ({ size = 16 }: { size?: number }) => (
 );
 
 export default function App() {
-  const [selectedTool, setSelectedTool] = useState("Select");
+  const [selectedTool, setSelectedTool] = useState("Line");
   const [entities, setEntities] = useState<Entity[]>([]);
   const [layers, setLayers] = useState<Layer[]>([
     { id: "Layer 0", name: "Layer 0", visible: true, frozen: false },
@@ -83,6 +86,8 @@ export default function App() {
   ]);
   const [activeSidebarTab, setActiveSidebarTab] = useState<'defaults' | 'tavole'>('defaults');
   const [editingCartiglioTavolaId, setEditingCartiglioTavolaId] = useState<string | null>(null);
+  const [doubleClickedTavolaId, setDoubleClickedTavolaId] = useState<string | null>(null);
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const [rulerStyle, setRulerStyle] = useState<"tecnigrafo" | "crosshair">(
     "crosshair",
   );
@@ -179,8 +184,8 @@ export default function App() {
       ],
     },
   ];
-  const [showProperties, setShowProperties] = useState(true);
-  const [selectedCategory, setSelectedCategory] = useState(categories[0].name);
+  const [showProperties, setShowProperties] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState("Disegno");
 
   // Undo/Redo
   const [history, setHistory] = useState<Entity[][]>([[]]);
@@ -411,7 +416,189 @@ export default function App() {
             orthoMode={orthoMode}
             tavole={tavole}
             onUpdateTavole={setTavole}
+            onDoubleClickTavola={setDoubleClickedTavolaId}
           />
+          
+          {doubleClickedTavolaId && !pdfPreviewUrl && (
+            <div className="absolute inset-0 bg-black/20 flex items-center justify-center p-4 z-50 pointer-events-auto">
+              <div className="bg-white rounded-lg shadow-xl w-full max-w-sm overflow-hidden flex flex-col">
+                {(() => {
+                  const tav = tavole.find(t => t.id === doubleClickedTavolaId);
+                  if (!tav) return null;
+                  return (
+                    <>
+                      <div className="px-4 border-b border-neutral-100 flex items-center justify-between py-3">
+                        <h3 className="font-bold text-neutral-800 text-sm">Parametri Tavola - {tav.name}</h3>
+                        <button onClick={() => setDoubleClickedTavolaId(null)} className="text-neutral-400 hover:text-neutral-600">✕</button>
+                      </div>
+                      <div className="p-4 space-y-4">
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-[10px] text-neutral-500 font-bold uppercase tracking-wider mb-1">Foglio</label>
+                            <select
+                              value={tav.format}
+                              onChange={(e) => setTavole(tavole.map(t => t.id === tav.id ? { ...t, format: e.target.value as any } : t))}
+                              className="w-full bg-neutral-50 border border-neutral-300 text-sm rounded p-1.5 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                            >
+                              <option value="A4">A4</option>
+                              <option value="A3">A3</option>
+                              <option value="A2">A2</option>
+                              <option value="A1">A1</option>
+                              <option value="A0">A0</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-neutral-500 font-bold uppercase tracking-wider mb-1">Scala 1:</label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={tav.scale}
+                              onChange={(e) => {
+                                const val = Math.max(1, Number(e.target.value));
+                                setTavole(tavole.map(t => t.id === tav.id ? { ...t, scale: val } : t));
+                              }}
+                              className="w-full bg-neutral-50 border border-neutral-300 text-sm rounded p-1.5 text-center font-bold focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-neutral-500 font-bold uppercase tracking-wider mb-1">Unità</label>
+                            <select
+                              value={tav.unit}
+                              onChange={(e) => setTavole(tavole.map(t => t.id === tav.id ? { ...t, unit: e.target.value as any } : t))}
+                              className="w-full bg-neutral-50 border border-neutral-300 text-sm rounded p-1.5 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                            >
+                              <option value="m">Metri</option>
+                              <option value="cm">Cm</option>
+                              <option value="mm">Mm</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 mt-4 pt-4 border-t border-neutral-100">
+                          <h4 className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-2">Cartiglio</h4>
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[10px] font-semibold text-neutral-600">Progetto</label>
+                            <input 
+                              type="text"
+                              className="border border-neutral-300 rounded p-1.5 text-sm w-full bg-neutral-50 focus:bg-white focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                              value={tav.datiCartiglio.progetto}
+                              onChange={(e) => setTavole(tavole.map(t => t.id === tav.id ? {...t, datiCartiglio: {...t.datiCartiglio, progetto: e.target.value}} : t))}
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[10px] font-semibold text-neutral-600">Titolo</label>
+                            <input 
+                              type="text"
+                              className="border border-neutral-300 rounded p-1.5 text-sm w-full bg-neutral-50 focus:bg-white focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                              value={tav.datiCartiglio.titolo}
+                              onChange={(e) => setTavole(tavole.map(t => t.id === tav.id ? {...t, datiCartiglio: {...t.datiCartiglio, titolo: e.target.value}} : t))}
+                            />
+                          </div>
+                          <div className="flex gap-2">
+                            <div className="flex flex-col gap-1 flex-1">
+                              <label className="text-[10px] font-semibold text-neutral-600">Autore</label>
+                              <input 
+                                type="text"
+                                className="border border-neutral-300 rounded p-1.5 text-sm w-full bg-neutral-50 focus:bg-white focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                                value={tav.datiCartiglio.autore}
+                                onChange={(e) => setTavole(tavole.map(t => t.id === tav.id ? {...t, datiCartiglio: {...t.datiCartiglio, autore: e.target.value}} : t))}
+                              />
+                            </div>
+                            <div className="flex flex-col gap-1 w-1/3">
+                              <label className="text-[10px] font-semibold text-neutral-600">Data</label>
+                              <input 
+                                type="text"
+                                className="border border-neutral-300 rounded p-1.5 text-sm w-full bg-neutral-50 focus:bg-white focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                                value={tav.datiCartiglio.data}
+                                onChange={(e) => setTavole(tavole.map(t => t.id === tav.id ? {...t, datiCartiglio: {...t.datiCartiglio, data: e.target.value}} : t))}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                      </div>
+                      <div className="p-4 border-t border-neutral-100 bg-neutral-50 flex justify-end gap-2">
+                        <button
+                          onClick={async () => {
+                            const { exportNativePDF } = await import("./utils/pdfExport");
+                            const url = exportNativePDF(entities, tav.format, tav.scale, tav.unit, tav, 'bloburl');
+                            if (url) {
+                              setPdfPreviewUrl(url);
+                            }
+                          }}
+                          className="px-4 py-2 bg-indigo-100 text-indigo-700 hover:text-indigo-800 rounded text-sm font-bold shadow-sm hover:bg-indigo-200 transition-colors flex items-center justify-center gap-1"
+                        >
+                          Anteprima di Stampa
+                        </button>
+                        <button
+                          onClick={() => setDoubleClickedTavolaId(null)}
+                          className="px-4 py-2 bg-indigo-600 text-white rounded text-sm font-bold shadow-sm hover:bg-indigo-700 transition-colors"
+                        >
+                          Chiudi
+                        </button>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
+
+          {pdfPreviewUrl && (
+            <div className="absolute inset-0 bg-black/60 flex items-center justify-center p-6 z-[60] pointer-events-auto">
+              <div className="bg-white rounded-lg shadow-2xl w-full h-full max-w-5xl flex flex-col overflow-hidden">
+                <div className="px-4 py-3 border-b flex items-center justify-between bg-neutral-50 shrink-0">
+                  <h3 className="font-bold text-neutral-800 flex items-center gap-2">
+                    <Printer size={18} className="text-indigo-600" />
+                    Anteprima di Stampa PDF
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => {
+                        const a = document.createElement("a");
+                        a.href = pdfPreviewUrl;
+                        a.download = "anteprima.pdf";
+                        a.click();
+                      }}
+                      className="px-3 py-1.5 bg-neutral-200 hover:bg-neutral-300 text-neutral-800 rounded font-bold text-sm transition-colors"
+                    >
+                      Scarica File
+                    </button>
+                    <button 
+                      onClick={() => setPdfPreviewUrl(null)} 
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded font-bold text-sm transition-colors"
+                    >
+                      Chiudi Anteprima
+                    </button>
+                  </div>
+                </div>
+                <div id="pdf-scroll-container" className="flex-1 overflow-auto bg-neutral-200/50 p-4">
+                  <Document 
+                    file={pdfPreviewUrl} 
+                    onLoadSuccess={() => {
+                      setTimeout(() => {
+                         const container = document.getElementById("pdf-scroll-container");
+                         if (container) {
+                           container.scrollTo({ top: container.scrollHeight, left: container.scrollWidth, behavior: 'smooth' });
+                         }
+                      }, 200);
+                    }}
+                    loading={<div className="text-neutral-500 font-bold p-10 animate-pulse text-center w-full">Generazione PDF in corso...</div>}
+                    error={<div className="text-red-500 p-10 font-bold text-center w-full">Impossibile generare l'anteprima PDF.</div>}
+                    className="flex justify-center min-w-min"
+                  >
+                    <Page 
+                       pageNumber={1} 
+                       renderTextLayer={false} 
+                       renderAnnotationLayer={false}
+                       scale={2.0}
+                       className="shadow-2xl border border-neutral-300"
+                    />
+                  </Document>
+                </div>
+              </div>
+            </div>
+          )}
           
           {/* Subtle watermark overlay for licensing & authenticity */}
           <div className="absolute bottom-4 left-4 bg-white/70 backdrop-blur-sm border border-neutral-300/60 px-3 py-1.5 rounded shadow-sm text-[10px] text-neutral-600 font-mono pointer-events-none select-none flex flex-col z-10">
@@ -726,6 +913,18 @@ export default function App() {
 
                         {/* Action buttons (printable preview) */}
                         <div className="flex gap-2 mt-3 pt-2">
+                          <button
+                            onClick={async () => {
+                              const { exportNativePDF } = await import("./utils/pdfExport");
+                              const url = exportNativePDF(entities, tav.format, tav.scale, tav.unit, tav, 'bloburl');
+                              if (url) {
+                                setPdfPreviewUrl(url);
+                              }
+                            }}
+                            className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-bold py-1.5 px-2 rounded-md text-[10px] transition-colors flex items-center justify-center gap-1 shadow-sm uppercase tracking-wider"
+                          >
+                            Anteprima
+                          </button>
                           <button
                             onClick={async () => {
                               const { exportNativePDF } = await import("./utils/pdfExport");

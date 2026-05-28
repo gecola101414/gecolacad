@@ -16,8 +16,9 @@ export const exportNativePDF = (
   format: string, 
   scaleDenom: number, 
   unit: string,
-  tavola?: TavolaExport
-) => {
+  tavola?: TavolaExport,
+  action: 'download' | 'bloburl' = 'download'
+): string | void => {
   if (entities.length === 0 && !tavola) return;
 
   // Find bounding box
@@ -345,6 +346,19 @@ export const exportNativePDF = (
       let dString = tavola.datiCartiglio?.data || "";
       if(dString.length > MAX_DATA_LEN) dString = dString.substring(0, MAX_DATA_LEN) + "...";
       pdf.text(dString, cartX + cartW * 0.5 + 2.5, cartY + cartH * 0.7 + 10);
+  }
+
+  if (action === 'bloburl') {
+    let url: string = '';
+    // Use output type arraybuffer to create a clean blob URL
+    try {
+        const out = pdf.output('blob');
+        url = URL.createObjectURL(out);
+    } catch(e) {
+        // Fallback to datauristring or raw bloburl
+        url = pdf.output('bloburl').toString();
+    }
+    return url;
   }
 
   const exportName = tavola ? `${tavola.name}.pdf` : 'disegno.pdf';

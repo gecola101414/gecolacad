@@ -261,9 +261,10 @@ interface CADCanvasProps {
   orthoMode?: boolean;
   tavole?: Tavola[];
   onUpdateTavole?: (tavole: Tavola[]) => void;
+  onDoubleClickTavola?: (id: string) => void;
 }
 
-export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, tavole, onUpdateTavole }, ref) => {
+export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, tavole, onUpdateTavole, onDoubleClickTavola }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [view, setView] = useState({ zoom: 1, pan: { x: 0, y: 0 } });
   const [dragTavolaId, setDragTavolaId] = useState<string | null>(null);
@@ -275,6 +276,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const [clonedEntityIds, setClonedEntityIds] = useState<Set<string>>(new Set());
   const holdTimerRef = useRef<NodeJS.Timeout | null>(null);
   const holdStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const lastClickTimeRef = useRef<number>(0);
+  const lastClickPosRef = useRef<{ x: number, y: number } | null>(null);
   const isHoldFiredRef = useRef<boolean>(false);
   const skipToolResetRef = useRef<boolean>(false);
   const isStickyCopyRef = useRef<boolean>(false);
@@ -2604,6 +2607,34 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     const rawPoint = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
     lastMouseRef.current = rawPoint;
 
+    // --- CUSTOM DOUBLE CLICK DETECTION ---
+    const now = Date.now();
+    if (now - lastClickTimeRef.current < 300 && lastClickPosRef.current) {
+        const dx = rawPoint.x - lastClickPosRef.current.x;
+        const dy = rawPoint.y - lastClickPosRef.current.y;
+        if (Math.sqrt(dx * dx + dy * dy) < 20 / view.zoom) {
+            lastClickTimeRef.current = 0; // reset
+            if (activeTool === 'Join') {
+                confirmJoin();
+                return;
+            } else if (tavole && onDoubleClickTavola) {
+                for (let i = tavole.length - 1; i >= 0; i--) {
+                  const tav = tavole[i];
+                  if (!tav.visible) continue;
+                  const { w, h } = getTavolaDimensions(tav);
+                  if (rawPoint.x >= tav.position.x && rawPoint.x <= tav.position.x + w &&
+                      rawPoint.y >= tav.position.y && rawPoint.y <= tav.position.y + h) {
+                    onDoubleClickTavola(tav.id);
+                    setDrawing(null);
+                    return; 
+                  }
+                }
+            }
+        }
+    }
+    lastClickTimeRef.current = now;
+    lastClickPosRef.current = rawPoint;
+
     // --- TAVOLA GESTURE DRAG INTERCEPT ---
     let hitTavolaId: string | null = null;
     if (tavole) {
@@ -4001,7 +4032,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       onMouseMove={handleMouseMove} 
       onMouseUp={handleMouseUp} 
       onContextMenu={handleContextMenu}
-      onDoubleClick={() => { if (activeTool === 'Join') confirmJoin(); }}
     >
       <canvas ref={canvasRef} />
       
