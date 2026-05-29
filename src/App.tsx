@@ -9,6 +9,8 @@ import { CADCanvas } from "./components/CADCanvas";
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 import { DimensionStyleDialog } from "./components/DimensionStyleDialog";
+import { TemplatePreview } from "./components/TemplatePreview";
+import { TEMPLATES } from './data/templates';
 import { Entity, Point, Layer, Measurement, Tavola } from "./types";
 import { mergeAllSegments } from "./utils/entityUtils";
 import {
@@ -65,6 +67,7 @@ export default function App() {
     { id: "p1", name: "p1", visible: true, frozen: false },
     { id: "p2", name: "p2", visible: true, frozen: false },
     { id: "p4", name: "p4", visible: true, frozen: false },
+    { id: "Maschere", name: "Maschere", visible: true, frozen: false },
     { id: "Misure", name: "Misure", visible: true, frozen: false },
     { id: "Spessori", name: "Spessori", visible: true, frozen: false },
   ]);
@@ -92,7 +95,8 @@ export default function App() {
     { id: "tav4", name: "Tavola n. 4", format: "A1", scale: 500, unit: "cm", position: { x: 40, y: 30 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 4", autore: "Ing. Domenico Gimondo", data: "2026" } },
     { id: "tav5", name: "Tavola n. 5", format: "A0", scale: 1000, unit: "cm", position: { x: 0, y: 0 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 5", autore: "Ing. Domenico Gimondo", data: "2026" } },
   ]);
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers'>('penne');
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere'>('penne');
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [editingCartiglioTavolaId, setEditingCartiglioTavolaId] = useState<string | null>(null);
   const [doubleClickedTavolaId, setDoubleClickedTavolaId] = useState<string | null>(null);
@@ -160,6 +164,24 @@ export default function App() {
   }, [isDragging, toolboxPos]);
 
   const handleRightClickShortcut = (e: React.MouseEvent) => {
+    // If in Template tool, try rotating first
+    if (selectedTool === 'Template' || selectedTool === 'Select') {
+        const rotated = cadCanvasRef.current?.rotateMaskAtPoint(e);
+        if (rotated) {
+            e.preventDefault();
+            return;
+        }
+    }
+
+    // If in Template tool and didn't rotate, cancel it and switch to Select
+    if (selectedTool === 'Template') {
+      setSelectedTool('Select');
+      setSelectedTemplateId(null);
+      setShortcutToast("Strumento: Selezione (Magneti)");
+      setTimeout(() => setShortcutToast(null), 1500);
+      return;
+    }
+
     // If not in a drawing tool, switch to Line
     if (!["Line", "Circle", "Arc", "Rectangle", "Point", "Dimension"].includes(selectedTool)) {
       setSelectedCategory("Disegno");
@@ -333,6 +355,20 @@ export default function App() {
           <Pen size={16} />
           <span className="text-[10px]">Penne</span>
         </button>
+        <button
+          onClick={() => {
+            if (activeSidebarTab === 'maschere' && showProperties) {
+              setShowProperties(false);
+            } else {
+              setActiveSidebarTab('maschere');
+              setShowProperties(true);
+            }
+          }}
+          className={`px-4 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 ${showProperties && activeSidebarTab === 'maschere' ? "bg-neutral-100 text-indigo-600 font-bold" : "hover:bg-neutral-200"}`}
+        >
+          <Square size={16} />
+          <span className="text-[10px]">Maschere</span>
+        </button>
         <div className="flex-1"></div>
         <button
           onClick={() => {
@@ -453,6 +489,8 @@ export default function App() {
             tavole={tavole}
             onUpdateTavole={setTavole}
             onDoubleClickTavola={setDoubleClickedTavolaId}
+            selectedTemplateId={selectedTemplateId}
+            selectedEntityId={selectedId}
           />
           
           {doubleClickedTavolaId && !pdfPreviewUrl && (
@@ -655,7 +693,7 @@ export default function App() {
           <div className="w-80 bg-white border-l border-neutral-300 p-4 transition-all overflow-y-auto flex flex-col h-full">
             <h3 className="font-bold mb-4 flex justify-between items-center text-neutral-800 border-b border-neutral-100 pb-2">
               <span className="text-xs font-black uppercase tracking-wider font-mono">
-                {activeSidebarTab === "tavole" ? "Gestione Tavole" : activeSidebarTab === "layers" ? "Gestione Layers" : "Mazzo Penne & Stili"}
+                {activeSidebarTab === "tavole" ? "Gestione Tavole" : activeSidebarTab === "layers" ? "Gestione Layers" : activeSidebarTab === "maschere" ? "Archivio Maschere" : "Mazzo Penne & Stili"}
               </span>
               <button 
                 onClick={() => setShowProperties(false)} 
@@ -666,7 +704,53 @@ export default function App() {
             </h3>
 
             <div className="space-y-4 flex-1">
-              {activeSidebarTab === "penne" ? (
+              {activeSidebarTab === "maschere" ? (
+                <div className="space-y-6">
+                  <div className="bg-amber-100/50 border border-amber-200 p-3 rounded-lg shadow-sm">
+                    <p className="text-[10px] text-amber-800 leading-relaxed font-serif italic">
+                      <strong>TRASFERELLI REBER R41:</strong><br/>
+                      Seleziona e clicca, oppure trascina l'elemento nel disegno. Una volta inserito, usa lo strumento <strong>Selezione</strong> per spostarlo liberamente proprio come un foglio di trasferibili.
+                    </p>
+                  </div>
+                  {['Arredi', 'Bagno', 'Verde', 'Persone', 'Mezzi'].map(cat => (
+                    <div key={cat}>
+                      <h4 className="text-[10px] uppercase font-black text-neutral-400 mb-3 tracking-widest border-b border-neutral-100 pb-1 flex justify-between items-center">
+                        {cat}
+                        <span className="text-[8px] font-normal lowercase opacity-50 px-2 bg-neutral-50 rounded">In scala cm</span>
+                      </h4>
+                      <div className="grid grid-cols-2 gap-2">
+                        {TEMPLATES.filter(t => t.category === cat).map(template => (
+                          <button
+                            key={template.id}
+                            draggable
+                            onDragStart={(e) => {
+                              setSelectedTemplateId(template.id);
+                              setSelectedTool('Template');
+                              e.dataTransfer.setData('text/plain', template.id);
+                            }}
+                            onClick={() => {
+                              setSelectedTemplateId(template.id);
+                              setSelectedTool('Template');
+                            }}
+                            className={`flex flex-col items-center justify-center p-3 rounded-md transition-all border group relative overflow-hidden ${selectedTemplateId === template.id && selectedTool === 'Template' ? "bg-white border-indigo-500 ring-2 ring-indigo-100" : "bg-neutral-50 border-neutral-200 hover:border-neutral-300 hover:bg-white"}`}
+                          >
+                            <div className="mb-2 transform scale-75 group-hover:scale-100 transition-transform duration-300">
+                                <TemplatePreview template={template} size={48} />
+                            </div>
+                            <span className={`text-[9px] font-bold text-center leading-tight ${selectedTemplateId === template.id && selectedTool === 'Template' ? "text-indigo-600" : "text-neutral-500"}`}>
+                              {template.name}
+                            </span>
+                            <div className={`absolute top-0 right-0 px-1 text-white text-[7px] font-black uppercase ${template.view === 'prospetto' ? "bg-orange-500" : "bg-indigo-400"}`}>
+                                {template.view === 'prospetto' ? 'Front' : 'Pianta'}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  <div className="h-20"></div>
+                </div>
+              ) : activeSidebarTab === "penne" ? (
                 selectedEntity ? (
                   <>
                     <label className="block text-sm">
@@ -731,54 +815,74 @@ export default function App() {
                     )}
                   </>
                 ) : (
-                  <>
-                    <label className="block text-sm">
-                      Stile Default:
-                      <div className="flex gap-2 mt-1">
-                        <button
-                          onClick={() =>
-                            setDefaultLineStyle({
-                              ...defaultLineStyle,
-                              mode: "ink",
-                            })
-                          }
-                          className={`p-2 rounded flex-1 text-xs font-bold ${defaultLineStyle.mode === "ink" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
-                        >
-                          Schizzo
-                        </button>
-                        <button
-                          onClick={() =>
-                            setDefaultLineStyle({
-                              ...defaultLineStyle,
-                              mode: "pencil",
-                            })
-                          }
-                          className={`p-2 rounded flex-1 text-xs font-bold ${defaultLineStyle.mode === "pencil" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
-                        >
-                          Kina
-                        </button>
-                      </div>
-                    </label>
-                    <label className="block text-sm">
-                      Seleziona Pennino:
-                      <div className="flex gap-2 mt-1">
-                        {[1, 2.5, 4].map((w) => (
+                  <div className="space-y-6">
+                    <div className="bg-neutral-800 text-neutral-100 p-3 rounded-lg shadow-lg border border-neutral-700">
+                      <p className="text-[10px] leading-tight font-mono opacity-80">
+                        <span className="text-amber-400 font-bold">PENNE TECNICHE:</span><br/>
+                        Scegli lo spessore del pennino. Il layer viene aggiornato automaticamente in base alla selezione.
+                      </p>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest flex items-center gap-2">
+                           <Sparkles size={10} /> Stile Tratto
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
                           <button
-                            key={w}
                             onClick={() =>
-                              setDefaultLineStyle({
-                                ...defaultLineStyle,
-                                lineWidth: w,
-                              })
+                              setDefaultLineStyle(prev => ({ ...prev, mode: "ink" }))
                             }
-                            className={`p-2 rounded flex-1 text-xs font-bold ${defaultLineStyle.lineWidth === w ? "bg-indigo-600 text-white" : "bg-neutral-200 text-neutral-900 border border-neutral-400"}`}
+                            className={`p-3 rounded-lg border text-left transition-all ${defaultLineStyle.mode === "ink" ? "bg-amber-50 border-amber-300 ring-4 ring-amber-100" : "bg-neutral-50 border-neutral-200 hover:border-neutral-300"}`}
                           >
-                            p{w === 1 ? '1' : w === 2.5 ? '2' : '4'} ({w} mm)
+                            <span className={`block text-xs font-black ${defaultLineStyle.mode === "ink" ? "text-amber-800" : "text-neutral-500"}`}>Schizzo</span>
+                            <span className="text-[9px] text-neutral-400 font-medium">Matita morbida</span>
                           </button>
-                        ))}
+                          <button
+                            onClick={() =>
+                              setDefaultLineStyle(prev => ({ ...prev, mode: "pencil" }))
+                            }
+                            className={`p-3 rounded-lg border text-left transition-all ${defaultLineStyle.mode === "pencil" ? "bg-neutral-900 border-neutral-700 ring-4 ring-neutral-200" : "bg-neutral-50 border-neutral-200 hover:border-neutral-300"}`}
+                          >
+                            <span className={`block text-xs font-black ${defaultLineStyle.mode === "pencil" ? "text-white" : "text-neutral-500"}`}>Kina</span>
+                            <span className="text-[9px] text-neutral-400 font-medium">Tratto tecnico</span>
+                          </button>
+                        </div>
                       </div>
-                    </label>
-                  </>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest flex items-center gap-2">
+                           <Pen size={10} /> Spessore Pennino
+                        </label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {[1, 2.5, 4].map((w) => (
+                            <button
+                              key={w}
+                              onClick={() =>
+                                setDefaultLineStyle(prev => ({ ...prev, lineWidth: w }))
+                              }
+                              className={`p-2.5 rounded-lg border transition-all flex flex-col items-center justify-center gap-1 ${defaultLineStyle.lineWidth === w ? "bg-white border-indigo-500 ring-4 ring-indigo-50 shadow-md transform -translate-y-0.5" : "bg-neutral-50 border-neutral-200 hover:bg-white"}`}
+                            >
+                              <div 
+                                className="w-full h-1 bg-neutral-800 rounded-full mb-1" 
+                                style={{ height: `${w * 0.7}px`, opacity: defaultLineStyle.lineWidth === w ? 1 : 0.3 }} 
+                              />
+                              <span className={`text-[10px] font-bold ${defaultLineStyle.lineWidth === w ? "text-indigo-600" : "text-neutral-500"}`}>
+                                p{w === 1 ? '1' : w === 2.5 ? '2' : '4'}
+                              </span>
+                              <span className="text-[8px] text-neutral-400">{w}mm</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="pt-4 border-t border-neutral-100 italic">
+                      <p className="text-[9px] text-neutral-400 leading-relaxed text-center">
+                        Usa il tasto destro sul foglio per alternare velocemente tra Schizzo e Kina.
+                      </p>
+                    </div>
+                  </div>
                 )
               ) : activeSidebarTab === 'layers' ? (
                   <div className="space-y-4">

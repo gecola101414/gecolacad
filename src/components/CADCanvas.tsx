@@ -1,9 +1,11 @@
 import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 'react';
-import { Entity, Point, Layer, LineEntity, CircleEntity, ArcEntity, RectEntity, InkPoint, Tavola, DimensionEntity } from '../types';
+import { Entity, Point, Layer, LineEntity, CircleEntity, ArcEntity, RectEntity, InkPoint, Tavola, DimensionEntity, PointEntity } from '../types';
 import { ManualInputOverlay } from './ManualInputOverlay';
+import { TEMPLATES, Template } from '../data/templates';
 
 export interface CADCanvasAPI {
   getCurrentMousePosition: () => Point;
+  rotateMaskAtPoint: (e: React.MouseEvent) => boolean;
 }
 
 const normalizeAngle = (a: number) => {
@@ -262,9 +264,11 @@ interface CADCanvasProps {
   tavole?: Tavola[];
   onUpdateTavole?: (tavole: Tavola[]) => void;
   onDoubleClickTavola?: (id: string) => void;
+  selectedTemplateId?: string | null;
+  selectedEntityId?: string | null;
 }
 
-export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, tavole, onUpdateTavole, onDoubleClickTavola }, ref) => {
+export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [view, setView] = useState({ zoom: 0.15, pan: { x: window.innerWidth > 0 ? (window.innerWidth / 2) - 150 : 250, y: window.innerHeight > 0 ? (window.innerHeight / 2) - 220 : 80 } });
   const [dragTavolaId, setDragTavolaId] = useState<string | null>(null);
@@ -353,6 +357,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const mouseScreenPosRef = useRef<Point>({ x: 0, y: 0 });
   const [isLocked, setIsLocked] = useState(false);
   const [positioningDimId, setPositioningDimId] = useState<string | null>(null);
+  const [positioningGroupId, setPositioningGroupId] = useState<string | null>(null);
+  const [positioningGroupStartPos, setPositioningGroupStartPos] = useState<Point | null>(null);
   const [showManualInput, setShowManualInput] = useState(false);
   const [bubblePosition, setBubblePosition] = useState<Point | null>(null);
   const lastMouseRef = useRef<Point>({ x: 0, y: 0 });
@@ -515,8 +521,75 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   }, []);
 
   useImperativeHandle(ref, () => ({
-    getCurrentMousePosition: () => lastMouseRef.current
+    getCurrentMousePosition: () => lastMouseRef.current,
+    rotateMaskAtPoint: (e: React.MouseEvent) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return false;
+      const rect = canvas.getBoundingClientRect();
+      const rawPoint = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
+      const found = getEntityAtPoint(rawPoint);
+      if (found && found.groupId) {
+        const direction = e.altKey ? -1 : 1;
+        rotateGroup(found.groupId, 90 * direction);
+        return true;
+      }
+      return false;
+    }
   }));
+
+  const rotateGroup = (groupId: string, angleDegrees: number) => {
+    const groupEntities = entities.filter(ent => ent.groupId === groupId);
+    if (groupEntities.length === 0) return;
+
+    // Calculate center of group (average of all key points)
+    let sumX = 0, sumY = 0, count = 0;
+    groupEntities.forEach(ent => {
+        const pts = getEntityKeyPoints(ent);
+        pts.forEach(p => {
+            sumX += p.x;
+            sumY += p.y;
+            count++;
+        });
+    });
+    if (count === 0) return;
+    const center = { x: sumX / count, y: sumY / count };
+
+    const rad = angleDegrees * Math.PI / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+
+    const rotatePoint = (p: Point): Point => ({
+      x: center.x + (p.x - center.x) * cos - (p.y - center.y) * sin,
+      y: center.y + (p.x - center.x) * sin + (p.y - center.y) * cos
+    });
+
+    const updater = (prev: Entity[]) => prev.map(ent => {
+      if (ent.groupId === groupId) {
+        if (ent.type === 'line' || ent.type === 'dimension') {
+          return { ...ent, start: rotatePoint(ent.start), end: rotatePoint(ent.end) };
+        } else if (ent.type === 'circle' || ent.type === 'arc') {
+          const newCenter = rotatePoint(ent.center);
+          if (ent.type === 'arc') {
+            return { 
+                ...ent, 
+                center: newCenter, 
+                startAngle: normalizeAngle(ent.startAngle + angleDegrees), 
+                endAngle: normalizeAngle(ent.endAngle + angleDegrees) 
+            };
+          }
+          return { ...ent, center: newCenter };
+        } else if (ent.type === 'rectangle') {
+          return { ...ent, p1: rotatePoint(ent.p1), p2: rotatePoint(ent.p2) };
+        } else if (ent.type === 'point') {
+          return { ...ent, point: rotatePoint(ent.point) };
+        }
+      }
+      return ent;
+    });
+
+    setEntities(updater);
+    onCommitHistory?.(updater(entities));
+  };
 
   const screenToCanvas = (x: number, y: number): Point => {
     return {
@@ -641,42 +714,39 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         });
 
         // 2. Line Extension Snaps (Specific to inclined lines or existing orientations)
-        visibleEntities.forEach(entity => {
-            if (entity.type === 'line') {
-                const line = entity as LineEntity;
-                const dx = line.end.x - line.start.x;
-                const dy = line.end.y - line.start.y;
-                const L = Math.sqrt(dx * dx + dy * dy);
-                if (L < 0.1) return;
+        // DISABLE extension snaps if orthoMode is on, to keep everything horizontal/vertical
+        if (!orthoMode) {
+            visibleEntities.forEach(entity => {
+                if (entity.type === 'line') {
+                    const line = entity as LineEntity;
+                    const dx = line.end.x - line.start.x;
+                    const dy = line.end.y - line.start.y;
+                    const L = Math.sqrt(dx * dx + dy * dy);
+                    if (L < 0.1) return;
 
-                const nx = -dy / L;
-                const ny = dx / L;
-                
-                // Infinite line distance
-                const dist = (point.x - line.start.x) * nx + (point.y - line.start.y) * ny;
-                if (Math.abs(dist) < threshold) {
-                    // Snap point on mapping
-                    const snapPt = { x: point.x - nx * dist, y: point.y - ny * dist };
+                    const nx = -dy / L;
+                    const ny = dx / L;
                     
-                    // Determine if we are near the trajectory (not just the line itself)
-                    // We also want to prefer endpoints as reference for the extension guide
-                    const dStart = Math.sqrt((snapPt.x - line.start.x) ** 2 + (snapPt.y - line.start.y) ** 2);
-                    const dEnd = Math.sqrt((snapPt.x - line.end.x) ** 2 + (snapPt.y - line.end.y) ** 2);
-                    const refPoint = dStart < dEnd ? line.start : line.end;
+                    const dist = (point.x - line.start.x) * nx + (point.y - line.start.y) * ny;
+                    if (Math.abs(dist) < threshold) {
+                        const snapPt = { x: point.x - nx * dist, y: point.y - ny * dist };
+                        const dStart = Math.sqrt((snapPt.x - line.start.x) ** 2 + (snapPt.y - line.end.x) ** 2);
+                        const dEnd = Math.sqrt((snapPt.x - line.end.x) ** 2 + (snapPt.y - line.end.y) ** 2);
+                        const refPoint = dStart < dEnd ? line.start : line.end;
 
-                    // Only add extension snap if it's not redundant with ortho snaps
-                    const ang = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 180;
-                    if (Math.abs(ang - 0) > 0.5 && Math.abs(ang - 90) > 0.5 && Math.abs(ang - 180) > 0.5) {
-                        snaps.push({
-                            point: snapPt,
-                            type: 'smart',
-                            refPoint: refPoint,
-                            refEntityId: line.id
-                        });
+                        const ang = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 180;
+                        if (Math.abs(ang - 0) > 0.5 && Math.abs(ang - 90) > 0.5 && Math.abs(ang - 180) > 0.5) {
+                            snaps.push({
+                                point: snapPt,
+                                type: 'smart',
+                                refPoint: refPoint,
+                                refEntityId: line.id
+                            });
+                        }
                     }
                 }
-            }
-        });
+            });
+        }
     }
     
     return snaps;
@@ -942,7 +1012,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             ctx.shadowBlur = 10 * flashIntensity;
         }
 
-        if ((entity.id === selectedParallelLine?.id && blink)) {
+        if ((entity.id === selectedParallelLine?.id && blink) || (selectedEntityId === entity.id) || (positioningGroupId && entity.groupId === positioningGroupId)) {
           ctx.strokeStyle = '#fbbf24'; // Amber highlight
           ctx.lineWidth = (entity.lineWidth + 2) / view.zoom;
         } else if ((dragEntityIds.includes(entity.id) || entity.id === highlightedTrimLine?.id) && (activeTool === 'Move' || activeTool === 'Cancella' || activeTool === 'Join' || activeTool === 'Copy')) {
@@ -959,7 +1029,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         let highlightColor = ctx.strokeStyle;
         if (isFlashing) {
              isHighlighted = true;
-        } else if ((entity.id === selectedParallelLine?.id && blink)) {
+        } else if ((entity.id === selectedParallelLine?.id && blink) || (selectedEntityId === entity.id) || (positioningGroupId && entity.groupId === positioningGroupId)) {
              isHighlighted = true;
         } else if ((dragEntityIds.includes(entity.id) || entity.id === highlightedTrimLine?.id) && (activeTool === 'Move' || activeTool === 'Cancella' || activeTool === 'Join' || activeTool === 'Copy')) {
              isHighlighted = true;
@@ -1448,6 +1518,33 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             const midY = (drawing.start.y + drawing.current.y) / 2;
             ctx.fillText(`${matchedAngle}°`, midX, midY - 6 / view.zoom);
             ctx.restore();
+        }
+
+        // --- TEMPLATE PREVIEW ---
+        if (activeTool === 'Template' && selectedTemplateId && hoverSnap) {
+            const template = TEMPLATES.find(t => t.id === selectedTemplateId);
+            if (template) {
+                ctx.save();
+                ctx.strokeStyle = (defaultLineStyle.mode === 'ink') ? '#555555' : '#000000';
+                ctx.lineWidth = defaultLineStyle.lineWidth / view.zoom;
+                ctx.globalAlpha = 0.5;
+                
+                const basePos = hoverSnap.point;
+                
+                template.entities.forEach(te => {
+                    ctx.beginPath();
+                    if (te.type === 'line') {
+                        ctx.moveTo(basePos.x + te.start.x, basePos.y + te.start.y);
+                        ctx.lineTo(basePos.x + te.end.x, basePos.y + te.end.y);
+                    } else if (te.type === 'circle') {
+                        ctx.arc(basePos.x + te.center.x, basePos.y + te.center.y, te.radius, 0, Math.PI * 2);
+                    } else if (te.type === 'arc') {
+                        ctx.arc(basePos.x + te.center.x, basePos.y + te.center.y, te.radius, te.startAngle * Math.PI / 180, te.endAngle * Math.PI / 180);
+                    }
+                    ctx.stroke();
+                });
+                ctx.restore();
+            }
         }
 
         // Render snap indicator
@@ -3045,8 +3142,16 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         return;
     }
 
+    if (positioningGroupId) {
+        setPositioningGroupId(null);
+        setPositioningGroupStartPos(null);
+        setEntities(prev => { onCommitHistory?.(prev); return prev; });
+        onSelect(null);
+        return;
+    }
+
     const isFreehandActive = activeTool === 'Line' && defaultLineStyle.mode === 'ink' && !orthoMode;
-    const snapped = isFreehandActive
+    const snapped = (isFreehandActive || (activeTool === 'Template' && !drawing))
         ? { point: rawPoint, snapped: false, type: 'standard' as const, refPoint: undefined, constraintAxis: undefined, refPoint2: undefined, constraintAxis2: undefined, hasDoubleSmart: false }
         : getSnappedPoint(rawPoint, entities, activeTool, drawing);
 
@@ -3056,6 +3161,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             onSelect(found.id);
             if (found.type === 'dimension') {
                 setPositioningDimId(found.id);
+            } else if (found.groupId) {
+                // Seleziona tutto il gruppo e attiva lo spostamento "appiccicoso"
+                setPositioningGroupId(found.groupId);
+                setPositioningGroupStartPos(rawPoint);
             }
         } else {
             onSelect(null);
@@ -3190,6 +3299,63 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                     return;
                 }
             }
+        }
+    } else if (activeTool === 'Template' && selectedTemplateId) {
+        // Magnetic behavior: if clicking on an existing mask (group), move it instead of placing new one
+        const found = getEntityAtPoint(rawPoint);
+        if (found && found.groupId) {
+            setPositioningGroupId(found.groupId);
+            setPositioningGroupStartPos(rawPoint);
+            onSelect(found.id);
+            return;
+        }
+
+        const template = TEMPLATES.find(t => t.id === selectedTemplateId);
+        if (template) {
+            const maskLayerId = layers.find(l => l.name === 'Maschere')?.id || activeLayerId;
+            const groupId = 'group_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
+            const newEntities: Entity[] = template.entities.map(te => {
+                const baseProps = {
+                    id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5),
+                    color: defaultLineStyle.color,
+                    lineWidth: defaultLineStyle.lineWidth,
+                    layer: maskLayerId,
+                    mode: defaultLineStyle.mode,
+                    groupId
+                };
+                
+                if (te.type === 'line') {
+                    return {
+                        ...baseProps,
+                        type: 'line',
+                        start: { x: snapped.point.x + te.start.x, y: snapped.point.y + te.start.y },
+                        end: { x: snapped.point.x + te.end.x, y: snapped.point.y + te.end.y },
+                    } as LineEntity;
+                } else if (te.type === 'circle') {
+                    return {
+                        ...baseProps,
+                        type: 'circle',
+                        center: { x: snapped.point.x + te.center.x, y: snapped.point.y + te.center.y },
+                        radius: te.radius
+                    } as CircleEntity;
+                } else if (te.type === 'arc') {
+                    return {
+                        ...baseProps,
+                        type: 'arc',
+                        center: { x: snapped.point.x + te.center.x, y: snapped.point.y + te.center.y },
+                        radius: te.radius,
+                        startAngle: te.startAngle,
+                        endAngle: te.endAngle
+                    } as ArcEntity;
+                }
+                return null;
+            }).filter(e => e !== null) as Entity[];
+
+            setEntities(prev => {
+                const next = [...prev, ...newEntities];
+                onCommitHistory?.(next);
+                return next;
+            });
         }
     } else if (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle' || activeTool === 'Point' || activeTool === 'Arc') {
       const wasLocked = isLocked;
@@ -3857,6 +4023,44 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         return;
     }
 
+    if (positioningGroupId && positioningGroupStartPos) {
+        const dx = rawPoint.x - positioningGroupStartPos.x;
+        const dy = rawPoint.y - positioningGroupStartPos.y;
+        setPositioningGroupStartPos(rawPoint);
+
+        const updater = (prev: Entity[]) => prev.map(ent => {
+            if (ent.groupId === positioningGroupId) {
+                if (ent.type === 'line' || ent.type === 'dimension') {
+                    return {
+                        ...ent,
+                        start: { x: ent.start.x + dx, y: ent.start.y + dy },
+                        end: { x: ent.end.x + dx, y: ent.end.y + dy }
+                    };
+                } else if (ent.type === 'circle' || ent.type === 'arc') {
+                    return {
+                        ...ent,
+                        center: { x: ent.center.x + dx, y: ent.center.y + dy }
+                    };
+                } else if (ent.type === 'rectangle') {
+                    return {
+                        ...ent,
+                        p1: { x: ent.p1.x + dx, y: ent.p1.y + dy },
+                        p2: { x: ent.p2.x + dx, y: ent.p2.y + dy }
+                    };
+                } else if (ent.type === 'point') {
+                    return {
+                        ...ent,
+                        point: { x: ent.point.x + dx, y: ent.point.y + dy }
+                    };
+                }
+            }
+            return ent;
+        });
+        if (setEntitiesSilent) setEntitiesSilent(updater);
+        else setEntities(updater);
+        return;
+    }
+
     if (drawing) {
       if (isLocked) return;
 
@@ -3969,9 +4173,13 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
             const snapped = getSnappedPoint(finalPoint, entities, activeTool, drawing);
             let snappedPoint = snapped.point;
-            if (activeTool === 'Line' && orthoMode) {
+            if (activeTool === 'Line' && orthoMode && !snapped.snapped) {
               // absolute rigidity of Ortho line: project snapping back onto orthogonal coordinate
               snappedPoint = isOrthoHorizontal ? { x: snappedPoint.x, y: drawing.start.y } : { x: drawing.start.x, y: snappedPoint.y };
+            }
+            // If it's a smart snap while in ortho mode, ensure it stays orthogonal if it's alignment-based
+            if (activeTool === 'Line' && orthoMode && snapped.snapped && snapped.type === 'smart') {
+                snappedPoint = isOrthoHorizontal ? { x: snappedPoint.x, y: drawing.start.y } : { x: drawing.start.x, y: snappedPoint.y };
             }
 
             setDrawing({ 
@@ -4503,6 +4711,72 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
   const tecnigrafoSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg"><rect x="38" y="108" width="90" height="16" fill="rgba(212,163,115,0.7)" stroke="#8b5a2b" stroke-width="1"/><rect x="38" y="108" width="90" height="6" fill="rgba(255,255,255,0.7)" stroke="#8b5a2b" stroke-width="0.5"/><line x1="40" y1="108" x2="40" y2="112" stroke="black" stroke-width="1"/><line x1="50" y1="108" x2="50" y2="114" stroke="black" stroke-width="1.5"/><line x1="60" y1="108" x2="60" y2="112" stroke="black" stroke-width="1"/><line x1="70" y1="108" x2="70" y2="112" stroke="black" stroke-width="1"/><line x1="80" y1="108" x2="80" y2="114" stroke="black" stroke-width="1.5"/><line x1="90" y1="108" x2="90" y2="112" stroke="black" stroke-width="1"/><line x1="100" y1="108" x2="100" y2="112" stroke="black" stroke-width="1"/><line x1="110" y1="108" x2="110" y2="114" stroke="black" stroke-width="1.5"/><line x1="120" y1="108" x2="120" y2="112" stroke="black" stroke-width="1"/><rect x="4" y="0" width="16" height="90" fill="rgba(212,163,115,0.7)" stroke="#8b5a2b" stroke-width="1"/><rect x="14" y="0" width="6" height="90" fill="rgba(255,255,255,0.7)" stroke="#8b5a2b" stroke-width="0.5"/><line x1="20" y1="88" x2="16" y2="88" stroke="black" stroke-width="1"/><line x1="20" y1="78" x2="14" y2="78" stroke="black" stroke-width="1.5"/><line x1="20" y1="68" x2="16" y2="68" stroke="black" stroke-width="1"/><line x1="20" y1="58" x2="16" y2="58" stroke="black" stroke-width="1"/><line x1="20" y1="48" x2="14" y2="48" stroke="black" stroke-width="1.5"/><line x1="20" y1="38" x2="16" y2="38" stroke="black" stroke-width="1"/><line x1="20" y1="28" x2="16" y2="28" stroke="black" stroke-width="1"/><line x1="20" y1="18" x2="14" y2="18" stroke="black" stroke-width="1.5"/><line x1="20" y1="8" x2="16" y2="8" stroke="black" stroke-width="1"/><circle cx="20" cy="108" r="18" fill="transparent" stroke="rgba(50,50,50,0.6)" stroke-width="1"/><line x1="8" y1="108" x2="32" y2="108" stroke="rgba(255,0,0,0.8)" stroke-width="1"/><line x1="20" y1="96" x2="20" y2="120" stroke="rgba(255,0,0,0.8)" stroke-width="1"/></svg>`);
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const templateId = e.dataTransfer.getData('text/plain');
+    if (!templateId) return;
+
+    const template = TEMPLATES.find(t => t.id === templateId);
+    if (!template) return;
+
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    const dropPoint = screenToCanvas(mouseX, mouseY);
+
+    const maskLayerId = layers.find(l => l.name === 'Maschere')?.id || activeLayerId;
+    const groupId = 'group_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
+    const newEntities: Entity[] = template.entities.map(te => {
+        const baseProps = {
+            id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5),
+            color: defaultLineStyle.color,
+            lineWidth: defaultLineStyle.lineWidth,
+            layer: maskLayerId,
+            mode: defaultLineStyle.mode,
+            groupId
+        };
+        
+        if (te.type === 'line') {
+            return {
+                ...baseProps,
+                type: 'line',
+                start: { x: dropPoint.x + te.start.x, y: dropPoint.y + te.start.y },
+                end: { x: dropPoint.x + te.end.x, y: dropPoint.y + te.end.y },
+            };
+        } else if (te.type === 'circle') {
+            return {
+                ...baseProps,
+                type: 'circle',
+                center: { x: dropPoint.x + te.center.x, y: dropPoint.y + te.center.y },
+                radius: te.radius
+            };
+        } else if (te.type === 'arc') {
+            return {
+                ...baseProps,
+                type: 'arc',
+                center: { x: dropPoint.x + te.center.x, y: dropPoint.y + te.center.y },
+                radius: te.radius,
+                startAngle: te.startAngle,
+                endAngle: te.endAngle
+            };
+        }
+        return null;
+    }).filter(e => e !== null) as Entity[];
+
+    setEntities(prev => {
+        const next = [...prev, ...newEntities];
+        onCommitHistory?.(next);
+        return next;
+    });
+  };
+
   const scissorsSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="5" cy="7.5" r="3" stroke="#64748b" stroke-width="1.5"/><circle cx="5" cy="16.5" r="3" stroke="#64748b" stroke-width="1.5"/><path d="M7.5 9L12 12L22 9" stroke="#64748b" stroke-width="1.5" stroke-linecap="round"/><path d="M7.5 15L12 12L22 15" stroke="#64748b" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="12" r="1.2" fill="#475569"/></svg>`);
   
   const pencilSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M0,0 L3,1 L1,3 Z" fill="#1e293b"/><path d="M3,1 L7,3 L3,7 L1,3 Z" fill="#fed7aa"/><path d="M7,3 L21,17 L17,21 L3,7 Z" fill="#4f46e5"/><path d="M7,3 L21,17 L19,19 L5,5 Z" fill="#6366f1"/><path d="M21,17 L24,20 L20,24 L17,21 Z" fill="#94a3b8"/><path d="M24,20 L28,24 L24,28 L20,24 Z" fill="#fda4af"/></svg>`);
@@ -4519,6 +4793,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       onMouseMove={handleMouseMove} 
       onMouseUp={handleMouseUp} 
       onContextMenu={handleContextMenu}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
     >
       <canvas ref={canvasRef} />
       
