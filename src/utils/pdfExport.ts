@@ -95,7 +95,13 @@ export const exportNativePDF = (
   const pdf = new jsPDF({
     orientation: drawingWidth > drawingHeight ? 'landscape' : 'portrait',
     unit: 'mm',
-    format: chosenFormat.toLowerCase()
+    format: chosenFormat.toLowerCase(),
+    putOnlyUsedFonts: true
+  });
+
+  // Suggest 'Actual Size' to the printer to avoid 3.8cm/4.0cm scaling errors
+  pdf.viewerPreferences({
+    'PrintScaling': 'None'
   });
 
   const unitToMm = {

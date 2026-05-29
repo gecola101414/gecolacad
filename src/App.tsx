@@ -1119,6 +1119,10 @@ export default function App() {
                             <span>Salva PDF</span>
                           </button>
                         </div>
+                        <div className="mt-2 text-[9px] text-amber-700 bg-amber-50 p-1.5 rounded border border-amber-200">
+                           <span className="font-bold">⚠️ SCALA DI STAMPA:</span><br/>
+                           Per mantenere la scala reale (es. 400cm = 4cm su carta), imposta <span className="font-bold underline italic">"Scala: 100%"</span> o <span className="font-bold underline italic">"Dimensioni Effettive"</span> nel pannello di stampa. Evita "Adatta alla pagina".
+                        </div>
                       </div>
                     ))}
                   </div>
