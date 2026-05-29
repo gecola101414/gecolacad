@@ -61,17 +61,19 @@ export default function App() {
   const [selectedTool, setSelectedTool] = useState("Line");
   const [entities, setEntities] = useState<Entity[]>([]);
   const [layers, setLayers] = useState<Layer[]>([
-    { id: "Layer 0", name: "Layer 0", visible: true, frozen: false },
+    { id: "0", name: "0", visible: true, frozen: false },
+    { id: "p1", name: "p1", visible: true, frozen: false },
+    { id: "p2", name: "p2", visible: true, frozen: false },
+    { id: "p4", name: "p4", visible: true, frozen: false },
     { id: "Misure", name: "Misure", visible: true, frozen: false },
     { id: "Spessori", name: "Spessori", visible: true, frozen: false },
-    { id: "Schizzo", name: "Schizzo", visible: true, frozen: false },
   ]);
-  const [activeLayerId, setActiveLayerId] = useState<string>("Layer 0");
+  const [activeLayerId, setActiveLayerId] = useState<string>("0");
   const [defaultLineStyle, setDefaultLineStyle] = useState({
     color: "#000000",
     lineWidth: 1,
     dashed: false,
-    mode: "ink" as "ink" | "pencil",
+    mode: "pencil" as "ink" | "pencil",
   });
   const [eraserRadius, setEraserRadius] = useState(20);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
@@ -90,7 +92,7 @@ export default function App() {
     { id: "tav4", name: "Tavola n. 4", format: "A1", scale: 500, unit: "cm", position: { x: 40, y: 30 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 4", autore: "Ing. Domenico Gimondo", data: "2026" } },
     { id: "tav5", name: "Tavola n. 5", format: "A0", scale: 1000, unit: "cm", position: { x: 0, y: 0 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 5", autore: "Ing. Domenico Gimondo", data: "2026" } },
   ]);
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'defaults' | 'tavole' | 'layers'>('defaults');
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers'>('penne');
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [editingCartiglioTavolaId, setEditingCartiglioTavolaId] = useState<string | null>(null);
   const [doubleClickedTavolaId, setDoubleClickedTavolaId] = useState<string | null>(null);
@@ -99,6 +101,19 @@ export default function App() {
     "crosshair",
   );
   const [orthoMode, setOrthoMode] = useState(true);
+
+  // Automatic Layer Selection based on style/pen
+  // Matita (Sketch) -> Layer 0
+  // Kina (Technical) -> p1, p2, p4
+  useEffect(() => {
+    if (defaultLineStyle.mode === 'ink') {
+      setActiveLayerId("0"); // Schizzo
+    } else {
+      if (defaultLineStyle.lineWidth === 1) setActiveLayerId("p1");
+      else if (defaultLineStyle.lineWidth === 2.5) setActiveLayerId("p2");
+      else if (defaultLineStyle.lineWidth === 4) setActiveLayerId("p4");
+    }
+  }, [defaultLineStyle.mode, defaultLineStyle.lineWidth]);
 
   const cadCanvasRef = useRef<any>(null);
 
@@ -145,16 +160,13 @@ export default function App() {
   }, [isDragging, toolboxPos]);
 
   const handleRightClickShortcut = (e: React.MouseEvent) => {
-    if (selectedTool !== "Line") {
+    // If not in a drawing tool, switch to Line
+    if (!["Line", "Circle", "Arc", "Rectangle", "Point", "Dimension"].includes(selectedTool)) {
       setSelectedCategory("Disegno");
       setSelectedTool("Line");
       setShortcutToast("Strumento: Linea");
       setTimeout(() => setShortcutToast(null), 1500);
-    } 
-    // Removed context menu display
-    /* else {
-      setContextMenu({ x: e.clientX, y: e.clientY, isOpen: true });
-    } */
+    }
   };
 
   const selectedEntity = entities.find((e) => e.id === selectedId);
@@ -309,17 +321,17 @@ export default function App() {
 
         <button
           onClick={() => {
-            if (activeSidebarTab === 'defaults' && showProperties) {
+            if (activeSidebarTab === 'penne' && showProperties) {
               setShowProperties(false);
             } else {
-              setActiveSidebarTab('defaults');
+              setActiveSidebarTab('penne');
               setShowProperties(true);
             }
           }}
-          className={`px-4 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 ${showProperties && activeSidebarTab === 'defaults' ? "bg-neutral-100 text-indigo-600 font-bold" : "hover:bg-neutral-200"}`}
+          className={`px-4 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 ${showProperties && activeSidebarTab === 'penne' ? "bg-neutral-100 text-indigo-600 font-bold" : "hover:bg-neutral-200"}`}
         >
-          <Square size={16} />
-          <span className="text-[10px]">Proprietà</span>
+          <Pen size={16} />
+          <span className="text-[10px]">Penne</span>
         </button>
         <div className="flex-1"></div>
         <button
@@ -388,13 +400,13 @@ export default function App() {
               onClick={() => setDefaultLineStyle({...defaultLineStyle, mode: 'pencil'})}
               className={`px-3 py-1 rounded text-[10px] font-bold ${defaultLineStyle.mode === 'pencil' ? 'bg-white shadow-sm' : 'text-neutral-500'}`}
             >
-              Standard
+              Kina (Standard)
             </button>
             <button
               onClick={() => setDefaultLineStyle({...defaultLineStyle, mode: 'ink'})}
               className={`px-3 py-1 rounded text-[10px] font-bold ${defaultLineStyle.mode === 'ink' ? 'bg-white shadow-sm' : 'text-neutral-500'}`}
             >
-              Schizzo
+              Schizzo (Matita)
             </button>
           </div>
           <div className="h-4 w-[1px] bg-neutral-300" />
@@ -643,7 +655,7 @@ export default function App() {
           <div className="w-80 bg-white border-l border-neutral-300 p-4 transition-all overflow-y-auto flex flex-col h-full">
             <h3 className="font-bold mb-4 flex justify-between items-center text-neutral-800 border-b border-neutral-100 pb-2">
               <span className="text-xs font-black uppercase tracking-wider font-mono">
-                {activeSidebarTab === "tavole" ? "Gestione Tavole" : activeSidebarTab === "layers" ? "Gestione Layers" : "Proprietà Disegno"}
+                {activeSidebarTab === "tavole" ? "Gestione Tavole" : activeSidebarTab === "layers" ? "Gestione Layers" : "Mazzo Penne & Stili"}
               </span>
               <button 
                 onClick={() => setShowProperties(false)} 
@@ -654,11 +666,11 @@ export default function App() {
             </h3>
 
             <div className="space-y-4 flex-1">
-              {activeSidebarTab === "defaults" ? (
+              {activeSidebarTab === "penne" ? (
                 selectedEntity ? (
                   <>
                     <label className="block text-sm">
-                      Stile Linea:
+                      Tipo Strumento:
                       <div className="flex gap-2 mt-1">
                         <button
                           onClick={() =>
@@ -666,7 +678,7 @@ export default function App() {
                           }
                           className={`p-2 rounded flex-1 text-xs font-bold transition-all ${selectedEntity.mode === "ink" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
                         >
-                          Stile Schizzo
+                          Schizzo
                         </button>
                         <button
                           onClick={() =>
@@ -674,12 +686,12 @@ export default function App() {
                           }
                           className={`p-2 rounded flex-1 text-xs font-bold transition-all ${selectedEntity.mode === "pencil" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
                         >
-                          Stile Standard
+                          Kina
                         </button>
                       </div>
                     </label>
                     <label className="block text-sm">
-                      Width:
+                      Pennino:
                       <div className="flex gap-2 mt-1">
                         {[1, 2.5, 4].map((w) => (
                           <button
@@ -689,7 +701,7 @@ export default function App() {
                             }
                             className={`p-2 rounded flex-1 text-xs font-bold ${selectedEntity.lineWidth === w ? "bg-indigo-600 text-white" : "bg-neutral-200 text-neutral-900 border border-neutral-400"}`}
                           >
-                            {w} mm
+                            p{w === 1 ? '1' : w === 2.5 ? '2' : '4'} ({w} mm)
                           </button>
                         ))}
                       </div>
@@ -732,7 +744,7 @@ export default function App() {
                           }
                           className={`p-2 rounded flex-1 text-xs font-bold ${defaultLineStyle.mode === "ink" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
                         >
-                          Stile Schizzo
+                          Schizzo
                         </button>
                         <button
                           onClick={() =>
@@ -743,12 +755,12 @@ export default function App() {
                           }
                           className={`p-2 rounded flex-1 text-xs font-bold ${defaultLineStyle.mode === "pencil" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
                         >
-                          Stile Standard
+                          Kina
                         </button>
                       </div>
                     </label>
                     <label className="block text-sm">
-                      Default Width:
+                      Seleziona Pennino:
                       <div className="flex gap-2 mt-1">
                         {[1, 2.5, 4].map((w) => (
                           <button
@@ -761,7 +773,7 @@ export default function App() {
                             }
                             className={`p-2 rounded flex-1 text-xs font-bold ${defaultLineStyle.lineWidth === w ? "bg-indigo-600 text-white" : "bg-neutral-200 text-neutral-900 border border-neutral-400"}`}
                           >
-                            {w} mm
+                            p{w === 1 ? '1' : w === 2.5 ? '2' : '4'} ({w} mm)
                           </button>
                         ))}
                       </div>

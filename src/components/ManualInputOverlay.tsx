@@ -9,9 +9,10 @@ interface ManualInputOverlayProps {
     onCommit: (data: any) => void;
     isOpen: boolean;
     onClose: () => void;
+    position?: Point | null;
 }
 
-export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, drawing, parallelLine, canvasToScreen, onCommit, isOpen, onClose }) => {
+export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, drawing, parallelLine, canvasToScreen, onCommit, isOpen, onClose, position }) => {
     // Initial calculations
     let initVal1 = 0;
     let initVal2 = 0;
@@ -105,9 +106,16 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
     }
 
     return (
-        <div className="fixed inset-0 flex items-center justify-center z-[100] bg-transparent pointer-events-none" onMouseDown={e => e.stopPropagation()} onMouseMove={e => e.stopPropagation()} onMouseUp={e => e.stopPropagation()} onWheel={e => e.stopPropagation()}>
+        <div 
+            className={position ? "absolute z-[100] pointer-events-none" : "fixed inset-0 flex items-center justify-center z-[100] bg-transparent pointer-events-none"} 
+            style={position ? { left: position.x - 80, top: position.y - 40 } : {}}
+            onMouseDown={e => e.stopPropagation()} 
+            onMouseMove={e => e.stopPropagation()} 
+            onMouseUp={e => e.stopPropagation()} 
+            onWheel={e => e.stopPropagation()}
+        >
             <form 
-                className="bg-slate-500/40 backdrop-blur-md text-white p-2 rounded shadow-2xl flex flex-col gap-2 min-w-[160px] border border-slate-400/50 pointer-events-auto text-xs"
+                className="bg-slate-900/90 backdrop-blur-xl text-white p-2 rounded shadow-[0_0_20px_rgba(0,0,0,0.5)] flex flex-col gap-2 min-w-[160px] border border-emerald-500/30 pointer-events-auto text-xs"
                 onSubmit={handleSubmit}
                 onKeyDown={handleKeyDown}
             >

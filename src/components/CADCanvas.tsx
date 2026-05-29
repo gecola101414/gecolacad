@@ -294,6 +294,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     hasDoubleSmart?: boolean;
     activeConstraint?: { axis: 'x' | 'y'; value: number };
     wheelLength?: number;
+    startWheelLength?: number;
     lockedDir?: Point;
     isVirtual?: boolean;
     freehandPoints?: Point[];
@@ -345,16 +346,34 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const [parallelDistanceHistory, setParallelDistanceHistory] = useState<number[]>([]);
   const [parallelMouse, setParallelMouse] = useState<Point | null>(null);
   const [isParallelWheelActive, setIsParallelWheelActive] = useState(false);
+  const [isJollyActive, setIsJollyActive] = useState(false);
   const [parallelSign, setParallelSign] = useState<number>(1);
+  const lastControlledPointRef = useRef<Point>({ x: 0, y: 0 });
+  const actualMousePosRef = useRef<Point>({ x: 0, y: 0 });
+  const mouseScreenPosRef = useRef<Point>({ x: 0, y: 0 });
   const [isLocked, setIsLocked] = useState(false);
   const [positioningDimId, setPositioningDimId] = useState<string | null>(null);
   const [showManualInput, setShowManualInput] = useState(false);
+  const [bubblePosition, setBubblePosition] = useState<Point | null>(null);
   const lastMouseRef = useRef<Point>({ x: 0, y: 0 });
   const previousMouseRef = useRef<Point>({ x: 0, y: 0 });
   const lastEraserExecutionTime = useRef(0);
   const lastEraseTimeByEntityId = useRef<Record<string, number>>({});
   const lastEraseTimeByPoint = useRef<Record<string, number>>({});
   const containerRef = useRef<HTMLDivElement>(null);
+  const fnStepValueRef = useRef<number>(0);
+  const fnAnchorCanvasPosRef = useRef<Point | null>(null);
+
+  useEffect(() => {
+    if (!drawing?.wheelLength && !isParallelWheelActive) {
+        fnAnchorCanvasPosRef.current = null;
+        fnStepValueRef.current = 0;
+        setIsJollyActive(false);
+    }
+  }, [drawing?.wheelLength, isParallelWheelActive]);
+
+  const isPrecisionActive = (drawing && drawing.wheelLength !== undefined) || 
+                            (activeTool === 'Parallel' && selectedParallelLine && isParallelWheelActive);
 
   const resolveGroups = (ids: string[], currentEntities: Entity[]): string[] => {
     const groupIds = new Set<string>();
@@ -504,6 +523,12 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       x: (x - view.pan.x) / view.zoom,
       y: (y - view.pan.y) / view.zoom
     };
+  };
+
+  const getDampenedCoordinate = (actualRawPoint: Point, e?: React.MouseEvent | MouseEvent | KeyboardEvent): Point => {
+    actualMousePosRef.current = actualRawPoint;
+    lastControlledPointRef.current = actualRawPoint;
+    return actualRawPoint;
   };
 
   const canvasToScreen = (x: number, y: number): Point => {
@@ -1872,6 +1897,203 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           ctx.restore();
           ctx.setLineDash([]);
       }
+
+      // LENTE INGRANDIMENTO HUD FOR PRECISION MODE (Right click activated)
+      const isPrecisionModeActive = (drawing && drawing.wheelLength !== undefined) || 
+                                    (activeTool === 'Parallel' && selectedParallelLine && isParallelWheelActive);
+      
+      if (isPrecisionModeActive) {
+          // Identify the exact physical point in canvas units of the object being drawn / matched
+          let targetCanvasPos = actualMousePosRef.current;
+          if (drawing) {
+              targetCanvasPos = drawing.current;
+          } else if (activeTool === 'Parallel' && selectedParallelLine) {
+              const line = selectedParallelLine as LineEntity;
+              const dxLine = line.end.x - line.start.x;
+              const dyLine = line.end.y - line.start.y;
+              const L = Math.sqrt(dxLine * dxLine + dyLine * dyLine);
+              if (L > 0) {
+                  const normX = -dyLine / L;
+                  const normY = dxLine / L;
+                  const offset = parallelDistance * parallelSign;
+                  // Midpoint of the offsets
+                  targetCanvasPos = {
+                      x: (line.start.x + line.end.x) / 2 + normX * offset,
+                      y: (line.start.y + line.end.y) / 2 + normY * offset
+                  };
+              }
+          }
+
+          const targetScreenPoint = canvasToScreen(targetCanvasPos.x, targetCanvasPos.y);
+          
+          ctx.save();
+          // Reset current canvas transform to identity to render in absolute screen pixels
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          
+          const bubbleRadius = 85; // Slightly larger for better readability
+          // Offset the bubble up & right from the target spot so it doesn't obstruct target view
+          const bubbleCx = targetScreenPoint.x + 120;
+          const bubbleCy = targetScreenPoint.y - 120;
+          
+          // Draw target point accent dot
+          ctx.beginPath();
+          ctx.arc(targetScreenPoint.x, targetScreenPoint.y, 4, 0, Math.PI * 2);
+          ctx.fillStyle = '#10b981';
+          ctx.fill();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          // TANGET CONE - "due segmenti tangenti alla circonferenza così da impressione del ingrandimento"
+          const dxP = targetScreenPoint.x - bubbleCx;
+          const dyP = targetScreenPoint.y - bubbleCy;
+          const dP = Math.sqrt(dxP * dxP + dyP * dyP);
+          
+          if (dP > bubbleRadius) {
+              const alpha = Math.atan2(dyP, dxP);
+              const theta = Math.acos(bubbleRadius / dP);
+              
+              const t1X = bubbleCx + bubbleRadius * Math.cos(alpha + theta);
+              const t1Y = bubbleCy + bubbleRadius * Math.sin(alpha + theta);
+              
+              const t2X = bubbleCx + bubbleRadius * Math.cos(alpha - theta);
+              const t2Y = bubbleCy + bubbleRadius * Math.sin(alpha - theta);
+              
+              // Shadow/Fill for cone
+              ctx.beginPath();
+              ctx.moveTo(targetScreenPoint.x, targetScreenPoint.y);
+              ctx.lineTo(t1X, t1Y);
+              ctx.arc(bubbleCx, bubbleCy, bubbleRadius, alpha + theta, alpha - theta, true);
+              ctx.closePath();
+              const coneGrad = ctx.createLinearGradient(targetScreenPoint.x, targetScreenPoint.y, bubbleCx, bubbleCy);
+              coneGrad.addColorStop(0, 'rgba(16, 185, 129, 0)');
+              coneGrad.addColorStop(1, 'rgba(16, 185, 129, 0.15)');
+              ctx.fillStyle = coneGrad;
+              ctx.fill();
+              
+              // Tangent lines
+              ctx.beginPath();
+              ctx.moveTo(targetScreenPoint.x, targetScreenPoint.y);
+              ctx.lineTo(t1X, t1Y);
+              ctx.moveTo(targetScreenPoint.x, targetScreenPoint.y);
+              ctx.lineTo(t2X, t2Y);
+              ctx.strokeStyle = 'rgba(16, 185, 129, 0.4)';
+              ctx.lineWidth = 1;
+              ctx.setLineDash([5, 5]);
+              ctx.stroke();
+              ctx.setLineDash([]);
+          }
+
+          // Drop shadow for the magnifier glass HUD bubble
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+          ctx.shadowBlur = 20;
+          ctx.shadowOffsetX = 5;
+          ctx.shadowOffsetY = 10;
+          
+          // Bubble frame backdrop
+          ctx.beginPath();
+          ctx.arc(bubbleCx, bubbleCy, bubbleRadius, 0, Math.PI * 2);
+          ctx.fillStyle = '#0f172a'; // Deep slate
+          ctx.fill();
+          
+          // Disable shadow for internal
+          ctx.shadowColor = 'transparent';
+          
+          // Radial gradient inside the lens
+          const glassGrad = ctx.createRadialGradient(bubbleCx - 30, bubbleCy - 30, 10, bubbleCx, bubbleCy, bubbleRadius);
+          glassGrad.addColorStop(0, '#1e293b');
+          glassGrad.addColorStop(1, '#0f172a');
+          ctx.fillStyle = glassGrad;
+          ctx.beginPath();
+          ctx.arc(bubbleCx, bubbleCy, bubbleRadius - 2, 0, Math.PI * 2);
+          ctx.fill();
+          
+          // Reflection line
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(bubbleCx, bubbleCy, bubbleRadius - 4, 0, Math.PI * 2);
+          ctx.clip();
+          ctx.beginPath();
+          ctx.moveTo(bubbleCx - bubbleRadius, bubbleCy - bubbleRadius);
+          ctx.lineTo(bubbleCx + bubbleRadius, bubbleCy + bubbleRadius);
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+          ctx.lineWidth = bubbleRadius;
+          ctx.stroke();
+          ctx.restore();
+          
+          // Outer bezel
+          ctx.beginPath();
+          ctx.arc(bubbleCx, bubbleCy, bubbleRadius, 0, Math.PI * 2);
+          ctx.strokeStyle = '#10b981';
+          ctx.lineWidth = 5;
+          ctx.stroke();
+          
+          // Internal highlights
+          ctx.beginPath();
+          ctx.arc(bubbleCx, bubbleCy, bubbleRadius - 4, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          
+          // Content Label inside the glass
+          let valueText = '';
+          let subText = 'MISURA';
+          
+          if (activeTool === 'Parallel' && selectedParallelLine) {
+              const formatPrecisionVal = (val: number) => {
+                  if (Number.isInteger(val)) return val.toString();
+                  const roundedVal = Math.round(val * 100) / 100;
+                  return roundedVal.toString().replace('.', ',');
+              };
+              valueText = formatPrecisionVal(parallelDistance);
+              subText = 'OFF-SET';
+          } else if (drawing) {
+              const tooltipDx = drawing.current.x - drawing.start.x;
+              const tooltipDy = drawing.current.y - drawing.start.y;
+              const tooltipLength = Math.sqrt(tooltipDx * tooltipDx + tooltipDy * tooltipDy);
+              
+              const formatPrecisionVal = (val: number) => {
+                  if (Number.isInteger(val)) return val.toString();
+                  const roundedVal = Math.round(val * 100) / 100;
+                  return roundedVal.toString().replace('.', ',');
+              };
+              
+              valueText = formatPrecisionVal(tooltipLength);
+              if (activeTool === 'Line') subText = 'Distanza';
+              else if (activeTool === 'Circle') subText = 'Raggio';
+              else if (activeTool === 'Rectangle') {
+                  const rx = Math.abs(tooltipDx);
+                  const ry = Math.abs(tooltipDy);
+                  valueText = `${formatPrecisionVal(rx)} × ${formatPrecisionVal(ry)}`;
+                  subText = 'Rettangolo';
+              }
+          }
+          
+          // Header
+          ctx.fillStyle = '#34d399';
+          ctx.font = 'bold 11px system-ui';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(subText.toUpperCase(), bubbleCx, bubbleCy - 30);
+          
+          // HUGE Numbers
+          ctx.fillStyle = '#ffffff';
+          const fontSz = valueText.length > 8 ? 'bold 18px system-ui' : 'bold 32px system-ui';
+          ctx.font = fontSz;
+          ctx.fillText(valueText, bubbleCx, bubbleCy + 5);
+          
+          // Modalità
+          ctx.fillStyle = isJollyActive ? '#34d399' : '#94a3b8';
+          ctx.font = 'bold 10px system-ui';
+          ctx.fillText(isJollyActive ? 'MODALITÀ: DECIMALI' : 'MODALITÀ: INTERI', bubbleCx, bubbleCy + 32);
+
+          // Click to Edit hint
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+          ctx.font = '500 8px system-ui';
+          ctx.fillText('CLICCA PER INSERIRE MISURA', bubbleCx, bubbleCy + 48);
+          
+          ctx.restore();
+      }
     };
 
     renderRef.current = render;
@@ -1881,138 +2103,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   // Basic pan/zoom handling
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
-    if (activeTool === 'Parallel' && selectedParallelLine) {
-        if (!isParallelWheelActive) {
-            setIsParallelWheelActive(true);
-            const line = selectedParallelLine as LineEntity;
-            const dxLine = line.end.x - line.start.x;
-            const dyLine = line.end.y - line.start.y;
-            const L = Math.sqrt(dxLine * dxLine + dyLine * dyLine);
-            if (L > 0 && parallelMouse) {
-                const normX = -dyLine / L;
-                const normY = dxLine / L;
-                const vecMouse = { x: parallelMouse.x - line.start.x, y: parallelMouse.y - line.start.y };
-                const curSign = (vecMouse.x * normX + vecMouse.y * normY) >= 0 ? 1 : -1;
-                setParallelSign(curSign);
-            } else {
-                setParallelSign(1);
-            }
-        }
-        const step = e.shiftKey ? 0.1 : 1.0;
-        setParallelDistance(prev => {
-            let baseVal = prev;
-            if (e.shiftKey) {
-                baseVal = Math.round(prev * 10) / 10;
-            } else {
-                baseVal = Math.round(prev);
-            }
-            let newVal = baseVal + (e.deltaY < 0 ? step : -step);
-            if (newVal < 0) newVal = 0;
-            return Math.round(newVal * 100) / 100;
-        });
-        return;
-    }
-
     if (isPanningRef.current) return;
-
-    if (drawing) {
-        // Scroll wheel fine-tunes drawing measurements (it does NOT zoom)
-        const dx = drawing.current.x - drawing.start.x;
-        const dy = drawing.current.y - drawing.start.y;
-        const currentLength = Math.sqrt(dx * dx + dy * dy);
-
-        // Step size: pressing Shift adds the decimal (step = 0.1), otherwise integer (step = 1.0)
-        const step = e.shiftKey ? 0.1 : 1.0;
-
-        // Round current length to cleanest step to avoid float accum errors
-        let baseLength = currentLength;
-        if (e.shiftKey) {
-            baseLength = Math.round(currentLength * 10) / 10;
-        } else {
-            baseLength = Math.round(currentLength);
-        }
-
-        // e.deltaY < 0 is scroll up (advance / increase length), deltaY > 0 is scroll down (decrease length)
-        let newLength = baseLength + (e.deltaY < 0 ? step : -step);
-        if (newLength < 0.1) newLength = 0.1;
-
-        // Eliminate Javascript float precision issues
-        newLength = Math.round(newLength * 100) / 100;
-
-        // Point direction
-        let ux = 1;
-        let uy = 0;
-        
-        if (drawing.lockedDir) {
-            ux = drawing.lockedDir.x;
-            uy = drawing.lockedDir.y;
-        } else {
-            const isExtensionSnap = drawing.snapType === 'smart' && drawing.refEntityId;
-            let foundRefAngle = false;
-            
-            if (isExtensionSnap) {
-                const refEnt = entities.find(e => e.id === drawing.refEntityId);
-                if (refEnt && refEnt.type === 'line') {
-                    const l = refEnt as LineEntity;
-                    const dxL = l.end.x - l.start.x;
-                    const dyL = l.end.y - l.start.y;
-                    const L_ref = Math.sqrt(dxL*dxL + dyL*dyL);
-                    if (L_ref > 0.001) {
-                        ux = dxL / L_ref;
-                        uy = dyL / L_ref;
-                        const dot = dx * ux + dy * uy;
-                        if (dot < 0) { ux = -ux; uy = -uy; }
-                        foundRefAngle = true;
-                    }
-                }
-            }
-            
-            if (!foundRefAngle && currentLength > 0.01) {
-                ux = dx / currentLength;
-                uy = dy / currentLength;
-            }
-        }
-
-        const newCurrentPoint = {
-            x: drawing.start.x + ux * newLength,
-            y: drawing.start.y + uy * newLength
-        };
-
-        setDrawing(prev => {
-            if (!prev) return null;
-            const preserveSnap = prev.snapType === 'smart';
-            return {
-                ...prev,
-                wheelLength: newLength,
-                lockedDir: prev.lockedDir || { x: ux, y: uy },
-                current: newCurrentPoint,
-                snapType: preserveSnap ? prev.snapType : undefined,
-                refPoint: preserveSnap ? prev.refPoint : undefined,
-                refEntityId: preserveSnap ? prev.refEntityId : undefined,
-                constraintAxis: preserveSnap ? prev.constraintAxis : undefined,
-                refPoint2: preserveSnap ? prev.refPoint2 : undefined,
-                constraintAxis2: preserveSnap ? prev.constraintAxis2 : undefined,
-                hasDoubleSmart: preserveSnap ? prev.hasDoubleSmart : false
-            };
-        });
-        return; // Done
-    }
-    
-    if (activeTool === 'Parallel') {
-        const step = e.shiftKey ? 0.1 : 1.0;
-        setParallelDistance(prev => {
-            let baseVal = prev;
-            if (e.shiftKey) {
-                baseVal = Math.round(prev * 10) / 10;
-            } else {
-                baseVal = Math.round(prev);
-            }
-            let newVal = baseVal + (e.deltaY < 0 ? step : -step);
-            if (newVal < 0) newVal = 0;
-            return Math.round(newVal * 100) / 100;
-        });
-        return;
-    }
 
     const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
     setView(prev => ({
@@ -2771,7 +2862,43 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const rawPoint = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
+    const rawPoint = getDampenedCoordinate(screenToCanvas(e.clientX - rect.left, e.clientY - rect.top), e);
+    const screenPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const canvasPoint = screenToCanvas(screenPos.x, screenPos.y);
+
+    // BUBBLE CLICK DETECTION
+    if (isPrecisionActive) {
+        let targetCanvasPos = actualMousePosRef.current;
+        if (drawing) {
+            targetCanvasPos = drawing.current;
+        } else if (activeTool === 'Parallel' && selectedParallelLine) {
+            const line = selectedParallelLine as LineEntity;
+            const dxLine = line.end.x - line.start.x;
+            const dyLine = line.end.y - line.start.y;
+            const L = Math.sqrt(dxLine * dxLine + dyLine * dyLine);
+            if (L > 0) {
+                const normX = -dyLine / L;
+                const normY = dxLine / L;
+                const offset = parallelDistance * parallelSign;
+                targetCanvasPos = {
+                    x: (line.start.x + line.end.x) / 2 + normX * offset,
+                    y: (line.start.y + line.end.y) / 2 + normY * offset
+                };
+            }
+        }
+        const tScreen = canvasToScreen(targetCanvasPos.x, targetCanvasPos.y);
+        const bubbleCx = tScreen.x + 120;
+        const bubbleCy = tScreen.y - 120;
+        const distB = Math.sqrt((screenPos.x - bubbleCx) ** 2 + (screenPos.y - bubbleCy) ** 2);
+        if (distB < 85) {
+            setBubblePosition({ x: bubbleCx, y: bubbleCy });
+            setShowManualInput(true);
+            return;
+        }
+    } else {
+        setBubblePosition(null);
+    }
+
     lastMouseRef.current = rawPoint;
 
     // --- CUSTOM DOUBLE CLICK DETECTION ---
@@ -3029,21 +3156,38 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 }
             } else {
                 // Activate precision lens mode!
-                setIsParallelWheelActive(true);
-                const line = selectedParallelLine as LineEntity;
-                const p1 = line.start;
-                const p2 = line.end;
-                const dx = p2.x - p1.x;
-                const dy = p2.y - p1.y;
-                const L = Math.sqrt(dx * dx + dy * dy);
-                if (L > 0) {
-                    const nx = -dy / L;
-                    const ny = dx / L;
-                    const vec1 = { x: rawPoint.x - p1.x, y: rawPoint.y - p1.y };
-                    const distVal = vec1.x * nx + vec1.y * ny;
-                    const sign = distVal >= 0 ? 1 : -1;
-                    setParallelSign(sign);
-                    setParallelDistance(Math.round(Math.abs(distVal) * 100) / 100);
+                let hardwareCaps = false;
+                let scrollLock = false;
+                let numLock = false;
+                if (e && (e as any).getModifierState) {
+                    hardwareCaps = !!(e as any).getModifierState('CapsLock');
+                    scrollLock = !!(e as any).getModifierState('ScrollLock');
+                    numLock = !!(e as any).getModifierState('NumLock');
+                }
+                const isDecimalActive = hardwareCaps || scrollLock || numLock || (e && (e as any).shiftKey);
+
+                if (isDecimalActive) {
+                    setIsParallelWheelActive(true);
+                    const line = selectedParallelLine as LineEntity;
+                    const p1 = line.start;
+                    const p2 = line.end;
+                    const dx = p2.x - p1.x;
+                    const dy = p2.y - p1.y;
+                    const L = Math.sqrt(dx * dx + dy * dy);
+                    if (L > 0) {
+                        const nx = -dy / L;
+                        const ny = dx / L;
+                        const vec1 = { x: rawPoint.x - p1.x, y: rawPoint.y - p1.y };
+                        const distVal = vec1.x * nx + vec1.y * ny;
+                        const sign = distVal >= 0 ? 1 : -1;
+                        const val = Math.round(Math.abs(distVal) * 100) / 100;
+                        setParallelSign(sign);
+                        setParallelDistance(val);
+                        fnStepValueRef.current = val;
+                        fnAnchorCanvasPosRef.current = rawPoint;
+                        setIsJollyActive(true);
+                    }
+                    return;
                 }
             }
         }
@@ -3125,19 +3269,49 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
                   const initialLength = Math.round(currentLength * 100) / 100;
 
-                  setDrawing(prev => {
-                      if (!prev) return null;
-                      return {
-                          ...prev,
-                          wheelLength: initialLength,
-                          lockedDir: { x: ux, y: uy },
-                          current: {
-                              x: prev.start.x + ux * initialLength,
-                              y: prev.start.y + uy * initialLength
-                          }
-                      };
-                  });
-                  return;
+                  // Jolly Check - only enter precision if Jolly/Fn is held
+                  let hardwareCaps = false;
+                  let scrollLock = false;
+                  let numLock = false;
+                  if (e && (e as any).getModifierState) {
+                      hardwareCaps = !!(e as any).getModifierState('CapsLock');
+                      scrollLock = !!(e as any).getModifierState('ScrollLock');
+                      numLock = !!(e as any).getModifierState('NumLock');
+                  }
+                  const isDecimalActive = hardwareCaps || scrollLock || numLock || (e && (e as any).shiftKey);
+
+                  if (isDecimalActive) {
+                      fnAnchorCanvasPosRef.current = rawPoint;
+                      fnStepValueRef.current = initialLength;
+                      setDrawing(prev => {
+                          if (!prev) return null;
+                          return {
+                              ...prev,
+                              wheelLength: initialLength,
+                              lockedDir: { x: ux, y: uy },
+                              current: {
+                                  x: prev.start.x + ux * initialLength,
+                                  y: prev.start.y + uy * initialLength
+                              }
+                          };
+                      });
+                      setIsJollyActive(true);
+                      return;
+                  }
+
+                  // Fallback for standard placement when not snapped and not entering precision mode
+                  snappedResult = {
+                      point: {
+                          x: drawing.start.x + ux * currentLength,
+                          y: drawing.start.y + uy * currentLength
+                      },
+                      type: 'standard' as const,
+                      refPoint: undefined,
+                      constraintAxis: undefined,
+                      refPoint2: undefined,
+                      constraintAxis2: undefined,
+                      hasDoubleSmart: false
+                  };
               }
           }
           
@@ -3152,7 +3326,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 mode: defaultLineStyle.mode,
                 start: drawing.start,
                 end: snappedResult.point,
-                layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId,
+                layer: activeLayerId,
                 inkPoints: defaultLineStyle.mode === 'ink' ? (() => {
                   const points: InkPoint[] = [];
                   const steps = 20;
@@ -3185,7 +3359,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 mode: defaultLineStyle.mode,
                 center: drawing.start,
                 radius: radius,
-                layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
+                layer: activeLayerId
               };
           } else if (activeTool === 'Rectangle') {
               newEntity = {
@@ -3197,7 +3371,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 mode: defaultLineStyle.mode,
                 p1: drawing.start,
                 p2: snappedResult.point,
-                layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
+                layer: activeLayerId
               };
           }
           if (newEntity && !drawing.isVirtual) {
@@ -3298,7 +3472,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           lineWidth: defaultLineStyle.lineWidth,
           mode: defaultLineStyle.mode,
           point: snapped.point,
-          layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
+          layer: activeLayerId
         };
         setEntities(prev => [...prev, newEntity]);
         setDrawing(null);
@@ -3531,14 +3705,14 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             }
         }
     } else if (activeTool === 'Eraser') {
-        const rawPoint = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
+        const rawPoint = getDampenedCoordinate(screenToCanvas(e.clientX - rect.left, e.clientY - rect.top), e);
         setEraserPos(rawPoint);
         executeEraser(rawPoint, true);
     } else if (activeTool === 'Trim') {
-        const rawPoint = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
+        const rawPoint = getDampenedCoordinate(screenToCanvas(e.clientX - rect.left, e.clientY - rect.top), e);
         executeTrim(rawPoint);
     } else if (activeTool === 'Cancella') {
-        const rawPoint = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
+        const rawPoint = getDampenedCoordinate(screenToCanvas(e.clientX - rect.left, e.clientY - rect.top), e);
         const found = getEntityAtPoint(rawPoint);
         if (found) {
             const idsToDelete = resolveGroups([found.id], entities);
@@ -3611,7 +3785,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const rawPoint = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
+    mouseScreenPosRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const rawPoint = getDampenedCoordinate(screenToCanvas(e.clientX - rect.left, e.clientY - rect.top), e);
     onMouseMovePosition?.(rawPoint);
 
     let isNearEdge = false;
@@ -3705,12 +3880,52 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       if (drawing.wheelLength !== undefined) {
           const ux = drawing.lockedDir?.x ?? 1;
           const uy = drawing.lockedDir?.y ?? 0;
+          
+          if (!fnAnchorCanvasPosRef.current) {
+              fnAnchorCanvasPosRef.current = rawPoint;
+          }
+          
+          const dX = rawPoint.x - (fnAnchorCanvasPosRef.current?.x ?? rawPoint.x);
+          const dY = rawPoint.y - (fnAnchorCanvasPosRef.current?.y ?? rawPoint.y);
+          const deltaProj = dX * ux + dY * uy;
+          
+          let hardwareCaps = false;
+          let scrollLock = false;
+          let numLock = false;
+          if (e && (e as any).getModifierState) {
+              hardwareCaps = !!(e as any).getModifierState('CapsLock');
+              scrollLock = !!(e as any).getModifierState('ScrollLock');
+              numLock = !!(e as any).getModifierState('NumLock');
+          }
+          const isDecimalActive = hardwareCaps || scrollLock || numLock || (e && (e as any).shiftKey);
+          
+          // Re-anchor when mode toggles to prevent jumps
+          if (isDecimalActive !== isJollyActive) {
+              fnAnchorCanvasPosRef.current = rawPoint;
+              fnStepValueRef.current = drawing.wheelLength ?? 1.0;
+              setIsJollyActive(isDecimalActive);
+          }
+          
+          // SENSITIVITY: Extremely dampened for "stepped" wheel feeling
+          const sens = isDecimalActive ? 0.002 : 0.04; 
+          const baseValue = fnStepValueRef.current ?? drawing.startWheelLength ?? drawing.wheelLength ?? 1.0;
+          let targetValue = baseValue + deltaProj * sens;
+          
+          if (isDecimalActive) {
+              targetValue = Math.round(targetValue * 100) / 100; 
+          } else {
+              targetValue = Math.round(targetValue); 
+          }
+          
+          if (targetValue < 0.1) targetValue = 0.1;
+          
           const snappedPoint = {
-              x: drawing.start.x + ux * drawing.wheelLength,
-              y: drawing.start.y + uy * drawing.wheelLength
+              x: drawing.start.x + ux * targetValue,
+              y: drawing.start.y + uy * targetValue
           };
           setDrawing({ 
               ...drawing, 
+              wheelLength: targetValue,
               current: snappedPoint, 
               snapType: undefined, 
               refPoint: undefined,
@@ -3856,31 +4071,67 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             const sign = distVal >= 0 ? 1 : -1;
             setParallelSign(sign);
 
+            let hardwareCaps = false;
+            let scrollLock = false;
+            let numLock = false;
+            if (e && (e as any).getModifierState) {
+                hardwareCaps = !!(e as any).getModifierState('CapsLock');
+                scrollLock = !!(e as any).getModifierState('ScrollLock');
+                numLock = !!(e as any).getModifierState('NumLock');
+            }
+            const isDecimalActive = hardwareCaps || scrollLock || numLock || (e && (e as any).shiftKey);
+            
+            // Re-anchor Parallel when mode toggles
+            if (isDecimalActive !== isJollyActive) {
+                fnAnchorCanvasPosRef.current = rawPoint;
+                fnStepValueRef.current = parallelDistance;
+                setIsJollyActive(isDecimalActive);
+            }
+            
             if (isParallelWheelActive) {
-                // If the pointer deviates significantly from the currently proposed parallel distance, break the lock
-                const threshold = 20 / view.zoom;
-                if (Math.abs(actualDist - parallelDistance) > threshold) {
-                    setIsParallelWheelActive(false);
-                    setParallelDistance(actualDist);
-                }
-            } else {
-                // Not locked, tracking mouse distance dynamically
-                let dist = actualDist;
+                const ux = -dy / L;
+                const uy = dx / L;
+                const dX = rawPoint.x - (fnAnchorCanvasPosRef.current?.x ?? rawPoint.x);
+                const dY = rawPoint.y - (fnAnchorCanvasPosRef.current?.y ?? rawPoint.y);
+                const deltaProj = (dX * ux + dY * uy) * parallelSign;
+
+                // SENSITIVITY: Extremely dampened for "stepped" wheel feeling
+                const sens = isDecimalActive ? 0.002 : 0.04;
+                const baseValue = fnStepValueRef.current ?? parallelDistance ?? 1.0;
+                let dist = baseValue + deltaProj * sens;
                 
-                // Snap to memorized distance if close enough
+                if (isDecimalActive) {
+                    dist = Math.round(dist * 100) / 100;
+                } else {
+                    dist = Math.round(dist);
+                }
+                
+                if (dist < 0.1) dist = 0.1;
+                setParallelDistance(dist);
+            } else {
+                let dist = actualDist;
+                if (isDecimalActive) {
+                    dist = Math.round(dist * 10) / 10;
+                } else {
+                    dist = Math.round(dist);
+                }
+                if (dist < 0.1) dist = 0.1;
+
+                // Maintain the memory snapping feature
                 if (parallelDistanceHistory.length > 0 && parallelDistanceHistory[0] > 0) {
                     const mem = parallelDistanceHistory[0];
                     if (Math.abs(dist - mem) < (20 / view.zoom)) {
                         dist = mem;
-                        setIsParallelWheelActive(true); // Snap lock and make green immediately
+                        setIsParallelWheelActive(true);
+                        fnStepValueRef.current = mem;
                     }
                 }
-                
+
                 setParallelDistance(dist);
             }
         }
     } else if (activeTool === 'Eraser') {
-        const rawPoint = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
+        const rawPoint = getDampenedCoordinate(screenToCanvas(e.clientX - rect.left, e.clientY - rect.top), e);
         setEraserPos(rawPoint);
         setHighlightedTrimLine(null);
         setHighlightedTrimSegment(null);
@@ -3888,7 +4139,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             executeEraser(rawPoint, false);
         }
     } else if (activeTool === 'Trim') {
-        const rawPoint = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
+        const rawPoint = getDampenedCoordinate(screenToCanvas(e.clientX - rect.left, e.clientY - rect.top), e);
         const target = getTrimTargetAtPoint(rawPoint);
         setHighlightedTrimLine(target || null);
         
@@ -3940,7 +4191,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 width: 0.5 + Math.random() * 0.5,
                 alpha: 0.4 + Math.random() * 0.4
             })),
-            layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
+            layer: activeLayerId
         };
         setEntities(prev => {
             onCommitHistory?.(prev);
@@ -4057,41 +4308,32 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     return () => cancelAnimationFrame(animationFrame);
   }, [flashIds]);
 
+
+
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (confirmJoin()) return;
     
-    // 1. If currently drawing: This is the 'undo'
-    if (drawing) {
-        setDrawing(null);
-        setIsLocked(false);
-        setHighlightedTrimSegment(null);
-        setSelectedParallelLine(null);
-        setDragEntityIds([]);
-        setDragEntityId(null);
-        setActiveMoveSnapPoint(null);
-        return;
-    }
-
-    // 2. If other actions are in progress: cancel them
-    if (selectedParallelLine || highlightedTrimSegment || dragEntityIds.length > 0) {
-        setDrawing(null);
-        setIsLocked(false);
-        setHighlightedTrimSegment(null);
-        setSelectedParallelLine(null);
-        setDragEntityIds([]);
-        setDragEntityId(null);
-        setActiveMoveSnapPoint(null);
-        return;
-    }
-
-    // 3. If in drawing mode: Toggle style
-    const drawingTools = ['Line', 'Circle', 'Arc', 'Rectangle', 'Point', 'Dimension'];
-    if (drawingTools.includes(activeTool)) {
+    // Toggle style if in drawing mode and NOT yet drawing the first point
+    const isDrawingTool = ['Line', 'Circle', 'Arc', 'Rectangle', 'Point', 'Dimension'].includes(activeTool);
+    if (isDrawingTool && !drawing) {
         setDefaultLineStyle(prev => ({ ...prev, mode: prev.mode === 'ink' ? 'pencil' : 'ink' }));
         return;
     }
 
+    // Right click as ESC
+    const escAction = () => {
+        setDrawing(null);
+        setIsLocked(false);
+        setHighlightedTrimSegment(null);
+        setSelectedParallelLine(null);
+        setActiveMoveSnapPoint(null);
+        setDragEntityIds([]);
+        setDragEntityId(null);
+        setShowManualInput(false);
+        setIsParallelWheelActive(false);
+    };
+
+    escAction();
     onContextMenu?.(e);
   };
 
@@ -4125,7 +4367,21 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   }, [dragEntityId, activeTool, onCommitHistory, dragTavolaId]);
 
   useEffect(() => {
+    const updateJolly = (e: KeyboardEvent) => {
+        let hardwareCaps = false;
+        let scrollLock = false;
+        let numLock = false;
+        if (e.getModifierState) {
+            hardwareCaps = !!e.getModifierState('CapsLock');
+            scrollLock = !!e.getModifierState('ScrollLock');
+            numLock = !!e.getModifierState('NumLock');
+        }
+        const isActive = hardwareCaps || scrollLock || numLock || e.shiftKey;
+        setIsJollyActive(isActive);
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
+        updateJolly(e);
         if (e.key === 'Escape') {
             setDrawing(null);
             setIsLocked(false);
@@ -4134,6 +4390,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             setActiveMoveSnapPoint(null);
             setDragEntityIds([]);
             setShowManualInput(false);
+            setIsParallelWheelActive(false);
         } else if (e.key === 'Enter') {
             if (activeTool === 'Join') confirmJoin();
         } else if (!showManualInput && /^[0-9\.\-]$/.test(e.key)) {
@@ -4143,8 +4400,17 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             }
         }
     };
+    
+    const handleKeyUp = (e: KeyboardEvent) => {
+        updateJolly(e);
+    };
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+        window.removeEventListener('keyup', handleKeyUp);
+    };
   }, [activeTool, dragEntityIds, entities, drawing, selectedParallelLine, showManualInput]);
 
   const handleManualCommit = (tool: string, data: any) => {
@@ -4164,7 +4430,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             mode: defaultLineStyle.mode,
             start: drawing.start,
             end: finalPoint,
-            layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
+            layer: activeLayerId
         };
         setEntities(prev => { onCommitHistory?.(prev); return [...prev, newEntity]; });
         setDrawing({ start: finalPoint, current: finalPoint, snapType: 'standard' });
@@ -4179,7 +4445,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             mode: defaultLineStyle.mode,
             center: drawing.start,
             radius: R,
-            layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
+            layer: activeLayerId
         };
         setEntities(prev => { onCommitHistory?.(prev); return [...prev, newEntity]; });
         setDrawing(null);
@@ -4194,7 +4460,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             mode: defaultLineStyle.mode,
             p1: drawing.start,
             p2: finalPoint,
-            layer: defaultLineStyle.lineWidth > 1 ? 'Spessori' : activeLayerId
+            layer: activeLayerId
         };
         setEntities(prev => { onCommitHistory?.(prev); return [...prev, newEntity]; });
         setDrawing(null);
@@ -4256,6 +4522,32 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     >
       <canvas ref={canvasRef} />
       
+      {/* Precision Lens Manual Input */}
+      {isPrecisionActive && showManualInput && bubblePosition && (
+          <ManualInputOverlay
+              type={activeTool === "Parallel" ? "parallel" : (activeTool.toLowerCase() as any)}
+              drawing={drawing || undefined}
+              parallelLine={activeTool === "Parallel" ? { 
+                  start: (selectedParallelLine as LineEntity).start, 
+                  end: (selectedParallelLine as LineEntity).end, 
+                  mouse: actualMousePosRef.current,
+                  distance: parallelDistance
+              } : undefined}
+              canvasToScreen={canvasToScreen}
+              onCommit={(data) => { 
+                  setShowManualInput(false); 
+                  setBubblePosition(null);
+                  handleManualCommit(activeTool, data); 
+              }}
+              isOpen={showManualInput}
+              onClose={() => {
+                  setShowManualInput(false);
+                  setBubblePosition(null);
+              }}
+              position={bubblePosition}
+          />
+      )}
+
       {drawing && !drawing.isFreehand && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle') && drawing.wheelLength === undefined && (
         <ManualInputOverlay
             type={activeTool.toLowerCase() as any}
@@ -4280,80 +4572,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             isOpen={showManualInput}
             onClose={() => setShowManualInput(false)}
         />
-      )}
-      {isParallelWheelActive && selectedParallelLine && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-slate-900/95 backdrop-blur-md border border-emerald-500/80 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 pointer-events-none select-none">
-            <div className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-[10px] font-bold tracking-widest text-emerald-400 uppercase leading-none">🔍 Precisione Attiva / Lente</span>
-              <span className="text-2xl font-bold font-mono tracking-tight text-white mt-1">
-                Dist: {parallelDistance.toFixed(2)}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1.5 bg-slate-800/90 p-1 rounded-lg border border-slate-700 pointer-events-auto" onMouseDown={e => e.stopPropagation()} onMouseUp={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
-              <button 
-                onClick={() => handlePrecisionAdjust(-1)}
-                className="w-8 h-8 flex items-center justify-center bg-slate-700/85 hover:bg-emerald-600 hover:text-white text-white rounded font-bold transition active:scale-90 select-none cursor-pointer text-sm"
-                title="Diminuisci (premi Shift per decimi)"
-              >
-                ◀
-              </button>
-              <button 
-                onClick={() => handlePrecisionAdjust(1)}
-                className="w-8 h-8 flex items-center justify-center bg-slate-700/85 hover:bg-emerald-600 hover:text-white text-white rounded font-bold transition active:scale-90 select-none cursor-pointer text-sm"
-                title="Aumenta (premi Shift per decimi)"
-              >
-                ▶
-              </button>
-            </div>
-
-            <div className="h-8 w-[1px] bg-slate-700 mx-1" />
-            <span className="text-[10px] text-slate-300 max-w-[150px] leading-tight font-sans">
-              Rotella mouse o frecce. <br/>
-              Premi <strong>Maiusc (Shift)</strong> per decimi!
-            </span>
-        </div>
-      )}
-      {drawing && drawing.wheelLength !== undefined && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-slate-900/95 backdrop-blur-md border border-emerald-500/80 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 pointer-events-none select-none">
-            <div className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-[10px] font-bold tracking-widest text-emerald-400 uppercase leading-none">🔍 Precisione Attiva / Lente</span>
-              <span className="text-2xl font-bold font-mono tracking-tight text-white mt-1">
-                {activeTool === 'Circle' ? 'Raggio' : activeTool === 'Rectangle' ? 'Largh/Alt' : 'Lunghezza'}: {drawing.wheelLength.toFixed(2)}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1.5 bg-slate-800/90 p-1 rounded-lg border border-slate-700 pointer-events-auto" onMouseDown={e => e.stopPropagation()} onMouseUp={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
-              <button 
-                onClick={() => handlePrecisionAdjust(-1)}
-                className="w-8 h-8 flex items-center justify-center bg-slate-700/85 hover:bg-emerald-600 hover:text-white text-white rounded font-bold transition active:scale-90 select-none cursor-pointer text-sm"
-                title="Diminuisci (premi Shift per decimi)"
-              >
-                ◀
-              </button>
-              <button 
-                onClick={() => handlePrecisionAdjust(1)}
-                className="w-8 h-8 flex items-center justify-center bg-slate-700/85 hover:bg-emerald-600 hover:text-white text-white rounded font-bold transition active:scale-90 select-none cursor-pointer text-sm"
-                title="Aumenta (premi Shift per decimi)"
-              >
-                ▶
-              </button>
-            </div>
-
-            <div className="h-8 w-[1px] bg-slate-700 mx-1" />
-            <span className="text-[10px] text-slate-300 max-w-[150px] leading-tight font-sans">
-              Rotella mouse o frecce. <br/>
-              Premi <strong>Maiusc (Shift)</strong> per decimi!
-            </span>
-        </div>
       )}
       {/* ManualInputOverlay for other tools if needed */}
     </div>
