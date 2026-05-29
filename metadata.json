@@ -1,6 +1,10 @@
 {
-  "name": "GECOLA CAD Professional",
-  "description": "Technical 2D CAD with vintage Letraset/Reber technical pen aesthetics, drag-and-drop architectural templates and professional plotter export.",
-  "requestFramePermissions": ["microphone"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "name": "gecolacad 2.0_a",
+  "description": "A minimalist, fast 2D CAD application for the browser.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

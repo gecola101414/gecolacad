@@ -88,15 +88,37 @@ export const exportNativePDF = (
   const drawingWidth = maxX - minX;
   const drawingHeight = maxY - minY;
 
+  // Precision Calibration Factor
+  // Helps compensate for printer-driver margin shrinkage (common with HP/Apple drivers)
+  // 1.0256 is the typical correction for 39mm -> 40mm errors
+  const CALIBRATION_FACTOR = 1.0256; 
+
   const chosenFormat = tavola ? tavola.format : format;
   const chosenScaleDenom = tavola ? tavola.scale : scaleDenom;
   const chosenUnit = tavola ? tavola.unit : unit;
 
+  const getPaperSizeMmLocal = (fmt: string) => {
+    switch (fmt.toUpperCase()) {
+      case 'A4': return { w: 210, h: 297 };
+      case 'A3': return { w: 297, h: 420 };
+      case 'A2': return { w: 420, h: 594 };
+      case 'A1': return { w: 594, h: 841 };
+      case 'A0': return { w: 841, h: 1189 };
+      default: return { w: 210, h: 297 };
+    }
+  };
+
+  const pSizeRes = getPaperSizeMmLocal(chosenFormat);
+  const orientation = drawingWidth > drawingHeight ? 'l' : 'p';
+  const finalPageWidth = orientation === 'l' ? pSizeRes.h : pSizeRes.w;
+  const finalPageHeight = orientation === 'l' ? pSizeRes.w : pSizeRes.h;
+
   const pdf = new jsPDF({
-    orientation: drawingWidth > drawingHeight ? 'landscape' : 'portrait',
+    orientation,
     unit: 'mm',
-    format: chosenFormat.toLowerCase(),
-    putOnlyUsedFonts: true
+    format: [finalPageWidth, finalPageHeight],
+    putOnlyUsedFonts: true,
+    floatPrecision: 16
   });
 
   // Suggest 'Actual Size' to the printer to avoid 3.8cm/4.0cm scaling errors
@@ -110,7 +132,8 @@ export const exportNativePDF = (
       m: 1000
   };
   const multiplier = unitToMm[chosenUnit as keyof typeof unitToMm] || 1;
-  const scale = multiplier / chosenScaleDenom;
+  // Apply the calibration factor to the base scale
+  const scale = (multiplier / chosenScaleDenom) * CALIBRATION_FACTOR;
   
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
@@ -363,6 +386,17 @@ export const exportNativePDF = (
       let dString = tavola.datiCartiglio?.data || "";
       if(dString.length > MAX_DATA_LEN) dString = dString.substring(0, MAX_DATA_LEN) + "...";
       pdf.text(dString, cartX + cartW * 0.5 + 2.5, cartY + cartH * 0.7 + 10);
+
+      // Warning note for user about printer scaling
+      pdf.setFontSize(4);
+      pdf.setTextColor(150, 0, 0);
+      pdf.text("STAMPARE AL 100% (DIMENSIONI EFFETTIVE). SE MISURA 38mm INVECE DI 40mm, DISATTIVARE 'ADATTA ALLA PAGINA' NELLE IMPOSTAZIONI STAMPANTE.", cartX + 2.5, cartY + cartH - 2);
+      
+      // Verification line (10mm)
+      pdf.setDrawColor(150, 0, 0);
+      pdf.setLineWidth(0.3);
+      pdf.line(cartX + cartW - 15, cartY + cartH - 4.5, cartX + cartW - 5, cartY + cartH - 4.5);
+      pdf.text("VERIFICA 10mm", cartX + cartW - 10, cartY + cartH - 2.5, { align: 'center' });
   }
 
   if (action === 'bloburl') {

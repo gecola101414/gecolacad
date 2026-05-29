@@ -41,6 +41,8 @@ import {
   Snowflake,
   Plus,
   Check,
+  Save,
+  FolderOpen
 } from "lucide-react";
 
 const ParallelIcon = ({ size = 16 }: { size?: number }) => (
@@ -106,6 +108,87 @@ export default function App() {
   );
   const [orthoMode, setOrthoMode] = useState(true);
 
+  // File System State
+  const [fileHandle, setFileHandle] = useState<any>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const saveToHandle = async (handle: any) => {
+    setIsSaving(true);
+    try {
+      const writable = await handle.createWritable();
+      const stateToSave = {
+        entities,
+        layers,
+        tavole,
+        measurements,
+        defaultLineStyle
+      };
+      await writable.write(JSON.stringify(stateToSave));
+      await writable.close();
+    } catch (err) {
+      console.error("Failed to save to file:", err);
+    } finally {
+      // Short delay so the green dot is visible
+      setTimeout(() => setIsSaving(false), 500); 
+    }
+  };
+
+  useEffect(() => {
+    if (!fileHandle) return;
+    const timeoutId = setTimeout(() => {
+      saveToHandle(fileHandle);
+    }, 1000);
+    return () => clearTimeout(timeoutId);
+  }, [entities, fileHandle, layers, tavole, measurements]);
+
+  const handleOpenFile = async () => {
+    try {
+      if (!('showOpenFilePicker' in window)) {
+        alert("Salvataggio in locale non supportato da questo browser.");
+        return;
+      }
+      const [handle] = await (window as any).showOpenFilePicker({
+        types: [{ description: 'File GECOLA CAD', accept: {'application/json': ['.gcad']} }],
+      });
+      const file = await handle.getFile();
+      const contents = await file.text();
+      const data = JSON.parse(contents);
+      
+      if (data.entities) setEntities(data.entities);
+      if (data.layers) setLayers(data.layers);
+      if (data.tavole) setTavole(data.tavole);
+      if (data.measurements) setMeasurements(data.measurements);
+      if (data.defaultLineStyle) setDefaultLineStyle(data.defaultLineStyle);
+      
+      setFileHandle(handle);
+      setShortcutToast("File caricato!");
+      setTimeout(() => setShortcutToast(null), 2000);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleSaveAsFile = async () => {
+    try {
+      if (!('showSaveFilePicker' in window)) {
+        alert("Salvataggio in locale non supportato da questo browser.");
+        return;
+      }
+      const handle = await (window as any).showSaveFilePicker({
+        types: [{ description: 'File GECOLA CAD', accept: {'application/json': ['.gcad']} }],
+        suggestedName: 'progetto_gecolacad.gcad'
+      });
+      setFileHandle(handle);
+      await saveToHandle(handle);
+      setShortcutToast("Salvato con nome!");
+      setTimeout(() => setShortcutToast(null), 2000);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const cadCanvasRef = useRef<any>(null);
+
   // Automatic Layer Selection based on style/pen
   // Matita (Sketch) -> Layer 0
   // Kina (Technical) -> p1, p2, p4
@@ -118,8 +201,6 @@ export default function App() {
       else if (defaultLineStyle.lineWidth === 4) setActiveLayerId("p4");
     }
   }, [defaultLineStyle.mode, defaultLineStyle.lineWidth]);
-
-  const cadCanvasRef = useRef<any>(null);
 
   const [toolboxPos, setToolboxPos] = useState(() => {
     const saved = localStorage.getItem('toolboxPos');
@@ -287,9 +368,24 @@ export default function App() {
     <div className="flex flex-col h-screen bg-neutral-100 text-neutral-900">
       {/* Ribbon */}
       <header className="h-14 border-b border-neutral-300 bg-white flex">
-        <div className="flex items-center px-4 border-r border-neutral-300 bg-neutral-900 text-white select-none mr-1">
-          <span className="font-sans font-black tracking-wider text-sm">GECOLA <span className="text-amber-400">CAD</span></span>
+        <div className="flex items-center px-4 border-r border-neutral-300 bg-neutral-900 text-white select-none mr-1 relative">
+          <span className="font-sans font-black tracking-wider text-sm whitespace-nowrap">GECOLA <span className="text-amber-400">CAD</span></span>
+          {fileHandle && (
+            <div className="absolute top-1 right-2 flex items-center justify-center pointer-events-none">
+              <div className={`w-2 h-2 rounded-full ${isSaving ? 'bg-amber-400' : 'bg-emerald-500'} transition-colors duration-300 drop-shadow-md`} title={isSaving ? "Salvataggio in corso..." : "Auto-save attivo"}></div>
+            </div>
+          )}
         </div>
+        
+        <div className="flex items-center gap-1 px-2 border-r border-neutral-300 mr-2 bg-neutral-50">
+           <button onClick={handleOpenFile} title="Apri File" className="p-1.5 hover:bg-neutral-200 text-neutral-600 rounded">
+             <FolderOpen size={16} />
+           </button>
+           <button onClick={handleSaveAsFile} title={fileHandle ? "Salva con nome" : "Salva"} className="p-1.5 hover:bg-neutral-200 text-neutral-600 rounded">
+             <Save size={16} />
+           </button>
+        </div>
+
         {categories.map((cat) => (
           <button
             key={cat.name}
@@ -430,7 +526,17 @@ export default function App() {
         )}
 
         <div className="ml-auto flex items-center gap-2">
-          <div className="h-4 w-[1px] bg-neutral-300" />
+          <button
+            onClick={() => setOrthoMode(!orthoMode)}
+            className={`px-3 py-1 rounded flex items-center gap-1.5 text-xs transition border font-semibold ${
+              orthoMode 
+                ? "bg-emerald-100 text-emerald-950 border-emerald-400" 
+                : "bg-neutral-100 text-neutral-600 border-neutral-300 hover:bg-neutral-200"
+            }`}
+          >
+            <span className={`inline-block w-2 h-2 rounded-full ${orthoMode ? "bg-emerald-600 animate-pulse" : "bg-neutral-400"}`} />
+            MODO ORTO: {orthoMode ? "ATTIVO (0°/90°)" : "DISATTIVATO"}
+          </button>
           <div className="flex gap-1 rounded bg-neutral-200 p-0.5">
             <button
               onClick={() => setDefaultLineStyle({...defaultLineStyle, mode: 'pencil'})}
@@ -445,18 +551,6 @@ export default function App() {
               Schizzo (Matita)
             </button>
           </div>
-          <div className="h-4 w-[1px] bg-neutral-300" />
-          <button
-            onClick={() => setOrthoMode(!orthoMode)}
-            className={`px-3 py-1 rounded flex items-center gap-1.5 text-xs transition border font-semibold ${
-              orthoMode 
-                ? "bg-emerald-100 text-emerald-950 border-emerald-400" 
-                : "bg-neutral-100 text-neutral-600 border-neutral-300 hover:bg-neutral-200"
-            }`}
-          >
-            <span className={`inline-block w-2 h-2 rounded-full ${orthoMode ? "bg-emerald-600 animate-pulse" : "bg-neutral-400"}`} />
-            MODO ORTO: {orthoMode ? "ATTIVO (0°/90°)" : "DISATTIVATO"}
-          </button>
         </div>
       </div>
 

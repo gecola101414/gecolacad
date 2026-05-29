@@ -289,6 +289,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const [drawing, setDrawing] = useState<{
     start: Point;
     current: Point;
+    arcStartPoint?: Point;
+    arcDirection?: number;
     snapType?: 'standard' | 'smart';
     refPoint?: Point;
     refEntityId?: string;
@@ -346,7 +348,14 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const [selectionWindow, setSelectionWindow] = useState<{ start: Point; current: Point } | null>(null);
   const [dragOffset, setDragOffset] = useState<Point>({x: 0, y: 0});
   const [eraserPos, setEraserPos] = useState({x: 0, y: 0});
-  const [parallelDistance, setParallelDistance] = useState<number>(0);
+  const [parallelDistance, setParallelDistance] = useState<number>(() => {
+    try {
+        const saved = localStorage.getItem('lastParallelDistance');
+        return saved ? parseFloat(saved) : 10;
+    } catch(e) {
+        return 10;
+    }
+  });
   const [parallelDistanceHistory, setParallelDistanceHistory] = useState<number[]>([]);
   const [parallelMouse, setParallelMouse] = useState<Point | null>(null);
   const [isParallelWheelActive, setIsParallelWheelActive] = useState(false);
@@ -404,16 +413,54 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const isShiftPressedRef = useRef(false);
   const isPanningRef = useRef(false);
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Shift') {
-        setIsShiftPressed(true);
-        isShiftPressedRef.current = true;
-      }
-    };
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'Shift') {
         setIsShiftPressed(false);
         isShiftPressedRef.current = false;
+      }
+    };
+
+    const handleArrowsLine = (e: KeyboardEvent) => {
+      if (activeTool !== 'Line' || showManualInput) return;
+      
+      const keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+      if (!keys.includes(e.key)) return;
+
+      e.preventDefault();
+      
+      // Get current snap point as start if not already drawing
+      let currentStart = drawing?.start;
+      if (!currentStart) {
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const rawMouse = screenToCanvas(mouseScreenPosRef.current.x - rect.left, mouseScreenPosRef.current.y - rect.top);
+        const snapped = getSnappedPoint(rawMouse, entities, activeTool, null);
+        currentStart = snapped.point;
+      }
+
+      let lockedDir = { x: 0, y: 0 };
+      if (e.key === 'ArrowRight') lockedDir = { x: 1, y: 0 };
+      if (e.key === 'ArrowLeft') lockedDir = { x: -1, y: 0 };
+      if (e.key === 'ArrowDown') lockedDir = { x: 0, y: 1 };
+      if (e.key === 'ArrowUp') lockedDir = { x: 0, y: -1 };
+
+      setDrawing({
+        start: currentStart,
+        current: currentStart,
+        lockedDir: lockedDir,
+        isVirtual: true
+      });
+      
+      const screenPos = canvasToScreen(currentStart.x, currentStart.y);
+      setBubblePosition(screenPos);
+      setShowManualInput(true);
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      handleArrowsLine(e);
+      if (e.key === 'Shift') {
+        setIsShiftPressed(true);
+        isShiftPressedRef.current = true;
       }
     };
     const handleBlur = () => {
@@ -450,6 +497,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
      setActiveMoveSnapPoint(null);
      setCopySourceEntityIds([]);
      setClonedEntityIds(new Set());
+
+     if (activeTool === 'Parallel') {
+        setShowManualInput(true);
+        setBubblePosition(null); // Center screen
+     }
   }, [activeTool]);
 
   const getEntitiesInWindow = (start: Point, current: Point, entities: Entity[]): string[] => {
@@ -714,39 +766,36 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         });
 
         // 2. Line Extension Snaps (Specific to inclined lines or existing orientations)
-        // DISABLE extension snaps if orthoMode is on, to keep everything horizontal/vertical
-        if (!orthoMode) {
-            visibleEntities.forEach(entity => {
-                if (entity.type === 'line') {
-                    const line = entity as LineEntity;
-                    const dx = line.end.x - line.start.x;
-                    const dy = line.end.y - line.start.y;
-                    const L = Math.sqrt(dx * dx + dy * dy);
-                    if (L < 0.1) return;
+        visibleEntities.forEach(entity => {
+            if (entity.type === 'line') {
+                const line = entity as LineEntity;
+                const dx = line.end.x - line.start.x;
+                const dy = line.end.y - line.start.y;
+                const L = Math.sqrt(dx * dx + dy * dy);
+                if (L < 0.1) return;
 
-                    const nx = -dy / L;
-                    const ny = dx / L;
-                    
-                    const dist = (point.x - line.start.x) * nx + (point.y - line.start.y) * ny;
-                    if (Math.abs(dist) < threshold) {
-                        const snapPt = { x: point.x - nx * dist, y: point.y - ny * dist };
-                        const dStart = Math.sqrt((snapPt.x - line.start.x) ** 2 + (snapPt.y - line.end.x) ** 2);
-                        const dEnd = Math.sqrt((snapPt.x - line.end.x) ** 2 + (snapPt.y - line.end.y) ** 2);
-                        const refPoint = dStart < dEnd ? line.start : line.end;
+                const nx = -dy / L;
+                const ny = dx / L;
+                
+                const dist = (point.x - line.start.x) * nx + (point.y - line.start.y) * ny;
+                if (Math.abs(dist) < threshold) {
+                    const snapPt = { x: point.x - nx * dist, y: point.y - ny * dist };
+                    const dStart = Math.sqrt((snapPt.x - line.start.x) ** 2 + (snapPt.y - line.end.x) ** 2);
+                    const dEnd = Math.sqrt((snapPt.x - line.end.x) ** 2 + (snapPt.y - line.end.y) ** 2);
+                    const refPoint = dStart < dEnd ? line.start : line.end;
 
-                        const ang = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 180;
-                        if (Math.abs(ang - 0) > 0.5 && Math.abs(ang - 90) > 0.5 && Math.abs(ang - 180) > 0.5) {
-                            snaps.push({
-                                point: snapPt,
-                                type: 'smart',
-                                refPoint: refPoint,
-                                refEntityId: line.id
-                            });
-                        }
+                    const ang = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 180;
+                    if (Math.abs(ang - 0) > 0.5 && Math.abs(ang - 90) > 0.5 && Math.abs(ang - 180) > 0.5) {
+                        snaps.push({
+                            point: snapPt,
+                            type: 'smart',
+                            refPoint: refPoint,
+                            refEntityId: line.id
+                        });
                     }
                 }
-            });
-        }
+            }
+        });
     }
     
     return snaps;
@@ -833,7 +882,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       };
     }
     
-    return { point, snapped: false, type: 'standard' };
+    // Default case: no snaps found
+    return { point: point, snapped: false, type: 'standard' };
   };
 
   const distanceToSegment = (p: Point, s: Point, e: Point) => {
@@ -1349,7 +1399,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       }
 
       // Draw current drawing preview
-      if (drawing && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle')) {
+      if (drawing && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle' || activeTool === 'Arc')) {
         let isKnownAngle = false;
         let matchedAngle = 0;
         if (activeTool === 'Line') {
@@ -1437,10 +1487,39 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             } else if (activeTool === 'Circle') {
                 const radius = Math.sqrt(Math.pow(drawing.current.x - drawing.start.x, 2) + Math.pow(drawing.current.y - drawing.start.y, 2));
                 ctx.arc(drawing.start.x, drawing.start.y, radius, 0, Math.PI * 2);
-            } else {
+            } else if (activeTool === 'Rectangle') {
                 const width = drawing.current.x - drawing.start.x;
                 const height = drawing.current.y - drawing.start.y;
                 ctx.rect(drawing.start.x, drawing.start.y, width, height);
+            } else if (activeTool === 'Arc') {
+                if (!drawing.arcStartPoint) {
+                    // Previewing radius line
+                    const radius = Math.sqrt(Math.pow(drawing.current.x - drawing.start.x, 2) + Math.pow(drawing.current.y - drawing.start.y, 2));
+                    ctx.arc(drawing.start.x, drawing.start.y, radius, 0, Math.PI * 2);
+                    ctx.moveTo(drawing.start.x, drawing.start.y);
+                    ctx.lineTo(drawing.current.x, drawing.current.y);
+                } else {
+                    // Previewing arc angle
+                    const radius = Math.sqrt(Math.pow(drawing.arcStartPoint.x - drawing.start.x, 2) + Math.pow(drawing.arcStartPoint.y - drawing.start.y, 2));
+                    let startAngle = Math.atan2(drawing.arcStartPoint.y - drawing.start.y, drawing.arcStartPoint.x - drawing.start.x) * 180 / Math.PI;
+                    let endAngle = Math.atan2(drawing.current.y - drawing.start.y, drawing.current.x - drawing.start.x) * 180 / Math.PI;
+                    
+                    startAngle = (startAngle + 360) % 360;
+                    endAngle = (endAngle + 360) % 360;
+
+                    const diff = endAngle - startAngle;
+                    if (isShiftPressedRef.current) {
+                        const temp = startAngle;
+                        startAngle = endAngle;
+                        endAngle = temp;
+                    }
+
+                    ctx.arc(drawing.start.x, drawing.start.y, radius, startAngle * Math.PI / 180, endAngle * Math.PI / 180);
+                    
+                    // Draw indicator line to cursor
+                    ctx.moveTo(drawing.start.x, drawing.start.y);
+                    ctx.lineTo(drawing.current.x, drawing.current.y);
+                }
             }
             ctx.stroke();
         }
@@ -1478,6 +1557,14 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             label = `L = ${formatPrecision(tooltipLength)}`;
         } else if (activeTool === 'Circle') {
             label = `R = ${formatPrecision(tooltipLength)}`;
+        } else if (activeTool === 'Arc') {
+            if (!drawing.arcStartPoint) {
+                label = `R = ${formatPrecision(tooltipLength)}`;
+            } else {
+                let currentAngle = Math.atan2(drawing.current.y - drawing.start.y, drawing.current.x - drawing.start.x) * 180 / Math.PI;
+                currentAngle = (currentAngle + 360) % 360;
+                label = `A = ${formatPrecision(currentAngle)}°`;
+            }
         } else if (activeTool === 'Rectangle') {
             const w = Math.abs(tooltipDx);
             const h = Math.abs(tooltipDy);
@@ -1996,8 +2083,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       }
 
       // LENTE INGRANDIMENTO HUD FOR PRECISION MODE (Right click activated)
-      const isPrecisionModeActive = (drawing && drawing.wheelLength !== undefined) || 
-                                    (activeTool === 'Parallel' && selectedParallelLine && isParallelWheelActive);
+      const isPrecisionModeActive = (drawing && drawing.wheelLength !== undefined);
       
       if (isPrecisionModeActive) {
           // Identify the exact physical point in canvas units of the object being drawn / matched
@@ -3361,7 +3447,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       const wasLocked = isLocked;
       setIsLocked(false);
       
-      if (drawing && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle')) {
+      if (drawing && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle' || activeTool === 'Arc')) {
           let snappedResult;
 
           if (drawing.wheelLength !== undefined) {
@@ -3375,7 +3461,24 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                   hasDoubleSmart: false
               };
           } else {
-              const rawSnapped = getSnappedPoint(rawPoint, entities, activeTool, drawing);
+              const isOrthoHorizontal = activeTool === 'Line' && orthoMode && 
+                    Math.abs(rawPoint.x - drawing.start.x) >= Math.abs(rawPoint.y - drawing.start.y);
+
+              let finalPoint = rawPoint;
+              if (activeTool === 'Line' && orthoMode) {
+                  finalPoint = isOrthoHorizontal 
+                    ? { x: finalPoint.x, y: drawing.start.y } 
+                    : { x: drawing.start.x, y: finalPoint.y };
+              }
+
+              const rawSnapped = getSnappedPoint(finalPoint, entities, activeTool, drawing);
+              
+              if (activeTool === 'Line' && orthoMode) {
+                  rawSnapped.point = isOrthoHorizontal 
+                    ? { x: rawSnapped.point.x, y: drawing.start.y } 
+                    : { x: drawing.start.x, y: rawSnapped.point.y };
+              }
+
               if (rawSnapped.snapped) {
                   snappedResult = rawSnapped;
               } else {
@@ -3539,6 +3642,49 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 p2: snappedResult.point,
                 layer: activeLayerId
               };
+          } else if (activeTool === 'Arc') {
+              if (!drawing.arcStartPoint) {
+                  // Click 2: Anchor the first angle and radius
+                  setDrawing({
+                      ...drawing,
+                      arcStartPoint: snappedResult.point,
+                      current: snappedResult.point,
+                      snapType: undefined,
+                      refPoint: undefined,
+                  });
+                  return; // Don't finalize entity yet
+              } else {
+                  // Click 3: Finalize arc
+                  const radius = Math.sqrt(Math.pow(drawing.arcStartPoint.x - drawing.start.x, 2) + Math.pow(drawing.arcStartPoint.y - drawing.start.y, 2));
+                  let startAngle = Math.atan2(drawing.arcStartPoint.y - drawing.start.y, drawing.arcStartPoint.x - drawing.start.x) * 180 / Math.PI;
+                  let endAngle = Math.atan2(snappedResult.point.y - drawing.start.y, snappedResult.point.x - drawing.start.x) * 180 / Math.PI;
+                  
+                  startAngle = (startAngle + 360) % 360;
+                  endAngle = (endAngle + 360) % 360;
+
+                  // Sweep direction behavior
+                  // Assume we draw counter-clockwise from start to end by default.
+                  if (isShiftPressedRef.current) {
+                      // Swap to draw the other way
+                      const temp = startAngle;
+                      startAngle = endAngle;
+                      endAngle = temp;
+                  }
+
+                  newEntity = {
+                      id: Date.now().toString(),
+                      type: 'arc',
+                      color: defaultLineStyle.color,
+                      lineWidth: defaultLineStyle.lineWidth,
+                      dashed: defaultLineStyle.dashed,
+                      mode: defaultLineStyle.mode,
+                      center: drawing.start,
+                      radius: radius,
+                      startAngle: startAngle,
+                      endAngle: endAngle,
+                      layer: activeLayerId
+                  };
+              }
           }
           if (newEntity && !drawing.isVirtual) {
               setEntities(prev => {
@@ -3836,7 +3982,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             setSelectionWindow({ start: rawPoint, current: rawPoint });
         }
     } else if (activeTool === 'Parallel') {
-        // Reset (Duplicate removed)
+        const found = getLineAtPoint(rawPoint);
+        if (found) {
+            setSelectedParallelLine(found);
+        }
     } else if (activeTool === 'Dimension') {
         const clickedEntity = getEntityAtPoint(rawPoint);
         if (clickedEntity && clickedEntity.type === 'dimension') {
@@ -4154,34 +4303,35 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 activeConstraint: undefined
             });
           } else {
-            let finalPoint = rawPoint;
-            const isOrthoHorizontal = activeTool === 'Line' && orthoMode && Math.abs(rawPoint.x - drawing.start.x) >= Math.abs(rawPoint.y - drawing.start.y);
+            const isOrthoHorizontal = activeTool === 'Line' && orthoMode && 
+                  Math.abs(rawPoint.x - drawing.start.x) >= Math.abs(rawPoint.y - drawing.start.y);
 
-            // Apply constraint enforcement
-            if (drawing.activeConstraint) {
-                if (drawing.activeConstraint.axis === 'x') finalPoint.x = drawing.activeConstraint.value;
-                else finalPoint.y = drawing.activeConstraint.value;
-            }
-            
+            let finalPoint = rawPoint;
+
             if (activeTool === 'Line') {
-              if (orthoMode) {
-                finalPoint = isOrthoHorizontal ? { x: finalPoint.x, y: drawing.start.y } : { x: drawing.start.x, y: finalPoint.y };
-              } else if (!e.shiftKey) {
-                finalPoint = applyAngleSnapping(drawing.start, rawPoint);
-              }
+                if (orthoMode) {
+                    finalPoint = isOrthoHorizontal 
+                      ? { x: finalPoint.x, y: drawing.start.y } 
+                      : { x: drawing.start.x, y: finalPoint.y };
+                } else if (!e.shiftKey) {
+                    finalPoint = applyAngleSnapping(drawing.start, rawPoint);
+                }
             }
 
             const snapped = getSnappedPoint(finalPoint, entities, activeTool, drawing);
             let snappedPoint = snapped.point;
-            if (activeTool === 'Line' && orthoMode && !snapped.snapped) {
-              // absolute rigidity of Ortho line: project snapping back onto orthogonal coordinate
-              snappedPoint = isOrthoHorizontal ? { x: snappedPoint.x, y: drawing.start.y } : { x: drawing.start.x, y: snappedPoint.y };
-            }
-            // If it's a smart snap while in ortho mode, ensure it stays orthogonal if it's alignment-based
-            if (activeTool === 'Line' && orthoMode && snapped.snapped && snapped.type === 'smart') {
-                snappedPoint = isOrthoHorizontal ? { x: snappedPoint.x, y: drawing.start.y } : { x: drawing.start.x, y: snappedPoint.y };
+
+            if (activeTool === 'Line' && orthoMode) {
+                snappedPoint = isOrthoHorizontal 
+                  ? { x: snappedPoint.x, y: drawing.start.y } 
+                  : { x: drawing.start.x, y: snappedPoint.y };
             }
 
+            if (!snapped.snapped && !orthoMode && drawing.activeConstraint) {
+                if (drawing.activeConstraint.axis === 'x') snappedPoint.x = drawing.activeConstraint.value;
+                else snappedPoint.y = drawing.activeConstraint.value;
+            }
+            
             setDrawing({ 
                 ...drawing, 
                 current: snappedPoint, 
@@ -4240,7 +4390,17 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     if (Math.abs(deltaX) > 1e-6 || Math.abs(deltaY) > 1e-6) {
         const updater = (prev: Entity[]) => prev.map(ent => {
             if (targetIds.includes(ent.id)) {
-                if (ent.type === 'line') return { ...ent, start: { x: ent.start.x + deltaX, y: ent.start.y + deltaY }, end: { x: ent.end.x + deltaX, y: ent.end.y + deltaY } };
+                if (ent.type === 'line') {
+                    const movedEntity = { 
+                        ...ent, 
+                        start: { x: ent.start.x + deltaX, y: ent.start.y + deltaY }, 
+                        end: { x: ent.end.x + deltaX, y: ent.end.y + deltaY } 
+                    };
+                    if (ent.isFreehand && ent.inkPoints) {
+                        movedEntity.inkPoints = ent.inkPoints.map(p => ({ ...p, x: p.x + deltaX, y: p.y + deltaY }));
+                    }
+                    return movedEntity;
+                }
                 if (ent.type === 'circle') return { ...ent, center: { x: ent.center.x + deltaX, y: ent.center.y + deltaY } };
                 if (ent.type === 'rectangle') return { ...ent, p1: { x: ent.p1.x + deltaX, y: ent.p1.y + deltaY }, p2: { x: ent.p2.x + deltaX, y: ent.p2.y + deltaY } };
                 if (ent.type === 'point') return { ...ent, point: { x: ent.point.x + deltaX, y: ent.point.y + deltaY } };
@@ -4520,6 +4680,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
+
+    if (activeTool === 'Join') {
+        if (confirmJoin()) return;
+    }
     
     // Toggle style if in drawing mode and NOT yet drawing the first point
     const isDrawingTool = ['Line', 'Circle', 'Arc', 'Rectangle', 'Point', 'Dimension'].includes(activeTool);
@@ -4542,6 +4706,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     };
 
     escAction();
+    setActiveTool('Line');
     onContextMenu?.(e);
   };
 
@@ -4621,14 +4786,69 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     };
   }, [activeTool, dragEntityIds, entities, drawing, selectedParallelLine, showManualInput]);
 
+    const moveLineParallel = (line: LineEntity, length: number, rawPoint: Point) => {
+        const dxLine = line.end.x - line.start.x;
+        const dyLine = line.end.y - line.start.y;
+        const L = Math.sqrt(dxLine * dxLine + dyLine * dyLine);
+        if (L > 0) {
+            const normX = -dyLine / L;
+            const normY = dxLine / L;
+            
+            const vecMouse = { x: rawPoint.x - line.start.x, y: rawPoint.y - line.start.y };
+            const dir = (vecMouse.x * normX + vecMouse.y * normY) >= 0 ? 1 : -1;
+            
+            const offsetX = normX * length * dir;
+            const offsetY = normY * length * dir;
+            
+            setEntities(prev => {
+                const next = prev.map(ent => {
+                    if (ent.id === line.id) {
+                        return { 
+                            ...ent, 
+                            start: { x: ent.start.x + offsetX, y: ent.start.y + offsetY },
+                            end: { x: ent.end.x + offsetX, y: ent.end.y + offsetY }
+                        };
+                    }
+                    return ent;
+                });
+                onCommitHistory?.(next); 
+                return next;
+            });
+            return true;
+        }
+        return false;
+    };
+
   const handleManualCommit = (tool: string, data: any) => {
+    if (tool === 'Parallel') {
+        const dist = data.val1;
+        setParallelDistance(dist);
+        localStorage.setItem('lastParallelDistance', dist.toString());
+        setParallelDistanceHistory(prev => [dist, ...prev.slice(0, 4)]);
+        
+        if (selectedParallelLine) {
+            moveLineParallel(selectedParallelLine as LineEntity, dist, parallelMouse || {x: (selectedParallelLine as LineEntity).start.x, y: (selectedParallelLine as LineEntity).start.y + dist});
+        }
+        setShowManualInput(false);
+        return;
+    }
     if (tool === 'Line' && drawing) {
         const L = data.val1;
-        const A = data.val2;
-        const finalPoint = {
-            x: drawing.start.x + L * Math.cos(A * Math.PI / 180),
-            y: drawing.start.y + L * Math.sin(A * Math.PI / 180)
-        };
+        let finalPoint: Point;
+        
+        if (drawing.lockedDir) {
+            finalPoint = {
+                x: drawing.start.x + L * drawing.lockedDir.x,
+                y: drawing.start.y + L * drawing.lockedDir.y
+            };
+        } else {
+            const A = data.val2;
+            finalPoint = {
+                x: drawing.start.x + L * Math.cos(A * Math.PI / 180),
+                y: drawing.start.y + L * Math.sin(A * Math.PI / 180)
+            };
+        }
+        
         const newEntity: Entity = {
             id: Date.now().toString(),
             type: 'line',
@@ -4798,22 +5018,21 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     >
       <canvas ref={canvasRef} />
       
-      {/* Precision Lens Manual Input */}
-      {isPrecisionActive && showManualInput && bubblePosition && (
+      {showManualInput && (
           <ManualInputOverlay
               type={activeTool === "Parallel" ? "parallel" : (activeTool.toLowerCase() as any)}
               drawing={drawing || undefined}
               parallelLine={activeTool === "Parallel" ? { 
-                  start: (selectedParallelLine as LineEntity).start, 
-                  end: (selectedParallelLine as LineEntity).end, 
-                  mouse: actualMousePosRef.current,
+                  start: selectedParallelLine?.type === 'line' ? (selectedParallelLine as LineEntity).start : { x: 0, y: 0 }, 
+                  end: selectedParallelLine?.type === 'line' ? (selectedParallelLine as LineEntity).end : { x: 0, y: 0 }, 
+                  mouse: parallelMouse || lastMouseRef.current,
                   distance: parallelDistance
               } : undefined}
               canvasToScreen={canvasToScreen}
               onCommit={(data) => { 
+                  handleManualCommit(activeTool, data); 
                   setShowManualInput(false); 
                   setBubblePosition(null);
-                  handleManualCommit(activeTool, data); 
               }}
               isOpen={showManualInput}
               onClose={() => {
@@ -4823,33 +5042,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
               position={bubblePosition}
           />
       )}
-
-      {drawing && !drawing.isFreehand && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle') && drawing.wheelLength === undefined && (
-        <ManualInputOverlay
-            type={activeTool.toLowerCase() as any}
-            drawing={drawing}
-            canvasToScreen={canvasToScreen}
-            onCommit={(data) => { setShowManualInput(false); handleManualCommit(activeTool, data); }}
-            isOpen={showManualInput}
-            onClose={() => setShowManualInput(false)}
-        />
-      )}
-      {activeTool === 'Parallel' && selectedParallelLine && parallelMouse && !isParallelWheelActive && (
-        <ManualInputOverlay
-            type="parallel"
-            parallelLine={{ 
-                start: (selectedParallelLine as LineEntity).start, 
-                end: (selectedParallelLine as LineEntity).end, 
-                mouse: parallelMouse,
-                distance: parallelDistance
-            }}
-            canvasToScreen={canvasToScreen}
-            onCommit={(data) => { setShowManualInput(false); handleManualCommit(activeTool, data); }}
-            isOpen={showManualInput}
-            onClose={() => setShowManualInput(false)}
-        />
-      )}
-      {/* ManualInputOverlay for other tools if needed */}
     </div>
   );
 });

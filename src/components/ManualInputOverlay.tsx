@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Point } from '../types';
+import { Mic, MicOff, MoveHorizontal } from 'lucide-react';
 
 interface ManualInputOverlayProps {
     type: 'line' | 'circle' | 'rectangle' | 'parallel';
-    drawing?: { start: Point, current: Point };
+    drawing?: { start: Point, current: Point, lockedDir?: Point };
     parallelLine?: { start: Point, end: Point, mouse: Point, distance?: number };
     canvasToScreen: (x: number, y: number) => { x: number, y: number };
     onCommit: (data: any) => void;
@@ -54,6 +55,15 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
 
     const [val1, setVal1] = useState('');
     const [val2, setVal2] = useState('');
+    const [isListening, setIsListening] = useState(false);
+    const [transcriptPreview, setTranscriptPreview] = useState('');
+    const recognitionRef = useRef<any>(null);
+
+    // Jog slider state
+    const [isJogging, setIsJogging] = useState(false);
+    const [jogDisplayDiff, setJogDisplayDiff] = useState(0);
+    const jogRef = useRef({ startX: 0, currentX: 0 });
+    const jogAnimRef = useRef<number | null>(null);
 
     useEffect(() => {
         if (isOpen) {
@@ -63,8 +73,174 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
                 setVal1(initVal1.toFixed(2));
             }
             setVal2(initVal2.toFixed(2));
+            setTranscriptPreview('');
         }
     }, [isOpen, initVal1, initVal2, type]);
+
+    // Speech Recognition Setup
+    useEffect(() => {
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (!SpeechRecognition) return;
+
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'it-IT';
+
+        const italianNumbers: { [key: string]: string } = {
+            'zero': '0', 'uno': '1', 'due': '2', 'tre': '3', 'quattro': '4',
+            'cinque': '5', 'sei': '6', 'sette': '7', 'otto': '8', 'nove': '9',
+            'dieci': '10', 'undici': '11', 'dodici': '12', 'tredici': '13',
+            'quattordici': '14', 'quindici': '15', 'sedici': '16', 'diciassette': '17',
+            'diciotto': '18', 'diciannove': '19', 'venti': '20', 'trenta': '30',
+            'quaranta': '40', 'cinquanta': '50', 'sessanta': '60', 'settanta': '70',
+            'ottanta': '80', 'novanta': '90', 'cento': '100'
+        };
+
+        recognition.onresult = (event: any) => {
+            let transcript = '';
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                transcript += event.results[i][0].transcript.toLowerCase();
+            }
+
+            if (transcript) {
+                setTranscriptPreview(transcript);
+                
+                // Remove spaces and replace separators
+                let processed = transcript.replace(/virgola/g, '.').replace(/punto/g, '.').replace(/meno/g, '-').replace(/\s+/g, '');
+                
+                // Extract numbers
+                const numbers = processed.match(/-?\d+(?:[.,]\d+)?/g);
+                if (numbers && numbers.length > 0) {
+                    setVal1(numbers[numbers.length - 1]);
+                }
+            }
+        };
+
+        recognition.onerror = (event: any) => {
+            console.error('Speech recognition error:', event.error);
+            if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+                setIsListening(false);
+                isListeningRef.current = false;
+            }
+        };
+
+        recognition.onend = () => {
+            if (isListeningRef.current) {
+                try {
+                    recognition.start();
+                } catch(e) {
+                    setTimeout(() => {
+                        if (isListeningRef.current) try { recognition.start(); } catch(e2) {}
+                    }, 50);
+                }
+            }
+        };
+
+        recognitionRef.current = recognition;
+        
+        return () => {
+            recognition.abort();
+        };
+    }, []);
+
+    const isListeningRef = useRef(false);
+    const startListening = (e: React.MouseEvent | React.TouchEvent) => {
+        e.preventDefault();
+        if (!recognitionRef.current) return;
+        setVal1('');
+        setTranscriptPreview('In ascolto...');
+        setIsListening(true);
+        isListeningRef.current = true;
+        try {
+            recognitionRef.current.start();
+        } catch(e) {
+            // ignore
+        }
+    };
+
+
+    const stopListening = () => {
+        if (!recognitionRef.current) return;
+        setIsListening(false);
+        isListeningRef.current = false;
+        try {
+            recognitionRef.current.stop();
+        } catch(e) {
+            // ignore
+        }
+    };
+
+    const handleIncrement = (amount: number) => {
+        setVal1(prev => {
+            const current = parseFloat(prev.replace(',', '.')) || 0;
+            return (current + amount).toFixed(2);
+        });
+    };
+
+    // Jog Slider Logic
+    const startJog = (e: React.MouseEvent | React.TouchEvent) => {
+        e.preventDefault();
+        const x = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+        jogRef.current = { startX: x, currentX: x };
+        setIsJogging(true);
+    };
+
+    useEffect(() => {
+        if (!isJogging) return;
+
+        let lastTime = performance.now();
+        const animate = (time: number) => {
+            const deltaTime = (time - lastTime) / 1000;
+            lastTime = time;
+
+            const diff = jogRef.current.currentX - jogRef.current.startX;
+            if (Math.abs(diff) > 2) { // lowered threshold for better response
+                setVal1(prev => {
+                    const currentStr = prev === '' ? '0' : prev;
+                    const current = parseFloat(currentStr.replace(',', '.')) || 0;
+                    // Linear + Quadratic sensitivity
+                    const linearPart = diff * 0.1;
+                    const quadraticPart = Math.sign(diff) * Math.pow(diff / 50, 2) * 5;
+                    const speed = linearPart + quadraticPart;
+                    const newValue = current + (speed * deltaTime);
+                    return newValue.toFixed(2);
+                });
+            }
+            jogAnimRef.current = requestAnimationFrame(animate);
+        };
+        jogAnimRef.current = requestAnimationFrame(animate);
+
+        return () => {
+            if (jogAnimRef.current) cancelAnimationFrame(jogAnimRef.current);
+        };
+    }, [isJogging]);
+
+    useEffect(() => {
+        const handleMove = (e: MouseEvent | TouchEvent) => {
+            if (!isJogging) return;
+            const x = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
+            jogRef.current.currentX = x;
+            setJogDisplayDiff(x - jogRef.current.startX);
+        };
+        const handleUp = () => {
+            setIsJogging(false);
+            setJogDisplayDiff(0);
+        };
+
+        if (isJogging) {
+            window.addEventListener('mousemove', handleMove);
+            window.addEventListener('mouseup', handleUp);
+            window.addEventListener('touchmove', handleMove);
+            window.addEventListener('touchend', handleUp);
+        }
+        return () => {
+            window.removeEventListener('mousemove', handleMove);
+            window.removeEventListener('mouseup', handleUp);
+            window.removeEventListener('touchmove', handleMove);
+            window.removeEventListener('touchend', handleUp);
+        };
+    }, [isJogging]);
 
     const handleSubmit = (e?: React.FormEvent) => {
         e?.preventDefault();
@@ -108,66 +284,148 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
     return (
         <div 
             className={position ? "absolute z-[100] pointer-events-none" : "fixed inset-0 flex items-center justify-center z-[100] bg-transparent pointer-events-none"} 
-            style={position ? { left: position.x - 80, top: position.y - 40 } : {}}
+            style={position ? { left: position.x - 80, top: position.y - 60 } : {}}
             onMouseDown={e => e.stopPropagation()} 
             onMouseMove={e => e.stopPropagation()} 
             onMouseUp={e => e.stopPropagation()} 
             onWheel={e => e.stopPropagation()}
         >
             <form 
-                className="bg-slate-900/90 backdrop-blur-xl text-white p-2 rounded shadow-[0_0_20px_rgba(0,0,0,0.5)] flex flex-col gap-2 min-w-[160px] border border-emerald-500/30 pointer-events-auto text-xs"
+                className="bg-slate-900/95 backdrop-blur-xl text-white p-3 rounded-lg shadow-[0_10px_40px_rgba(0,0,0,0.6)] flex flex-col gap-3 min-w-[200px] border border-emerald-500/40 pointer-events-auto text-xs"
                 onSubmit={handleSubmit}
                 onKeyDown={handleKeyDown}
             >
-                <div className="flex justify-between items-center pb-1 border-b border-slate-400/50">
-                    <div className="text-xs font-bold text-slate-100">
-                        Inserimento
+                <div className="flex justify-between items-center pb-2 border-b border-slate-700">
+                    <div className="text-[10px] uppercase font-bold tracking-tight text-emerald-400">
+                        {drawing?.lockedDir ? "Linea Ortogonale" : "Input"}
                     </div>
+                    {isListening && (
+                        <div className="flex flex-col items-end gap-0.5 max-w-[100px]">
+                            <div className="text-[9px] animate-pulse text-red-400 font-bold">In ascolto...</div>
+                            <div className="text-[8px] text-slate-400 truncate w-full text-right italic">
+                                {transcriptPreview}
+                            </div>
+                        </div>
+                    )}
                 </div>
                 
-                {type === 'line' && (
-                    <>
-                        <label className="flex items-center gap-2 justify-between">
-                            L: <input type="text" autoFocus onFocus={e => e.target.select()} value={val1} onChange={e => setVal1(e.target.value)} className="w-16 bg-slate-800/60 border border-slate-500/50 px-1 py-0.5 rounded text-right outline-none focus:border-indigo-400" />
-                        </label>
-                        <label className="flex items-center gap-2 justify-between">
-                            A: <input type="text" onFocus={e => e.target.select()} value={val2} onChange={e => setVal2(e.target.value)} className="w-16 bg-slate-800/60 border border-slate-500/50 px-1 py-0.5 rounded text-right outline-none focus:border-indigo-400" />
-                        </label>
-                    </>
-                )}
-                
-                {type === 'circle' && (
-                    <label className="flex items-center gap-2 justify-between">
-                        R: <input type="text" autoFocus onFocus={e => e.target.select()} value={val1} onChange={e => setVal1(e.target.value)} className="w-16 bg-slate-800/60 border border-slate-500/50 px-1 py-0.5 rounded text-right outline-none focus:border-indigo-400" />
-                    </label>
-                )}
+                <div className="flex flex-col gap-3">
+                    {/* Primary Input with Microphone */}
+                    <div className="flex items-center gap-2">
+                        <span className="w-8 text-slate-400 font-mono text-[10px]">
+                            {type === 'line' ? 'L:' : type === 'circle' ? 'R:' : type === 'rectangle' ? 'W:' : 'Dist:'}
+                        </span>
+                        <div className="flex-1 relative">
+                            <input 
+                                type="text" 
+                                autoFocus 
+                                onFocus={e => e.target.select()} 
+                                value={val1} 
+                                onChange={e => setVal1(e.target.value)} 
+                                className="w-full bg-slate-800 border border-slate-600 px-2 py-1.5 rounded text-right outline-none focus:border-emerald-500 font-mono text-sm" 
+                            />
+                        </div>
+                        <button 
+                            type="button" 
+                            onMouseDown={startListening}
+                            onMouseUp={stopListening}
+                            onMouseLeave={stopListening}
+                            onTouchStart={startListening}
+                            onTouchEnd={stopListening}
+                            className={`p-1.5 rounded-full transition-all ${isListening ? 'bg-red-500 text-white shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
+                        >
+                            {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+                        </button>
+                    </div>
 
-                {type === 'rectangle' && (
-                    <>
-                        <label className="flex items-center gap-2 justify-between">
-                            W: <input type="text" autoFocus onFocus={e => e.target.select()} value={val1} onChange={e => setVal1(e.target.value)} className="w-16 bg-slate-800/60 border border-slate-500/50 px-1 py-0.5 rounded text-right outline-none focus:border-indigo-400" />
-                        </label>
-                        <label className="flex items-center gap-2 justify-between">
-                            H: <input type="text" onFocus={e => e.target.select()} value={val2} onChange={e => setVal2(e.target.value)} className="w-16 bg-slate-800/60 border border-slate-500/50 px-1 py-0.5 rounded text-right outline-none focus:border-indigo-400" />
-                        </label>
-                    </>
-                )}
+                    {/* Jog Slider Bar (The "Barretta") */}
+                    <div className="flex flex-col gap-1.5 px-0.5">
+                        <div className="flex h-10 gap-0.5 rounded-lg overflow-hidden border border-slate-700 bg-slate-800/30 shadow-inner">
+                            <button 
+                                type="button"
+                                onClick={() => handleIncrement(-1)}
+                                className="w-10 bg-red-950/40 hover:bg-red-900/60 transition-colors text-red-500 font-bold border-r border-slate-700/50 flex items-center justify-center active:scale-95 shadow-inner"
+                            >
+                                <span className="text-[10px]">-1</span>
+                            </button>
+                            <button 
+                                type="button"
+                                onClick={() => handleIncrement(-0.1)}
+                                className="w-12 bg-red-800/10 hover:bg-red-700/20 transition-colors text-red-400 border-r border-slate-700/50 flex items-center justify-center active:scale-95"
+                            >
+                                <span className="text-[10px]">-0,1</span>
+                            </button>
+                            
+                            <div 
+                                className="flex-1 relative cursor-ew-resize select-none flex items-center justify-center group bg-slate-900/30"
+                                onMouseDown={startJog}
+                                onTouchStart={startJog}
+                            >
+                                <div className="absolute inset-x-0 h-[1px] bg-emerald-500/5 top-1/2 -translate-y-1/2" />
+                                <div className="absolute inset-y-0 w-px bg-slate-700/50 left-1/2 -translate-x-1/2" /> {/* Center mark */}
+                                <div className="w-1.5 h-6 bg-emerald-500/50 rounded-full z-10 shadow-[0_0_8px_rgba(16,185,129,0.3)]" />
+                                
+                                {isJogging && (
+                                    <div 
+                                        className="absolute bg-emerald-500/10 h-full backdrop-blur-[1px]" 
+                                        style={{ 
+                                            left: '50%',
+                                            width: Math.abs(jogDisplayDiff),
+                                            transform: `translateX(${jogDisplayDiff > 0 ? '0' : '-100%'})`
+                                        }} 
+                                    />
+                                )}
+                                <MoveHorizontal size={12} className="absolute bottom-1 right-1 text-slate-700 group-hover:text-emerald-500/20 transition-colors" />
+                            </div>
 
-                {type === 'parallel' && (
-                    <label className="flex items-center gap-2 justify-between text-cyan-200">
-                        Dist: <input type="text" autoFocus onFocus={e => e.target.select()} value={val1} onChange={e => setVal1(e.target.value)} className="w-16 bg-slate-800/60 border border-slate-500/50 text-white px-1 py-0.5 rounded text-right outline-none focus:border-indigo-400" />
-                    </label>
-                )}
+                            <button 
+                                type="button"
+                                onClick={() => handleIncrement(0.1)}
+                                className="w-12 bg-emerald-800/10 hover:bg-emerald-700/20 transition-colors text-emerald-400 border-l border-slate-700/50 flex items-center justify-center active:scale-95"
+                            >
+                                <span className="text-[10px]">+0,1</span>
+                            </button>
+                            <button 
+                                type="button"
+                                onClick={() => handleIncrement(1)}
+                                className="w-10 bg-emerald-950/40 hover:bg-emerald-900/60 transition-colors text-emerald-500 font-bold border-l border-slate-700/50 flex items-center justify-center active:scale-95 shadow-inner"
+                            >
+                                <span className="text-[10px]">+1</span>
+                            </button>
+                        </div>
+                        <div className="text-[8px] text-slate-600 uppercase tracking-widest text-center">Regolazione Dinamica</div>
+                    </div>
 
-                <div className="flex gap-1 mt-1">
-                    <button type="submit" className="flex-1 bg-indigo-500/80 hover:bg-indigo-400/80 text-white py-1 rounded text-xs transition-colors">
-                        OK
+                    {/* Secondary Input for Angle/Height */}
+                    {(type === 'line' && !drawing?.lockedDir) || type === 'rectangle' ? (
+                        <div className="flex items-center gap-2">
+                             <span className="w-8 text-slate-400 font-mono text-[10px]">
+                                {type === 'line' ? 'A:' : 'H:'}
+                            </span>
+                            <div className="flex-1">
+                                <input 
+                                    type="text" 
+                                    onFocus={e => e.target.select()} 
+                                    value={val2} 
+                                    onChange={e => setVal2(e.target.value)} 
+                                    className="w-full bg-slate-800 border border-slate-600 px-2 py-1.5 rounded text-right outline-none focus:border-indigo-500 font-mono text-sm" 
+                                />
+                            </div>
+                            <div className="w-8" /> {/* Spacer to match mic button */}
+                        </div>
+                    ) : null}
+                </div>
+
+                <div className="flex gap-2 mt-2 pt-2 border-t border-slate-700">
+                    <button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-md text-xs font-bold transition-all shadow-lg active:scale-95 uppercase tracking-wide">
+                        Conferma
                     </button>
-                    <button type="button" onClick={onClose} className="flex-1 bg-slate-600/80 hover:bg-slate-500/80 text-white py-1 rounded text-xs transition-colors">
-                        X
+                    <button type="button" onClick={onClose} className="bg-slate-700 hover:bg-slate-600 text-slate-300 px-4 py-2 rounded-md text-xs transition-all active:scale-95">
+                        Annulla
                     </button>
                 </div>
             </form>
         </div>
     );
 };
+
