@@ -9,8 +9,11 @@ import { CADCanvas } from "./components/CADCanvas";
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 import { DimensionStyleDialog } from "./components/DimensionStyleDialog";
+import { RaccordoDialog } from "./components/RaccordoDialog";
+import { DXFTextReaderDialog } from "./components/DXFTextReaderDialog";
 import { TemplatePreview } from "./components/TemplatePreview";
 import { TEMPLATES } from './data/templates';
+import { GUIDE_DATABASE, GuideItem } from './data/guides';
 import { Entity, Point, Layer, Measurement, Tavola } from "./types";
 import { mergeAllSegments } from "./utils/entityUtils";
 import { parseScriptToEntities, updateScriptVariables } from "./utils/parametricParser";
@@ -45,7 +48,9 @@ import {
   Save,
   FolderOpen,
   Type,
-  FileUp
+  FileUp,
+  Code,
+  BookOpen
 } from "lucide-react";
 
 const ParallelIcon = ({ size = 16 }: { size?: number }) => (
@@ -61,6 +66,41 @@ const ParallelIcon = ({ size = 16 }: { size?: number }) => (
   >
     <path d="M5 20L15 4" />
     <path d="M9 20L19 4" />
+  </svg>
+);
+
+const RaccordoIcon = ({ size = 16 }: { size?: number }) => (
+  <svg 
+    width={size} 
+    height={size} 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    stroke="currentColor" 
+    strokeWidth="2" 
+    strokeLinecap="round" 
+    strokeLinejoin="round"
+  >
+    <path d="M4 20V12A8 8 0 0 1 12 4H20" />
+    <circle cx="4" cy="20" r="1" fill="currentColor" />
+    <circle cx="20" cy="4" r="1" fill="currentColor" />
+  </svg>
+);
+
+const OrthoIcon = ({ size = 16 }: { size?: number }) => (
+  <svg 
+    width={size} 
+    height={size} 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    stroke="currentColor" 
+    strokeWidth="2" 
+    strokeLinecap="round" 
+    strokeLinejoin="round"
+  >
+    <path d="M5 5V19H19" />
+    <circle cx="5" cy="5" r="1" fill="currentColor" />
+    <circle cx="19" cy="19" r="1" fill="currentColor" />
+    <path d="M5 19h5v-5H5" strokeWidth="1" strokeDasharray="2,2" />
   </svg>
 );
 
@@ -93,6 +133,13 @@ export default function App() {
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isDimensionDialogOpen, setIsDimensionDialogOpen] = useState(false);
+  const [isRaccordoDialogOpen, setIsRaccordoDialogOpen] = useState(false);
+  const [isDXFTextReaderOpen, setIsDXFTextReaderOpen] = useState(false);
+  const [editingRaccordo, setEditingRaccordo] = useState<Entity | null>(null);
+  const [raccordoConfig, setRaccordoConfig] = useState<{ type: 'curvo' | 'rettilineo'; value: number }>({
+    type: 'curvo',
+    value: 10,
+  });
   /* const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -106,7 +153,10 @@ export default function App() {
     { id: "tav4", name: "Tavola n. 4", format: "A1", scale: 500, unit: "cm", position: { x: 40, y: 30 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 4", autore: "Ing. Domenico Gimondo", data: "2026" } },
     { id: "tav5", name: "Tavola n. 5", format: "A0", scale: 1000, unit: "cm", position: { x: 0, y: 0 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 5", autore: "Ing. Domenico Gimondo", data: "2026" } },
   ]);
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere' | 'testo' | 'gemini'>('penne');
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere' | 'testo' | 'gemini' | 'manuale'>('penne');
+  const [hoveredGuide, setHoveredGuide] = useState<GuideItem | null>(null);
+  const [guideLockedBy, setGuideLockedBy] = useState<string | null>(null);
+  const [showFloatingManual, setShowFloatingManual] = useState(true);
   const [geminiPrompt, setGeminiPrompt] = useState("");
   const [geminiResponse, setGeminiResponse] = useState<{
     explanation: string;
@@ -370,6 +420,20 @@ export default function App() {
     }
   };
 
+  const handleGuideHover = (key: string) => {
+    if (GUIDE_DATABASE[key]) {
+      setHoveredGuide(GUIDE_DATABASE[key]);
+      setGuideLockedBy(key);
+    }
+  };
+
+  const handleGuideClick = (key: string) => {
+    if (guideLockedBy === key) {
+      setHoveredGuide(null);
+      setGuideLockedBy(null);
+    }
+  };
+
   const selectedEntity = entities.find((e) => e.id === selectedId);
 
   const updateEntity = (id: string, updates: Partial<Entity>) => {
@@ -398,6 +462,7 @@ export default function App() {
         { name: "Eraser", icon: Eraser },
         { name: "Parallel", icon: ParallelIcon },
         { name: "Join", icon: Link },
+        { name: "Raccordo", icon: RaccordoIcon },
         { name: "Move", icon: Move },
         { name: "Copy", icon: Copy },
         { name: "Dimension", icon: Ruler },
@@ -504,16 +569,27 @@ export default function App() {
         </button>
 
         <div className="flex items-center justify-center px-4 gap-3 border-l border-neutral-300 bg-neutral-50/50">
-          <button onClick={undo} title="Annulla" className="p-1.5 bg-white rounded shadow-sm border border-neutral-200 hover:bg-neutral-100 hover:text-indigo-600 transition-colors text-neutral-600">
+          <button
+            onClick={() => { handleGuideClick('Annulla'); undo(); }}
+            onMouseEnter={() => handleGuideHover('Annulla')}
+            title="Annulla"
+            className="p-1.5 bg-white rounded shadow-sm border border-neutral-200 hover:bg-neutral-100 hover:text-indigo-600 transition-colors text-neutral-600"
+          >
             <Undo size={16} />
           </button>
-          <button onClick={redo} title="Ripristina" className="p-1.5 bg-white rounded shadow-sm border border-neutral-200 hover:bg-neutral-100 hover:text-indigo-600 transition-colors text-neutral-600">
+          <button
+            onClick={() => { handleGuideClick('Ripristina'); redo(); }}
+            onMouseEnter={() => handleGuideHover('Ripristina')}
+            title="Ripristina"
+            className="p-1.5 bg-white rounded shadow-sm border border-neutral-200 hover:bg-neutral-100 hover:text-indigo-600 transition-colors text-neutral-600"
+          >
             <Redo size={16} />
           </button>
         </div>
 
         <button
           onClick={() => {
+            handleGuideClick('Layers');
             if (activeSidebarTab === 'layers' && showProperties) {
               setShowProperties(false);
             } else {
@@ -521,6 +597,7 @@ export default function App() {
               setShowProperties(true);
             }
           }}
+          onMouseEnter={() => handleGuideHover('Layers')}
           className={`px-4 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 ${showProperties && activeSidebarTab === 'layers' ? "bg-indigo-50 text-indigo-700 font-bold" : "hover:bg-neutral-200 text-neutral-600"}`}
         >
           <Layers size={16} />
@@ -529,6 +606,7 @@ export default function App() {
 
         <button
           onClick={() => {
+            handleGuideClick('Penne');
             if (activeSidebarTab === 'penne' && showProperties) {
               setShowProperties(false);
             } else {
@@ -536,6 +614,7 @@ export default function App() {
               setShowProperties(true);
             }
           }}
+          onMouseEnter={() => handleGuideHover('Penne')}
           className={`px-4 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 ${showProperties && activeSidebarTab === 'penne' ? "bg-neutral-100 text-indigo-600 font-bold" : "hover:bg-neutral-200"}`}
         >
           <Pen size={16} />
@@ -543,6 +622,7 @@ export default function App() {
         </button>
         <button
           onClick={() => {
+            handleGuideClick('Maschere');
             if (activeSidebarTab === 'maschere' && showProperties) {
               setShowProperties(false);
             } else {
@@ -550,6 +630,7 @@ export default function App() {
               setShowProperties(true);
             }
           }}
+          onMouseEnter={() => handleGuideHover('Maschere')}
           className={`px-4 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 ${showProperties && activeSidebarTab === 'maschere' ? "bg-neutral-100 text-indigo-600 font-bold" : "hover:bg-neutral-200"}`}
         >
           <Square size={16} />
@@ -557,6 +638,7 @@ export default function App() {
         </button>
         <button
           onClick={() => {
+            handleGuideClick('Testo');
             if (activeSidebarTab === 'testo' && showProperties) {
               setShowProperties(false);
             } else {
@@ -564,6 +646,7 @@ export default function App() {
               setShowProperties(true);
             }
           }}
+          onMouseEnter={() => handleGuideHover('Testo')}
           className={`px-4 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 ${showProperties && activeSidebarTab === 'testo' ? "bg-neutral-100 text-indigo-600 font-bold" : "hover:bg-neutral-200"}`}
         >
           <Type size={16} />
@@ -571,6 +654,7 @@ export default function App() {
         </button>
         <button
           onClick={() => {
+            handleGuideClick('Gemini AI');
             if (activeSidebarTab === 'gemini' && showProperties) {
               setShowProperties(false);
             } else {
@@ -578,28 +662,49 @@ export default function App() {
               setShowProperties(true);
             }
           }}
+          onMouseEnter={() => handleGuideHover('Gemini AI')}
           className={`px-4 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 ${showProperties && activeSidebarTab === 'gemini' ? "bg-amber-50 text-amber-700 font-bold border-x border-amber-200" : "hover:bg-neutral-200 text-neutral-600"}`}
         >
           <Sparkles size={16} className={showProperties && activeSidebarTab === 'gemini' ? "text-amber-500 animate-pulse" : "text-amber-500"} />
           <span className="text-[10px]">Gemini AI</span>
         </button>
         <div className="flex-1"></div>
+        <button
+          onClick={() => {
+            if (activeSidebarTab === 'manuale' && showProperties) {
+              setShowProperties(false);
+            } else {
+              setActiveSidebarTab('manuale');
+              setShowProperties(true);
+            }
+          }}
+          className={`px-4 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 ${showProperties && activeSidebarTab === 'manuale' ? "bg-emerald-50 text-emerald-950 font-bold border-x border-emerald-200" : "hover:bg-neutral-200"}`}
+        >
+          <BookOpen size={16} className={showProperties && activeSidebarTab === 'manuale' ? "text-emerald-600 animate-pulse" : "text-neutral-500"} />
+          <span className="text-[10px] font-bold">Manuale</span>
+        </button>
+
         <div className="flex items-center gap-1.5 px-2 border-l border-neutral-300 bg-neutral-50 h-full">
-           <button onClick={handleOpenFile} title="Apri File" className="flex flex-col items-center justify-center p-1.5 hover:bg-neutral-200 text-neutral-600 rounded gap-0.5">
+           <button onClick={() => { handleGuideClick('Apri'); handleOpenFile(); }} onMouseEnter={() => handleGuideHover('Apri')} title="Apri File" className="flex flex-col items-center justify-center p-1.5 hover:bg-neutral-200 text-neutral-600 rounded gap-0.5">
              <FolderOpen size={16} />
              <span className="text-[10px]">Apri</span>
            </button>
-           <button onClick={handleSaveAsFile} title={fileHandle ? "Salva con nome" : "Salva"} className="flex flex-col items-center justify-center p-1.5 hover:bg-neutral-200 text-neutral-600 rounded gap-0.5">
+           <button onClick={() => { handleGuideClick('Salva'); handleSaveAsFile(); }} onMouseEnter={() => handleGuideHover('Salva')} title={fileHandle ? "Salva con nome" : "Salva"} className="flex flex-col items-center justify-center p-1.5 hover:bg-neutral-200 text-neutral-600 rounded gap-0.5">
              <Save size={16} />
              <span className="text-[10px]">Salva</span>
            </button>
-           <button onClick={() => importInputRef.current?.click()} title="Importa file .dxf o .dwg" className="flex flex-col items-center justify-center p-1.5 hover:bg-emerald-100 text-emerald-600 hover:text-emerald-700 rounded gap-0.5 border-l border-neutral-200 pl-2 transition-colors">
+           <button onClick={() => { handleGuideClick('Importa'); importInputRef.current?.click(); }} onMouseEnter={() => handleGuideHover('Importa')} title="Importa file .dxf o .dwg" className="flex flex-col items-center justify-center p-1.5 hover:bg-emerald-100 text-emerald-600 hover:text-emerald-700 rounded gap-0.5 border-l border-neutral-200 pl-2 transition-colors">
              <FileUp size={16} />
              <span className="text-[10px] font-bold">Importa</span>
+           </button>
+           <button onClick={() => { handleGuideClick('Lettore DXF'); setIsDXFTextReaderOpen(true); }} onMouseEnter={() => handleGuideHover('Lettore DXF')} title="Genera disegno da testo/codice DXF" className="flex flex-col items-center justify-center p-1.5 hover:bg-teal-50 text-teal-600 hover:text-teal-700 rounded gap-0.5 border-l border-neutral-200 pl-2 transition-colors">
+             <Code size={16} />
+             <span className="text-[10px] font-bold">Lettore DXF</span>
            </button>
         </div>
         <button
           onClick={() => {
+            handleGuideClick('Tavole CAD');
             if (activeSidebarTab === 'tavole' && showProperties) {
               setShowProperties(false);
             } else {
@@ -607,6 +712,7 @@ export default function App() {
               setShowProperties(true);
             }
           }}
+          onMouseEnter={() => handleGuideHover('Tavole CAD')}
           className={`px-4 flex flex-col items-center justify-center gap-0.5 ${showProperties && activeSidebarTab === 'tavole' ? "bg-indigo-50 border-x border-indigo-200" : "hover:bg-neutral-200 border-l border-neutral-300"}`}
         >
           <Layers size={16} className={`${activeSidebarTab === 'tavole' && showProperties ? "text-indigo-600 animate-pulse" : "text-neutral-500"}`} />
@@ -614,9 +720,11 @@ export default function App() {
         </button>
         <button
           onClick={async () => {
+            handleGuideClick('Salva');
             const { exportDXF } = await import("./utils/dxfExport");
             exportDXF(entities, layers, "disegno.dxf");
           }}
+          onMouseEnter={() => handleGuideHover('Salva')}
           className="px-4 flex flex-col items-center justify-center gap-0.5 hover:bg-neutral-200 text-blue-600 border-l border-neutral-300"
         >
           <span className="font-bold text-sm">DXF</span>
@@ -627,7 +735,15 @@ export default function App() {
         {selectedCategoryTools.map((tool) => (
           <button
             key={tool.name}
-            onClick={() => setSelectedTool(tool.name)}
+            onMouseEnter={() => handleGuideHover(tool.name)}
+            onClick={() => {
+              handleGuideClick(tool.name);
+              if (tool.name === "Raccordo") {
+                setIsRaccordoDialogOpen(true);
+              } else {
+                setSelectedTool(tool.name);
+              }
+            }}
             className={`px-2 py-0.5 rounded flex items-center gap-1 text-xs ${selectedTool === tool.name ? "bg-indigo-100 text-indigo-900 border border-indigo-300" : "hover:bg-neutral-200"}`}
           >
             <tool.icon size={12} />
@@ -641,14 +757,22 @@ export default function App() {
               Menu Righelli:
             </span>
             <button
-              onClick={() => setRulerStyle("tecnigrafo")}
+              onClick={() => {
+                handleGuideClick("Classico (Tecnigrafo)");
+                setRulerStyle("tecnigrafo");
+              }}
+              onMouseEnter={() => handleGuideHover("Classico (Tecnigrafo)")}
               className={`px-2 py-0.5 rounded flex items-center gap-1 text-xs transition ${rulerStyle === "tecnigrafo" ? "bg-amber-100 text-amber-950 border border-amber-300 font-medium" : "hover:bg-neutral-200"}`}
             >
               <DraftingCompass size={12} />
               Classico (Tecnigrafo)
             </button>
             <button
-              onClick={() => setRulerStyle("crosshair")}
+              onClick={() => {
+                handleGuideClick("Incrocio CAD");
+                setRulerStyle("crosshair");
+              }}
+              onMouseEnter={() => handleGuideHover("Incrocio CAD")}
               className={`px-2 py-0.5 rounded flex items-center gap-1 text-xs transition ${rulerStyle === "crosshair" ? "bg-amber-100 text-amber-950 border border-amber-300 font-medium" : "hover:bg-neutral-200"}`}
             >
               <Crosshair size={12} />
@@ -659,31 +783,38 @@ export default function App() {
 
         <div className="ml-auto flex items-center gap-2">
           <button
-            onClick={() => setOrthoMode(!orthoMode)}
-            className={`px-3 py-1 rounded flex items-center gap-1.5 text-xs transition border font-semibold ${
+            onClick={() => {
+              handleGuideClick("Modo Orto");
+              setOrthoMode(!orthoMode);
+            }}
+            onMouseEnter={() => handleGuideHover("Modo Orto")}
+            className={`px-2 py-0.5 rounded flex items-center gap-1 text-xs transition ${
               orthoMode 
-                ? "bg-emerald-100 text-emerald-950 border-emerald-400" 
-                : "bg-neutral-100 text-neutral-600 border-neutral-300 hover:bg-neutral-200"
+                ? "bg-indigo-100 text-indigo-900 border border-indigo-300" 
+                : "hover:bg-neutral-200"
             }`}
           >
-            <span className={`inline-block w-2 h-2 rounded-full ${orthoMode ? "bg-emerald-600 animate-pulse" : "bg-neutral-400"}`} />
-            MODO ORTO: {orthoMode ? "ATTIVO (0°/90°)" : "DISATTIVATO"}
-            {orthoMode && (
-              <span className="text-[10px] bg-emerald-200/50 text-emerald-950 px-1 py-0.5 rounded ml-1 font-medium select-none animate-pulse">
-                🔮 Shift o Diagonale
-              </span>
-            )}
+            <OrthoIcon size={12} />
+            <span>Ortho</span>
           </button>
           <div className="flex gap-1 rounded bg-neutral-200 p-0.5">
             <button
-              onClick={() => setDefaultLineStyle({...defaultLineStyle, mode: 'pencil'})}
-              className={`px-3 py-1 rounded text-[10px] font-bold ${defaultLineStyle.mode === 'pencil' ? 'bg-white shadow-sm' : 'text-neutral-500'}`}
+              onClick={() => {
+                handleGuideClick("Penne");
+                setDefaultLineStyle({...defaultLineStyle, mode: 'pencil'});
+              }}
+              onMouseEnter={() => handleGuideHover("Penne")}
+              className={`px-3 py-1 rounded text-[10px] font-bold ${defaultLineStyle.mode === 'pencil' ? 'bg-white shadow-sm font-extrabold text-neutral-900' : 'text-neutral-500 hover:text-neutral-700'}`}
             >
               Kina (Standard)
             </button>
             <button
-              onClick={() => setDefaultLineStyle({...defaultLineStyle, mode: 'ink'})}
-              className={`px-3 py-1 rounded text-[10px] font-bold ${defaultLineStyle.mode === 'ink' ? 'bg-white shadow-sm' : 'text-neutral-500'}`}
+              onClick={() => {
+                handleGuideClick("Penne");
+                setDefaultLineStyle({...defaultLineStyle, mode: 'ink'});
+              }}
+              onMouseEnter={() => handleGuideHover("Penne")}
+              className={`px-3 py-1 rounded text-[10px] font-bold ${defaultLineStyle.mode === 'ink' ? 'bg-white shadow-sm font-extrabold text-neutral-900' : 'text-neutral-500 hover:text-neutral-700'}`}
             >
               Schizzo (Matita)
             </button>
@@ -731,6 +862,11 @@ export default function App() {
             onDoubleClickTavola={setDoubleClickedTavolaId}
             selectedTemplateId={selectedTemplateId}
             selectedEntityId={selectedId}
+            raccordoConfig={raccordoConfig}
+            onEditRaccordo={(raccordoEntity) => {
+              setEditingRaccordo(raccordoEntity);
+              setIsRaccordoDialogOpen(true);
+            }}
           />
           
           {doubleClickedTavolaId && !pdfPreviewUrl && (
@@ -1747,6 +1883,74 @@ export default function App() {
                     ))}
                   </div>
                 </>
+              ) : activeSidebarTab === 'manuale' ? (
+                <div className="space-y-4 font-sans text-neutral-700">
+                  <div className="border-b border-neutral-200 pb-2">
+                    <h4 className="text-xs font-black text-neutral-800 uppercase tracking-wider font-mono flex items-center gap-1.5">
+                      <BookOpen size={13} className="text-emerald-600" />
+                      🇮🇹 MANUALE IN LINEA GECOLA
+                    </h4>
+                    <p className="text-[10px] text-neutral-400 mt-1">
+                      Fai clic su qualsiasi elemento o passa il mouse sopra un pulsante per aprirne la spiegazione.
+                    </p>
+                  </div>
+
+                  {/* Active Selected/Hovered Tool Detail */}
+                  <div className="bg-emerald-50/50 border border-emerald-200 rounded-lg p-3.5 space-y-2">
+                    <span className="text-[9px] font-black tracking-widest text-emerald-700 font-mono block uppercase">
+                      Pannello Dettaglio Attivo:
+                    </span>
+                    {hoveredGuide ? (
+                      <div>
+                        <div className="flex items-center gap-1.5 justify-between">
+                          <h5 className="text-xs font-black text-emerald-950 font-sans">{hoveredGuide.title}</h5>
+                          {hoveredGuide.hotkey && (
+                            <span className="text-[8px] bg-emerald-200 text-emerald-950 px-1 font-mono rounded">
+                              {hoveredGuide.hotkey}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-neutral-600 mt-1 leading-relaxed">
+                          {hoveredGuide.description}
+                        </p>
+                        {hoveredGuide.tip && (
+                          <div className="mt-2 text-[10px] leading-relaxed text-indigo-700 bg-white border border-indigo-100 p-2 rounded">
+                            <span className="font-extrabold text-amber-500">💡 Suggerimento:</span> {hoveredGuide.tip}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="py-2 text-center text-[11px] text-neutral-400 italic">
+                        Passa il puntatore del mouse sopra un pulsante qualsiasi della barra superiore o seleziona un comando dall'indice per visualizzarne la scheda tecnica qui in tempo reale.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* General Index Section */}
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-black tracking-widest text-neutral-400 font-mono block uppercase">
+                      Indice dei comandi disponibili:
+                    </span>
+                    <div className="space-y-1 max-h-[380px] overflow-y-auto pr-1">
+                      {Object.entries(GUIDE_DATABASE).map(([key, guide]) => (
+                        <button
+                          key={key}
+                          onClick={() => {
+                            setHoveredGuide(guide);
+                            setGuideLockedBy(key);
+                          }}
+                          className={`w-full text-left p-2 rounded-lg border text-xs transition-all flex flex-col gap-0.5 ${guideLockedBy === key ? "bg-white border-emerald-500 ring-2 ring-emerald-100 shadow-xs" : "bg-neutral-50 border-neutral-100 hover:bg-white hover:border-neutral-200"}`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-neutral-800">{key}</span>
+                            <span className="text-[9px] text-neutral-400 font-mono">{guide.hotkey}</span>
+                          </div>
+                          <span className="text-[10px] text-neutral-500 line-clamp-1">{guide.title}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               ) : null}
             </div>
           </div>
@@ -1819,6 +2023,145 @@ export default function App() {
                 Ho capito, Chiudi
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Raccordo configuration dialog */}
+      <RaccordoDialog
+        key={editingRaccordo ? `edit-${editingRaccordo.id}` : 'new-raccordo'}
+        isOpen={isRaccordoDialogOpen}
+        onClose={() => {
+          if (editingRaccordo?.raccordoMetadata) {
+            // Restore to the original config saved in metadata
+            const meta = editingRaccordo.raccordoMetadata;
+            cadCanvasRef.current?.editRaccordo(
+              meta.id1,
+              meta.id2,
+              meta.clickPt1,
+              meta.clickPt2,
+              editingRaccordo.id,
+              meta.config,
+              meta.originalLine1,
+              meta.originalLine2
+            );
+          }
+          setIsRaccordoDialogOpen(false);
+          setEditingRaccordo(null);
+        }}
+        initialConfig={editingRaccordo?.raccordoMetadata ? editingRaccordo.raccordoMetadata.config : raccordoConfig}
+        onChange={(config) => {
+          if (editingRaccordo?.raccordoMetadata) {
+            const meta = editingRaccordo.raccordoMetadata;
+            cadCanvasRef.current?.editRaccordo(
+              meta.id1,
+              meta.id2,
+              meta.clickPt1,
+              meta.clickPt2,
+              editingRaccordo.id,
+              config,
+              meta.originalLine1,
+              meta.originalLine2
+            );
+          } else {
+            setRaccordoConfig(config);
+          }
+        }}
+        onSave={(config) => {
+          if (editingRaccordo?.raccordoMetadata) {
+            const meta = editingRaccordo.raccordoMetadata;
+            const rId = editingRaccordo.id;
+            
+            // Clear editingRaccordo so onClose does not trigger restoration revert
+            setEditingRaccordo(null);
+            setIsRaccordoDialogOpen(false);
+
+            // Apply final configuration and commit to history
+            cadCanvasRef.current?.editRaccordo(
+              meta.id1,
+              meta.id2,
+              meta.clickPt1,
+              meta.clickPt2,
+              rId,
+              config,
+              meta.originalLine1,
+              meta.originalLine2
+            );
+            
+            setShortcutToast(`Raccordo modificato: ${config.type === 'curvo' ? 'Curvo r=' : 'Rettilineo d='}${config.value} cm`);
+            setTimeout(() => setShortcutToast(null), 4000);
+          } else {
+            setRaccordoConfig(config);
+            setSelectedTool("Raccordo");
+            setIsRaccordoDialogOpen(false);
+            setShortcutToast(`Raccordo pronto: ${config.type === 'curvo' ? 'Curvo r=' : 'Rettilineo d='}${config.value} cm`);
+            setTimeout(() => setShortcutToast(null), 4000);
+          }
+        }}
+      />
+
+      {/* DXF text reader dialog */}
+      <DXFTextReaderDialog
+        isOpen={isDXFTextReaderOpen}
+        onClose={() => setIsDXFTextReaderOpen(false)}
+        activeLayerId={activeLayerId}
+        layers={layers}
+        onImport={(importedEntities, newLayers, mergeMode) => {
+          if (newLayers.length > 0) {
+            setLayers(prev => [...prev, ...newLayers]);
+          }
+
+          if (mergeMode === 'replace') {
+            updateEntitiesWithHistory(importedEntities);
+          } else {
+            updateEntitiesWithHistory(prev => [...prev, ...importedEntities]);
+          }
+
+          setShortcutToast(`Generati con successo ${importedEntities.length} elementi vettoriali DXF!`);
+          setTimeout(() => setShortcutToast(null), 4000);
+        }}
+      />
+
+      {/* Floating Interactive Manual Companion */}
+      {showFloatingManual && hoveredGuide && (
+        <div className="absolute bottom-6 right-6 z-50 w-80 bg-neutral-900/95 backdrop-blur-md text-white rounded-lg shadow-xl border border-neutral-700/80 p-4 transition-all duration-300 transform scale-100 ease-out flex flex-col gap-2">
+          <div className="flex items-center justify-between border-b border-neutral-800 pb-1.5 flex-nowrap">
+            <div className="flex items-center gap-1.5 text-emerald-400 font-sans font-bold text-xs uppercase tracking-wider">
+              <BookOpen size={14} className="animate-pulse" />
+              <span>Manuale Interattivo</span>
+            </div>
+            <button 
+              onClick={() => {
+                setHoveredGuide(null);
+                setGuideLockedBy(null);
+              }}
+              className="text-neutral-400 hover:text-white hover:bg-neutral-800 rounded p-1 transition-colors"
+              title="Cancella/Nascondi"
+            >
+              <Trash2 size={12} />
+            </button>
+          </div>
+          <div>
+            <h4 className="text-sm font-semibold text-neutral-100 flex items-center justify-between gap-1">
+              <span className="truncate">{hoveredGuide.title}</span>
+              {hoveredGuide.hotkey && (
+                <span className="text-[9px] bg-neutral-800 text-neutral-300 px-1.5 py-0.5 rounded font-mono shrink-0">
+                  {hoveredGuide.hotkey}
+                </span>
+              )}
+            </h4>
+            <p className="text-xs text-neutral-300 mt-1.5 leading-relaxed">
+              {hoveredGuide.description}
+            </p>
+            {hoveredGuide.tip && (
+              <div className="mt-2.5 p-2 bg-indigo-950/40 border border-indigo-900/40 rounded text-[11px] text-indigo-300 flex items-start gap-1">
+                <span className="text-amber-400 font-bold shrink-0">💡</span>
+                <span>{hoveredGuide.tip}</span>
+              </div>
+            )}
+          </div>
+          <div className="text-[9px] text-neutral-400 pt-1 text-right italic font-medium">
+            Scompare automaticamente quando premi il pulsante o lo strumento!
           </div>
         </div>
       )}

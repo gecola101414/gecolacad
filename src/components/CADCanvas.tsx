@@ -6,6 +6,16 @@ import { TEMPLATES, Template } from '../data/templates';
 export interface CADCanvasAPI {
   getCurrentMousePosition: () => Point;
   rotateMaskAtPoint: (e: React.MouseEvent) => boolean;
+  editRaccordo: (
+    id1: string,
+    id2: string,
+    clickPt1: Point,
+    clickPt2: Point,
+    existingRaccordoId: string,
+    config: { type: 'curvo' | 'rettilineo'; value: number },
+    originalLine1: any,
+    originalLine2: any
+  ) => void;
 }
 
 const normalizeAngle = (a: number) => {
@@ -267,9 +277,11 @@ interface CADCanvasProps {
   selectedTemplateId?: string | null;
   selectedEntityId?: string | null;
   defaultTextStyle?: { fontFamily: string, fontSize: number, fontWeight: string, textAlign: 'left' | 'center' | 'right' | 'justify' };
+  raccordoConfig?: { type: 'curvo' | 'rettilineo'; value: number };
+  onEditRaccordo?: (raccordoEntity: Entity) => void;
 }
 
-export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId }, ref) => {
+export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, raccordoConfig, onEditRaccordo }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [view, setView] = useState({ zoom: 0.15, pan: { x: window.innerWidth > 0 ? (window.innerWidth / 2) - 150 : 250, y: window.innerHeight > 0 ? (window.innerHeight / 2) - 220 : 80 } });
   const [dragTavolaId, setDragTavolaId] = useState<string | null>(null);
@@ -279,6 +291,15 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
   const [copySourceEntityIds, setCopySourceEntityIds] = useState<string[]>([]);
   const [clonedEntityIds, setClonedEntityIds] = useState<Set<string>>(new Set());
+  const [selectedRaccordoLineIds, setSelectedRaccordoLineIds] = useState<string[]>([]);
+  const [selectedRaccordoClickPoints, setSelectedRaccordoClickPoints] = useState<Point[]>([]);
+
+  useEffect(() => {
+    if (activeTool !== 'Raccordo') {
+      setSelectedRaccordoLineIds([]);
+      setSelectedRaccordoClickPoints([]);
+    }
+  }, [activeTool]);
   const holdTimerRef = useRef<NodeJS.Timeout | null>(null);
   const holdStartPosRef = useRef<{ x: number; y: number } | null>(null);
   const lastClickTimeRef = useRef<number>(0);
@@ -601,6 +622,18 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         return true;
       }
       return false;
+    },
+    editRaccordo: (
+      id1: string,
+      id2: string,
+      clickPt1: Point,
+      clickPt2: Point,
+      existingRaccordoId: string,
+      config: { type: 'curvo' | 'rettilineo'; value: number },
+      originalLine1: any,
+      originalLine2: any
+    ) => {
+      applyRaccordo(id1, id2, clickPt1, clickPt2, existingRaccordoId, config, { originalLine1, originalLine2 });
     }
   }));
 
@@ -1038,6 +1071,221 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       const ent = getEntityAtPoint(point);
       return ent && ent.type === 'line' ? ent : undefined;
   };
+
+  const applyRaccordo = (
+    id1: string,
+    id2: string,
+    clickPt1: Point,
+    clickPt2: Point,
+    existingRaccordoId?: string,
+    overrideConfig?: { type: 'curvo' | 'rettilineo'; value: number },
+    forceOriginalLines?: { originalLine1: LineEntity; originalLine2: LineEntity }
+  ) => {
+    const line1 = (forceOriginalLines ? forceOriginalLines.originalLine1 : entities.find(e => e.id === id1)) as LineEntity | undefined;
+    const line2 = (forceOriginalLines ? forceOriginalLines.originalLine2 : entities.find(e => e.id === id2)) as LineEntity | undefined;
+    if (!line1 || !line2 || line1.type !== 'line' || line2.type !== 'line') return;
+
+    // 1. Find line-line intersection of the infinite lines
+    const x1 = line1.start.x, y1 = line1.start.y;
+    const x2 = line1.end.x, y2 = line1.end.y;
+    const x3 = line2.start.x, y3 = line2.start.y;
+    const x4 = line2.end.x, y4 = line2.end.y;
+
+    const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+    if (Math.abs(denom) < 1e-10) {
+      if (!existingRaccordoId) {
+        alert("I segmenti sono paralleli o coincidenti, impossibile raccordare.");
+      }
+      return;
+    }
+
+    const intersectX = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / denom;
+    const intersectY = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / denom;
+    const I = { x: intersectX, y: intersectY };
+
+    // 2. Determine ray directions V1 and V2 starting from I towards click points
+    let len1 = Math.sqrt((clickPt1.x - I.x) ** 2 + (clickPt1.y - I.y) ** 2);
+    let V1 = { x: 0, y: 0 };
+    if (len1 > 1e-3) {
+      V1 = { x: (clickPt1.x - I.x) / len1, y: (clickPt1.y - I.y) / len1 };
+    } else {
+      let d1 = Math.sqrt((x1 - I.x) ** 2 + (y1 - I.y) ** 2);
+      let d2 = Math.sqrt((x2 - I.x) ** 2 + (y2 - I.y) ** 2);
+      let farPt = d1 > d2 ? line1.start : line1.end;
+      let lenFar = Math.sqrt((farPt.x - I.x) ** 2 + (farPt.y - I.y) ** 2);
+      if (lenFar > 1e-3) {
+        V1 = { x: (farPt.x - I.x) / lenFar, y: (farPt.y - I.y) / lenFar };
+      } else {
+        if (!existingRaccordoId) {
+          alert("Geometria del primo segmento non valida.");
+        }
+        return;
+      }
+    }
+
+    let len2 = Math.sqrt((clickPt2.x - I.x) ** 2 + (clickPt2.y - I.y) ** 2);
+    let V2 = { x: 0, y: 0 };
+    if (len2 > 1e-3) {
+      V2 = { x: (clickPt2.x - I.x) / len2, y: (clickPt2.y - I.y) / len2 };
+    } else {
+      let d3 = Math.sqrt((x3 - I.x) ** 2 + (y3 - I.y) ** 2);
+      let d4 = Math.sqrt((x4 - I.x) ** 2 + (y4 - I.y) ** 2);
+      let farPt = d3 > d4 ? line2.start : line2.end;
+      let lenFar = Math.sqrt((farPt.x - I.x) ** 2 + (farPt.y - I.y) ** 2);
+      if (lenFar > 1e-3) {
+        V2 = { x: (farPt.x - I.x) / lenFar, y: (farPt.y - I.y) / lenFar };
+      } else {
+        if (!existingRaccordoId) {
+          alert("Geometria del secondo segmento non valida.");
+        }
+        return;
+      }
+    }
+
+    // 3. Compute angle theta between V1 and V2
+    const cosTheta = Math.max(-1, Math.min(1, V1.x * V2.x + V1.y * V2.y));
+    const theta = Math.acos(cosTheta);
+    if (Math.abs(Math.sin(theta)) < 1e-3) {
+      if (!existingRaccordoId) {
+        alert("L'angolo tra i segmenti è piatto o troppo acuto, impossibile raccordare.");
+      }
+      return;
+    }
+
+    const config = overrideConfig || raccordoConfig || { type: 'curvo', value: 10 };
+    const pVal = config.value;
+
+    let T = 0; // tangent distance from I
+
+    if (config.type === 'curvo') {
+      const alpha = theta / 2;
+      T = pVal / Math.tan(alpha);
+    } else {
+      T = pVal;
+    }
+
+    // 4. Determine endpoints that lie on the rays pointing away from I
+    const dot1 = (x1 - I.x) * V1.x + (y1 - I.y) * V1.y;
+    const dot2 = (x2 - I.x) * V1.x + (y2 - I.y) * V1.y;
+    const farEndpoint1 = dot1 > dot2 ? line1.start : line1.end;
+    const maxLen1 = Math.max(dot1, dot2);
+
+    const dot3 = (x3 - I.x) * V2.x + (y3 - I.y) * V2.y;
+    const dot4 = (x4 - I.x) * V2.x + (y4 - I.y) * V2.y;
+    const farEndpoint2 = dot3 > dot4 ? line2.start : line2.end;
+    const maxLen2 = Math.max(dot3, dot4);
+
+    // Check if configuration parameter is too large
+    if (T > maxLen1 || T > maxLen2) {
+      if (!existingRaccordoId) {
+        alert(`Il parametro inserito (${pVal} cm - offset ${T.toFixed(1)} cm) è troppo grande rispetto alla lunghezza di una delle due linee.`);
+      }
+      return;
+    }
+
+    // 5. New clipped endpoints on both segments
+    const C1 = { x: I.x + T * V1.x, y: I.y + T * V1.y };
+    const C2 = { x: I.x + T * V2.x, y: I.y + T * V2.y };
+
+    // Commit history
+    onCommitHistory?.(entities);
+
+    // Prepare modified lines
+    const updatedLine1: LineEntity = {
+      ...line1,
+      start: farEndpoint1,
+      end: C1
+    };
+
+    const updatedLine2: LineEntity = {
+      ...line2,
+      start: farEndpoint2,
+      end: C2
+    };
+
+    const defaultOriginalLine1 = forceOriginalLines ? forceOriginalLines.originalLine1 : JSON.parse(JSON.stringify(line1));
+    const defaultOriginalLine2 = forceOriginalLines ? forceOriginalLines.originalLine2 : JSON.parse(JSON.stringify(line2));
+    
+    const raccordoMetadata = {
+      id1: line1.id,
+      id2: line2.id,
+      originalLine1: defaultOriginalLine1,
+      originalLine2: defaultOriginalLine2,
+      clickPt1,
+      clickPt2,
+      config: { type: config.type, value: config.value }
+    };
+
+    let newConnector: Entity;
+
+    if (config.type === 'curvo') {
+      // 6a. Arc-fillet construction
+      const alpha = theta / 2;
+      const V_bisect = { x: V1.x + V2.x, y: V1.y + V2.y };
+      const lenBisect = Math.sqrt(V_bisect.x * V_bisect.x + V_bisect.y * V_bisect.y);
+      if (lenBisect < 1e-4) return;
+      V_bisect.x /= lenBisect;
+      V_bisect.y /= lenBisect;
+
+      const dist_bisect = pVal / Math.sin(alpha);
+      const O = { x: I.x + dist_bisect * V_bisect.x, y: I.y + dist_bisect * V_bisect.y };
+
+      const U1 = { x: C1.x - O.x, y: C1.y - O.y };
+      const U2 = { x: C2.x - O.x, y: C2.y - O.y };
+
+      const a1 = Math.atan2(U1.y, U1.x) * 180 / Math.PI;
+      const a2 = Math.atan2(U2.y, U2.x) * 180 / Math.PI;
+
+      // center O points to bisect of Ray 1 and Ray 2. The arc midpoint faces corner/I
+      const aMid = Math.atan2(-V_bisect.y, -V_bisect.x) * 180 / Math.PI;
+
+      let startAngle = a1;
+      let endAngle = a2;
+      if (!isAngleInArc(aMid, a1, a2)) {
+        startAngle = a2;
+        endAngle = a1;
+      }
+
+      newConnector = {
+        id: existingRaccordoId || ("raccordo-arc-" + Date.now().toString()),
+        type: 'arc',
+        center: O,
+        radius: pVal,
+        startAngle: startAngle,
+        endAngle: endAngle,
+        color: line1.color || defaultLineStyle.color,
+        lineWidth: line1.lineWidth || defaultLineStyle.lineWidth,
+        layer: activeLayerId,
+        mode: line1.mode || defaultLineStyle.mode,
+        raccordoMetadata
+      } as ArcEntity;
+    } else {
+      // 6b. Chamfer-line construction
+      newConnector = {
+        id: existingRaccordoId || ("raccordo-line-" + Date.now().toString()),
+        type: 'line',
+        start: C1,
+        end: C2,
+        color: line1.color || defaultLineStyle.color,
+        lineWidth: line1.lineWidth || defaultLineStyle.lineWidth,
+        layer: activeLayerId,
+        mode: line1.mode || defaultLineStyle.mode,
+        raccordoMetadata
+      } as LineEntity;
+    }
+
+    setEntities(prev => {
+      let filtered = prev;
+      if (existingRaccordoId) {
+        filtered = filtered.filter(ent => ent.id !== existingRaccordoId);
+      }
+      return filtered.map(ent => {
+        if (ent.id === id1) return updatedLine1;
+        if (ent.id === id2) return updatedLine2;
+        return ent;
+      }).concat(newConnector);
+    });
+  };
   const renderRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -1118,7 +1366,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             ctx.shadowBlur = 10 * flashIntensity;
         }
 
-        if ((entity.id === selectedParallelLine?.id && blink) || (selectedEntityId === entity.id) || (positioningGroupId && entity.groupId === positioningGroupId)) {
+        if ((entity.id === selectedParallelLine?.id && blink) || (selectedEntityId === entity.id) || (positioningGroupId && entity.groupId === positioningGroupId) || selectedRaccordoLineIds.includes(entity.id)) {
           ctx.strokeStyle = '#fbbf24'; // Amber highlight
           ctx.lineWidth = (entity.lineWidth + 2) / view.zoom;
         } else if ((dragEntityIds.includes(entity.id) || entity.id === highlightedTrimLine?.id) && (activeTool === 'Move' || activeTool === 'Cancella' || activeTool === 'Join' || activeTool === 'Copy')) {
@@ -1135,7 +1383,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         let highlightColor = ctx.strokeStyle;
         if (isFlashing) {
              isHighlighted = true;
-        } else if ((entity.id === selectedParallelLine?.id && blink) || (selectedEntityId === entity.id) || (positioningGroupId && entity.groupId === positioningGroupId)) {
+        } else if ((entity.id === selectedParallelLine?.id && blink) || (selectedEntityId === entity.id) || (positioningGroupId && entity.groupId === positioningGroupId) || selectedRaccordoLineIds.includes(entity.id)) {
              isHighlighted = true;
         } else if ((dragEntityIds.includes(entity.id) || entity.id === highlightedTrimLine?.id) && (activeTool === 'Move' || activeTool === 'Cancella' || activeTool === 'Join' || activeTool === 'Copy')) {
              isHighlighted = true;
@@ -3353,6 +3601,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     if (activeTool === 'Select') {
         const found = getEntityAtPoint(rawPoint);
         if (found) {
+            if (found.raccordoMetadata && onEditRaccordo) {
+                onEditRaccordo(found);
+                return;
+            }
             onSelect(found.id);
             if (found.type === 'dimension') {
                 setPositioningDimId(found.id);
@@ -4085,6 +4337,33 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             });
         } else {
             setSelectionWindow({ start: rawPoint, current: rawPoint });
+        }
+    } else if (activeTool === 'Raccordo') {
+        const potentialRaccordo = getEntityAtPoint(rawPoint);
+        if (potentialRaccordo && potentialRaccordo.raccordoMetadata && onEditRaccordo) {
+            onEditRaccordo(potentialRaccordo);
+            return;
+        }
+        const found = getLineAtPoint(rawPoint);
+        if (found) {
+            if (selectedRaccordoLineIds.includes(found.id)) {
+                setSelectedRaccordoLineIds(prev => prev.filter(id => id !== found.id));
+                setSelectedRaccordoClickPoints(prev => prev.filter((_, idx) => {
+                    const foundIdx = selectedRaccordoLineIds.indexOf(found.id);
+                    return idx !== foundIdx;
+                }));
+            } else {
+                const nextLineIds = [...selectedRaccordoLineIds, found.id];
+                const nextClickPoints = [...selectedRaccordoClickPoints, rawPoint];
+                setSelectedRaccordoLineIds(nextLineIds);
+                setSelectedRaccordoClickPoints(nextClickPoints);
+                
+                if (nextLineIds.length === 2) {
+                    applyRaccordo(nextLineIds[0], nextLineIds[1], nextClickPoints[0], nextClickPoints[1]);
+                    setSelectedRaccordoLineIds([]);
+                    setSelectedRaccordoClickPoints([]);
+                }
+            }
         }
     } else if (activeTool === 'Parallel') {
         const found = getLineAtPoint(rawPoint);
@@ -4859,6 +5138,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         setDragEntityId(null);
         setShowManualInput(false);
         setIsParallelWheelActive(false);
+        setSelectedRaccordoLineIds([]);
+        setSelectedRaccordoClickPoints([]);
     };
 
     escAction();

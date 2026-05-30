@@ -19,6 +19,15 @@ export interface CADEntity {
   mode: 'ink' | 'pencil';
   groupId?: string;
   opacity?: number;
+  raccordoMetadata?: {
+    id1: string;
+    id2: string;
+    originalLine1: any;
+    originalLine2: any;
+    clickPt1: { x: number; y: number };
+    clickPt2: { x: number; y: number };
+    config: { type: 'curvo' | 'rettilineo'; value: number };
+  };
 }
 
 export interface LineEntity extends CADEntity {
