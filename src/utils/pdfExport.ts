@@ -79,6 +79,11 @@ export const exportNativePDF = (
                 maxX = Math.max(maxX, p.x);
                 maxY = Math.max(maxY, p.y);
             }
+        } else if (ent.type === 'text') {
+            minX = Math.min(minX, ent.point.x);
+            minY = Math.min(minY, ent.point.y);
+            maxX = Math.max(maxX, ent.point.x + 2); // Approximate right bound
+            maxY = Math.max(maxY, ent.point.y + 1); // Approximate bottom bound
         }
       });
   }
@@ -302,6 +307,29 @@ export const exportNativePDF = (
               prevX = px;
               prevY = py;
           }
+      } else if (entity.type === 'text') {
+          // Parse color
+          let r = 0, g = 0, b = 0;
+          if (entity.color && entity.color.startsWith('#')) {
+              const hex = entity.color.replace('#', '');
+              if (hex.length === 6) {
+                  r = parseInt(hex.substring(0, 2), 16);
+                  g = parseInt(hex.substring(2, 4), 16);
+                  b = parseInt(hex.substring(4, 6), 16);
+              }
+          }
+          pdf.setTextColor(r, g, b);
+          const font = (entity.fontFamily || 'monospace').toLowerCase().includes('sans') ? 'helvetica' : 'monospace';
+          const style = entity.fontWeight === 'bold' ? 'bold' : 'normal';
+          pdf.setFont(font, style);
+          // Scale font size (pt)
+          pdf.setFontSize(ts(entity.fontSize) * (72 / 25.4));
+          // Use 'bottom' equivalent in jsPDF if needed, but jsPDF text baseline is bottom by default
+          let align: 'left'|'center'|'right' = 'left';
+          if (entity.textAlign === 'center') align = 'center';
+          if (entity.textAlign === 'right') align = 'right';
+          
+          pdf.text(entity.text, tx(entity.point.x), ty(entity.point.y), { align, baseline: 'top' });
       }
   });
 

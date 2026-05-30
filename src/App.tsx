@@ -42,7 +42,9 @@ import {
   Plus,
   Check,
   Save,
-  FolderOpen
+  FolderOpen,
+  Type,
+  FileUp
 } from "lucide-react";
 
 const ParallelIcon = ({ size = 16 }: { size?: number }) => (
@@ -80,6 +82,12 @@ export default function App() {
     dashed: false,
     mode: "pencil" as "ink" | "pencil",
   });
+  const [defaultTextStyle, setDefaultTextStyle] = useState({
+    fontFamily: 'sans-serif',
+    fontSize: 14,
+    fontWeight: 'normal',
+    textAlign: 'left' as 'left' | 'center' | 'right' | 'justify',
+  });
   const [eraserRadius, setEraserRadius] = useState(20);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -97,7 +105,7 @@ export default function App() {
     { id: "tav4", name: "Tavola n. 4", format: "A1", scale: 500, unit: "cm", position: { x: 40, y: 30 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 4", autore: "Ing. Domenico Gimondo", data: "2026" } },
     { id: "tav5", name: "Tavola n. 5", format: "A0", scale: 1000, unit: "cm", position: { x: 0, y: 0 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 5", autore: "Ing. Domenico Gimondo", data: "2026" } },
   ]);
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere'>('penne');
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere' | 'testo'>('penne');
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [editingCartiglioTavolaId, setEditingCartiglioTavolaId] = useState<string | null>(null);
@@ -111,6 +119,9 @@ export default function App() {
   // File System State
   const [fileHandle, setFileHandle] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [showDwgModal, setShowDwgModal] = useState(false);
+  const [dwgFileName, setDwgFileName] = useState("");
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const saveToHandle = async (handle: any) => {
     setIsSaving(true);
@@ -185,6 +196,49 @@ export default function App() {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    
+    if (extension === 'dxf') {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const text = e.target?.result as string;
+        try {
+          const { parseDXF } = await import("./utils/dxfImport");
+          const { entities: importedEntities, newLayers } = parseDXF(text, activeLayerId, layers);
+          
+          if (importedEntities.length === 0) {
+            alert("Nessun elemento DXF supportato trovato nel file o formato non riconosciuto.");
+            return;
+          }
+
+          if (newLayers.length > 0) {
+            setLayers(prev => [...prev, ...newLayers]);
+          }
+
+          updateEntitiesWithHistory(prev => [...prev, ...importedEntities]);
+          setShortcutToast(`Importati ${importedEntities.length} elementi CAD!`);
+          setTimeout(() => setShortcutToast(null), 3000);
+        } catch (err) {
+          console.error(err);
+          alert("Errore nel parsing del file DXF.");
+        }
+      };
+      reader.readAsText(file);
+    } else if (extension === 'dwg') {
+      setDwgFileName(file.name);
+      setShowDwgModal(true);
+    } else {
+      alert("Formato non supportato. Selezionare un file .dxf o .dwg.");
+    }
+    
+    // reset input so the same file can be imported again
+    event.target.value = '';
   };
 
   const cadCanvasRef = useRef<any>(null);
@@ -295,6 +349,7 @@ export default function App() {
         { name: "Arc", icon: History },
         { name: "Rectangle", icon: Square },
         { name: "Point", icon: Dot },
+        { name: "Testo", icon: Type },
         { name: "Trim", icon: Scissors },
         { name: "Eraser", icon: Eraser },
         { name: "Parallel", icon: ParallelIcon },
@@ -368,22 +423,13 @@ export default function App() {
     <div className="flex flex-col h-screen bg-neutral-100 text-neutral-900">
       {/* Ribbon */}
       <header className="h-14 border-b border-neutral-300 bg-white flex">
-        <div className="flex items-center px-4 border-r border-neutral-300 bg-neutral-900 text-white select-none mr-1 relative">
+        <div className="flex items-center px-4 border-r border-neutral-300 bg-neutral-900 text-white select-none mr-2 relative">
           <span className="font-sans font-black tracking-wider text-sm whitespace-nowrap">GECOLA <span className="text-amber-400">CAD</span></span>
           {fileHandle && (
             <div className="absolute top-1 right-2 flex items-center justify-center pointer-events-none">
               <div className={`w-2 h-2 rounded-full ${isSaving ? 'bg-amber-400' : 'bg-emerald-500'} transition-colors duration-300 drop-shadow-md`} title={isSaving ? "Salvataggio in corso..." : "Auto-save attivo"}></div>
             </div>
           )}
-        </div>
-        
-        <div className="flex items-center gap-1 px-2 border-r border-neutral-300 mr-2 bg-neutral-50">
-           <button onClick={handleOpenFile} title="Apri File" className="p-1.5 hover:bg-neutral-200 text-neutral-600 rounded">
-             <FolderOpen size={16} />
-           </button>
-           <button onClick={handleSaveAsFile} title={fileHandle ? "Salva con nome" : "Salva"} className="p-1.5 hover:bg-neutral-200 text-neutral-600 rounded">
-             <Save size={16} />
-           </button>
         </div>
 
         {categories.map((cat) => (
@@ -465,7 +511,35 @@ export default function App() {
           <Square size={16} />
           <span className="text-[10px]">Maschere</span>
         </button>
+        <button
+          onClick={() => {
+            if (activeSidebarTab === 'testo' && showProperties) {
+              setShowProperties(false);
+            } else {
+              setActiveSidebarTab('testo');
+              setShowProperties(true);
+            }
+          }}
+          className={`px-4 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 ${showProperties && activeSidebarTab === 'testo' ? "bg-neutral-100 text-indigo-600 font-bold" : "hover:bg-neutral-200"}`}
+        >
+          <Type size={16} />
+          <span className="text-[10px]">Testo</span>
+        </button>
         <div className="flex-1"></div>
+        <div className="flex items-center gap-1.5 px-2 border-l border-neutral-300 bg-neutral-50 h-full">
+           <button onClick={handleOpenFile} title="Apri File" className="flex flex-col items-center justify-center p-1.5 hover:bg-neutral-200 text-neutral-600 rounded gap-0.5">
+             <FolderOpen size={16} />
+             <span className="text-[10px]">Apri</span>
+           </button>
+           <button onClick={handleSaveAsFile} title={fileHandle ? "Salva con nome" : "Salva"} className="flex flex-col items-center justify-center p-1.5 hover:bg-neutral-200 text-neutral-600 rounded gap-0.5">
+             <Save size={16} />
+             <span className="text-[10px]">Salva</span>
+           </button>
+           <button onClick={() => importInputRef.current?.click()} title="Importa file .dxf o .dwg" className="flex flex-col items-center justify-center p-1.5 hover:bg-emerald-100 text-emerald-600 hover:text-emerald-700 rounded gap-0.5 border-l border-neutral-200 pl-2 transition-colors">
+             <FileUp size={16} />
+             <span className="text-[10px] font-bold">Importa</span>
+           </button>
+        </div>
         <button
           onClick={() => {
             if (activeSidebarTab === 'tavole' && showProperties) {
@@ -566,10 +640,19 @@ export default function App() {
             setActiveTool={setSelectedTool}
             setEntities={updateEntitiesWithHistory}
             setEntitiesSilent={updateEntitiesSilent}
+            defaultTextStyle={defaultTextStyle}
             onCommitHistory={commitToHistory}
             onSelect={(id) => {
               setSelectedId(id);
-              if (id) setShowProperties(true);
+              if (id) {
+                setShowProperties(true);
+                const ent = entities.find(e => e.id === id);
+                if (ent && ent.type === 'text') {
+                  setActiveSidebarTab('testo');
+                } else {
+                  setActiveSidebarTab('penne');
+                }
+              }
             }}
             onContextMenu={handleRightClickShortcut}
             activeLayerId={activeLayerId}
@@ -787,7 +870,11 @@ export default function App() {
           <div className="w-80 bg-white border-l border-neutral-300 p-4 transition-all overflow-y-auto flex flex-col h-full">
             <h3 className="font-bold mb-4 flex justify-between items-center text-neutral-800 border-b border-neutral-100 pb-2">
               <span className="text-xs font-black uppercase tracking-wider font-mono">
-                {activeSidebarTab === "tavole" ? "Gestione Tavole" : activeSidebarTab === "layers" ? "Gestione Layers" : activeSidebarTab === "maschere" ? "Archivio Maschere" : "Mazzo Penne & Stili"}
+                {activeSidebarTab === "tavole" ? "Gestione Tavole" 
+                  : activeSidebarTab === "layers" ? "Gestione Layers" 
+                  : activeSidebarTab === "maschere" ? "Archivio Maschere" 
+                  : activeSidebarTab === "testo" ? "Impostazioni Testo"
+                  : "Mazzo Penne & Stili"}
               </span>
               <button 
                 onClick={() => setShowProperties(false)} 
@@ -844,6 +931,133 @@ export default function App() {
                   ))}
                   <div className="h-20"></div>
                 </div>
+              ) : activeSidebarTab === "testo" ? (
+                <div className="space-y-6">
+                  {selectedEntity && selectedEntity.type === 'text' ? (
+                     <div className="bg-indigo-50 border border-indigo-200 text-indigo-900 p-3 rounded-lg shadow-sm">
+                       <p className="text-[10px] leading-tight font-mono font-bold">
+                         MODIFICA TESTO SELEZIONATO
+                       </p>
+                     </div>
+                  ) : (
+                     <div className="bg-neutral-800 text-neutral-100 p-3 rounded-lg shadow-lg border border-neutral-700">
+                       <p className="text-[10px] leading-tight font-mono opacity-80">
+                         <span className="text-amber-400 font-bold">INSERIMENTO TESTO:</span><br/>
+                         Seleziona lo strumento Testo e clicca nell'area di lavoro.
+                       </p>
+                     </div>
+                  )}
+                  
+                  <div className="space-y-4">
+                    {selectedEntity && selectedEntity.type === 'text' && (
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest flex items-center gap-2">Contenuto Testo</label>
+                          <textarea 
+                            className="w-full bg-white border border-neutral-300 text-xs rounded p-2 focus:ring-2 focus:ring-indigo-500"
+                            rows={3}
+                            value={(selectedEntity as import('./types').TextEntity).text}
+                            onChange={(e) => updateEntity(selectedEntity.id, { text: e.target.value })}
+                          />
+                        </div>
+                    )}
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest flex items-center gap-2">Famiglia Carattere</label>
+                      <select 
+                        className="w-full bg-white border border-neutral-300 text-xs rounded p-2 font-semibold"
+                        value={selectedEntity && selectedEntity.type === 'text' ? (selectedEntity as import('./types').TextEntity).fontFamily : defaultTextStyle.fontFamily}
+                        onChange={(e) => {
+                            if (selectedEntity && selectedEntity.type === 'text') updateEntity(selectedEntity.id, { fontFamily: e.target.value });
+                            else setDefaultTextStyle(prev => ({ ...prev, fontFamily: e.target.value }));
+                        }}
+                      >
+                        <option value="sans-serif">Sans Serif</option>
+                        <option value="serif">Serif</option>
+                        <option value="monospace">Monospace</option>
+                        <option value="Arial">Arial</option>
+                        <option value="Times New Roman">Times New Roman</option>
+                        <option value="Courier New">Courier New</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest flex items-center gap-2">Grandezza Testo</label>
+                       <input 
+                         type="number"
+                         min="8"
+                         max="144"
+                         className="w-full bg-white border border-neutral-300 text-xs rounded p-2 font-semibold text-center"
+                         value={selectedEntity && selectedEntity.type === 'text' ? (selectedEntity as import('./types').TextEntity).fontSize : defaultTextStyle.fontSize}
+                         onChange={(e) => {
+                             if (selectedEntity && selectedEntity.type === 'text') updateEntity(selectedEntity.id, { fontSize: Number(e.target.value) });
+                             else setDefaultTextStyle(prev => ({ ...prev, fontSize: Number(e.target.value) }));
+                         }}
+                       />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest flex items-center gap-2">Stile (Grassetto)</label>
+                      <div className="flex gap-2">
+                         <button 
+                           onClick={() => {
+                               if (selectedEntity && selectedEntity.type === 'text') updateEntity(selectedEntity.id, { fontWeight: 'normal' });
+                               else setDefaultTextStyle(prev => ({ ...prev, fontWeight: 'normal' }));
+                           }}
+                           className={`flex-1 p-2 border rounded text-xs transition-all ${(selectedEntity && selectedEntity.type === 'text' ? (selectedEntity as import('./types').TextEntity).fontWeight : defaultTextStyle.fontWeight) === 'normal' ? 'bg-indigo-600 text-white font-bold' : 'bg-neutral-50 hover:bg-neutral-100'}`}
+                         >Normale</button>
+                         <button 
+                           onClick={() => {
+                               if (selectedEntity && selectedEntity.type === 'text') updateEntity(selectedEntity.id, { fontWeight: 'bold' });
+                               else setDefaultTextStyle(prev => ({ ...prev, fontWeight: 'bold' }));
+                           }}
+                           className={`flex-1 p-2 border rounded text-xs transition-all ${(selectedEntity && selectedEntity.type === 'text' ? (selectedEntity as import('./types').TextEntity).fontWeight : defaultTextStyle.fontWeight) === 'bold' ? 'bg-indigo-600 text-white font-bold' : 'bg-neutral-50 hover:bg-neutral-100 font-bold'}`}
+                         >Grassetto</button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest flex items-center gap-2">Allineamento</label>
+                      <div className="flex gap-2">
+                         {['left', 'center', 'right', 'justify'].map((align) => (
+                           <button 
+                             key={align}
+                             onClick={() => {
+                                 if (selectedEntity && selectedEntity.type === 'text') updateEntity(selectedEntity.id, { textAlign: align as any });
+                                 else setDefaultTextStyle(prev => ({ ...prev, textAlign: align as any }));
+                             }}
+                             className={`flex-1 p-2 border rounded text-xs transition-all flex justify-center items-center ${(selectedEntity && selectedEntity.type === 'text' ? (selectedEntity as import('./types').TextEntity).textAlign : defaultTextStyle.textAlign) === align ? 'bg-indigo-600 text-white' : 'bg-neutral-50 hover:bg-neutral-100'}`}
+                           >
+                              {align === 'left' && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="17" y1="10" x2="3" y2="10"></line><line x1="21" y1="6" x2="3" y2="6"></line><line x1="21" y1="14" x2="3" y2="14"></line><line x1="17" y1="18" x2="3" y2="18"></line></svg>}
+                              {align === 'center' && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="10" x2="6" y2="10"></line><line x1="21" y1="6" x2="3" y2="6"></line><line x1="21" y1="14" x2="3" y2="14"></line><line x1="18" y1="18" x2="6" y2="18"></line></svg>}
+                              {align === 'right' && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="21" y1="10" x2="7" y2="10"></line><line x1="21" y1="6" x2="3" y2="6"></line><line x1="21" y1="14" x2="3" y2="14"></line><line x1="21" y1="18" x2="7" y2="18"></line></svg>}
+                              {align === 'justify' && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="21" y1="10" x2="3" y2="10"></line><line x1="21" y1="6" x2="3" y2="6"></line><line x1="21" y1="14" x2="3" y2="14"></line><line x1="21" y1="18" x2="3" y2="18"></line></svg>}
+                           </button>
+                         ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest flex items-center gap-2">Colore Testo</label>
+                       <div className="grid grid-cols-5 gap-2">
+                         {['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#64748b'].map((c) => {
+                             const isSelected = selectedEntity && selectedEntity.type === 'text' ? (selectedEntity as import('./types').TextEntity).color === c : defaultLineStyle.color === c;
+                             return (
+                               <button
+                                 key={c}
+                                 onClick={() => {
+                                     if (selectedEntity && selectedEntity.type === 'text') updateEntity(selectedEntity.id, { color: c });
+                                     else setDefaultLineStyle(prev => ({ ...prev, color: c }));
+                                 }}
+                                 className={`w-full aspect-square rounded-full flex items-center justify-center transition-transform ${isSelected ? "ring-2 ring-offset-2 ring-indigo-500 scale-110 shadow-md" : "hover:scale-105 border border-black/10"}`}
+                                 style={{ backgroundColor: c }}
+                               >
+                                 {isSelected && <Check size={10} className="text-white drop-shadow-md" />}
+                               </button>
+                             );
+                         })}
+                       </div>
+                    </div>
+                  </div>
+                </div>
               ) : activeSidebarTab === "penne" ? (
                 selectedEntity ? (
                   <>
@@ -880,6 +1094,21 @@ export default function App() {
                             className={`p-2 rounded flex-1 text-xs font-bold ${selectedEntity.lineWidth === w ? "bg-indigo-600 text-white" : "bg-neutral-200 text-neutral-900 border border-neutral-400"}`}
                           >
                             p{w === 1 ? '1' : w === 2.5 ? '2' : '4'} ({w} mm)
+                          </button>
+                        ))}
+                      </div>
+                    </label>
+                    <label className="block text-sm mt-4">
+                      Colore:
+                      <div className="grid grid-cols-5 gap-2 mt-2">
+                        {['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#64748b'].map((c) => (
+                          <button
+                            key={c}
+                            onClick={() => updateEntity(selectedEntity.id, { color: c })}
+                            className={`w-full aspect-square rounded-full flex items-center justify-center transition-transform ${selectedEntity.color === c ? "ring-2 ring-offset-2 ring-indigo-500 scale-110 shadow-md" : "hover:scale-105 border border-black/10"}`}
+                            style={{ backgroundColor: c }}
+                          >
+                            {selectedEntity.color === c && <Check size={10} className="text-white drop-shadow-md" />}
                           </button>
                         ))}
                       </div>
@@ -965,6 +1194,23 @@ export default function App() {
                                 p{w === 1 ? '1' : w === 2.5 ? '2' : '4'}
                               </span>
                               <span className="text-[8px] text-neutral-400">{w}mm</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="space-y-2 mt-4">
+                        <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest flex items-center gap-2">
+                           <Crosshair size={10} /> Colore Matita
+                        </label>
+                        <div className="grid grid-cols-5 gap-2">
+                          {['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#64748b'].map((c) => (
+                            <button
+                              key={c}
+                              onClick={() => setDefaultLineStyle(prev => ({ ...prev, color: c }))}
+                              className={`w-full aspect-square rounded-full flex items-center justify-center transition-transform ${defaultLineStyle.color === c ? "ring-2 ring-offset-2 ring-indigo-500 scale-110 shadow-md" : "hover:scale-105 border border-black/10"}`}
+                              style={{ backgroundColor: c }}
+                            >
+                              {defaultLineStyle.color === c && <Check size={10} className="text-white drop-shadow-md" />}
                             </button>
                           ))}
                         </div>
@@ -1238,6 +1484,64 @@ export default function App() {
           placeholder="Type a command (f.ex. L, C, R)..."
         />
       </footer>
+
+      {/* Hidden file input for DXF/DWG uploader */}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".dxf,.dwg"
+        onChange={handleImportFile}
+        className="hidden"
+        style={{ display: 'none' }}
+      />
+
+      {/* DWG Proprietary File Instructions Modal */}
+      {showDwgModal && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 select-none animate-fade-in" onClick={() => setShowDwgModal(false)}>
+          <div className="bg-slate-950 border border-slate-800 p-6 rounded-xl shadow-2xl max-w-sm w-full relative" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
+              <h3 className="text-xs font-black uppercase text-red-400 tracking-wider font-mono flex items-center gap-2">
+                <span className="px-1.5 py-0.5 bg-red-900/55 border border-red-700 rounded text-[9px] text-red-300">Formato DWG</span>
+                Notifica Informativa
+              </h3>
+              <button onClick={() => setShowDwgModal(false)} className="text-slate-500 hover:text-white font-mono text-xs font-bold leading-none">
+                ✕
+              </button>
+            </div>
+            
+            <p className="text-xs text-slate-300 leading-relaxed mb-4">
+              Hai caricato il file <span className="font-semibold text-yellow-400 font-mono">"{dwgFileName}"</span>.
+              <br/><br/>
+              Il formato <span className="font-bold text-white">DWG</span> di AutoCAD è un formato file binario compresso e con copyright proprietario non leggibile nativamente dai moderni browser web.
+            </p>
+
+            <div className="bg-slate-900 border border-slate-800 rounded-lg p-3.5 mb-4">
+              <span className="text-[10px] font-black text-indigo-400 font-mono block uppercase mb-1.5">Come procedere per il disegno:</span>
+              <ul className="text-[10.5px] text-slate-400 list-decimal pl-4 space-y-2 leading-relaxed">
+                <li>
+                  Converti il file DWG in formato <span className="text-indigo-300 font-semibold font-mono">DXF Vettoriale</span> (es. R12 o AutoCAD 2000 per compatibilità ottimale).
+                </li>
+                <li>
+                  Puoi usare convertitori gratuiti come <span className="text-indigo-300 underline font-semibold">ODA File Converter</span>, convertitori online o esportarlo direttamente da AutoCAD.
+                </li>
+                <li>
+                  Importa il file convertito <span className="text-emerald-400 font-bold font-mono">.dxf</span> qui per rigenerare all'istante l'intero disegno vettoriale sul foglio!
+                </li>
+              </ul>
+            </div>
+
+            <div className="flex justify-end gap-2.5">
+              <button
+                type="button"
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold tracking-wide font-sans transition-colors shadow-md"
+                onClick={() => setShowDwgModal(false)}
+              >
+                Ho capito, Chiudi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

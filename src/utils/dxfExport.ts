@@ -69,6 +69,8 @@ export function exportDXF(entities: Entity[], layers: Layer[], filename: string 
                angle += 180;
             }
             d.drawText(mx, -my + (5 * scaleFactor), Math.max(2, 12 * scaleFactor), -angle, textStr);
+        } else if (ent.type === 'text') {
+            d.drawText(ent.point.x, -ent.point.y, ent.fontSize, 0, ent.text);
         }
     });
 

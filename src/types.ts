@@ -7,7 +7,7 @@ export interface InkPoint {
   alpha: number;
 }
 
-export type EntityType = 'line' | 'circle' | 'rectangle' | 'dimension' | 'arc' | 'point';
+export type EntityType = 'line' | 'circle' | 'rectangle' | 'dimension' | 'arc' | 'point' | 'text';
 
 export interface CADEntity {
   id: string;
@@ -64,7 +64,17 @@ export interface DimensionEntity extends CADEntity {
   rotation?: number; // In degrees
 }
 
-export type Entity = LineEntity | CircleEntity | RectEntity | DimensionEntity | ArcEntity | PointEntity;
+export interface TextEntity extends CADEntity {
+  type: 'text';
+  point: Point;
+  text: string;
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: string;
+  textAlign: 'left' | 'center' | 'right' | 'justify';
+}
+
+export type Entity = LineEntity | CircleEntity | RectEntity | DimensionEntity | ArcEntity | PointEntity | TextEntity;
 
 export interface Measurement {
   id: string;

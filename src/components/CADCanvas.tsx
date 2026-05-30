@@ -266,9 +266,10 @@ interface CADCanvasProps {
   onDoubleClickTavola?: (id: string) => void;
   selectedTemplateId?: string | null;
   selectedEntityId?: string | null;
+  defaultTextStyle?: { fontFamily: string, fontSize: number, fontWeight: string, textAlign: 'left' | 'center' | 'right' | 'justify' };
 }
 
-export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId }, ref) => {
+export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [view, setView] = useState({ zoom: 0.15, pan: { x: window.innerWidth > 0 ? (window.innerWidth / 2) - 150 : 250, y: window.innerHeight > 0 ? (window.innerHeight / 2) - 220 : 80 } });
   const [dragTavolaId, setDragTavolaId] = useState<string | null>(null);
@@ -370,6 +371,18 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const [positioningGroupStartPos, setPositioningGroupStartPos] = useState<Point | null>(null);
   const [showManualInput, setShowManualInput] = useState(false);
   const [bubblePosition, setBubblePosition] = useState<Point | null>(null);
+
+  interface TextDialogState {
+    id?: string;
+    point: Point;
+    text: string;
+    fontFamily: string;
+    fontSize: number;
+    fontWeight: 'normal' | 'bold';
+    textAlign: 'left' | 'center' | 'right' | 'justify';
+    color: string;
+  }
+  const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
   const lastMouseRef = useRef<Point>({ x: 0, y: 0 });
   const previousMouseRef = useRef<Point>({ x: 0, y: 0 });
   const lastEraserExecutionTime = useRef(0);
@@ -378,6 +391,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const containerRef = useRef<HTMLDivElement>(null);
   const fnStepValueRef = useRef<number>(0);
   const fnAnchorCanvasPosRef = useRef<Point | null>(null);
+  const freehandOrthoAnchorRef = useRef<Point | null>(null);
 
   useEffect(() => {
     if (!drawing?.wheelLength && !isParallelWheelActive) {
@@ -711,6 +725,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           snaps.push({point: p, type: 'standard', refPoint: p});
           keyPoints.push(p);
         }
+      } else if (entity.type === 'text') {
+        snaps.push({point: entity.point, type: 'standard', refPoint: entity.point});
+        keyPoints.push(entity.point);
       }
     });
 
@@ -938,6 +955,25 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             const dist = distanceToSegment(point, p1, p2);
             if (dist < 10 / view.zoom) hit = true;
         }
+      } else if (ent.type === 'text') {
+        const lines = ent.text.split('\n');
+        const fontSize = ent.fontSize || 14;
+        const maxLen = Math.max(...lines.map(l => l.length), 1);
+        const w = (maxLen * fontSize * 0.55) / view.zoom;
+        const h = (lines.length * fontSize * 1.25) / view.zoom;
+        
+        let offsetX = 0;
+        if (ent.textAlign === 'center') offsetX = -w / 2;
+        else if (ent.textAlign === 'right') offsetX = -w;
+        
+        const tx = ent.point.x + offsetX;
+        const ty = ent.point.y;
+        
+        const pad = 6 / view.zoom;
+        if (point.x >= tx - pad && point.x <= tx + w + pad &&
+            point.y >= ty - pad && point.y <= ty + h + pad) {
+            hit = true;
+        }
       }
       
       if (hit) {
@@ -991,6 +1027,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     } else if (entity.type === 'point') {
       const p = entity.point || (entity as any).position;
       if (p) points.push(p);
+    } else if (entity.type === 'text') {
+      points.push(entity.point);
     }
     return points;
   };
@@ -1036,6 +1074,23 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
 
+      const getAlphaColor = (colorStr: string | undefined, alpha: number, defaultRGB = "85, 85, 85") => {
+        if (!colorStr || !colorStr.startsWith('#')) return `rgba(${defaultRGB}, ${alpha})`;
+        const hex = colorStr.replace('#', '');
+        if (hex.length === 3) {
+          const r = parseInt(hex[0] + hex[0], 16);
+          const g = parseInt(hex[1] + hex[1], 16);
+          const b = parseInt(hex[2] + hex[2], 16);
+          return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        } else if (hex.length === 6) {
+          const r = parseInt(hex.substring(0, 2), 16);
+          const g = parseInt(hex.substring(2, 4), 16);
+          const b = parseInt(hex.substring(4, 6), 16);
+          return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        }
+        return `rgba(${defaultRGB}, ${alpha})`;
+      };
+
       // Draw existing entities
       entities.forEach(entity => {
         const layer = layers.find(l => l.id === entity.layer);
@@ -1043,7 +1098,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         
         const isFlashing = flashIds.includes(entity.id);
 
-        ctx.strokeStyle = (entity.mode === 'ink') ? '#555555' : '#000000';
+        ctx.strokeStyle = entity.color || ((entity.mode === 'ink') ? '#555555' : '#000000');
         ctx.lineWidth = Math.max(0.8, entity.lineWidth / view.zoom); // Ensure visibility
         ctx.globalAlpha = entity.opacity !== undefined ? entity.opacity : 1.0;
         if (layer && layer.frozen) {
@@ -1109,7 +1164,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
      
                       ctx.beginPath();
                       ctx.lineWidth = Math.max(0.2, pt.width * (entity.lineWidth / view.zoom));
-                      ctx.strokeStyle = isHighlighted ? highlightColor : `rgba(85, 85, 85, ${pt.alpha})`;
+                      ctx.strokeStyle = isHighlighted ? highlightColor : getAlphaColor(entity.color, pt.alpha);
                       ctx.moveTo(lastX, lastY);
                       ctx.lineTo(px, py);
                       ctx.stroke();
@@ -1137,7 +1192,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
                       ctx.beginPath();
                       ctx.lineWidth = Math.max(0.2, (0.5 + Math.random() * 0.5) * (entity.lineWidth / view.zoom));
-                      ctx.strokeStyle = isHighlighted ? highlightColor : `rgba(85, 85, 85, ${0.3 + Math.random() * 0.4})`;
+                      ctx.strokeStyle = isHighlighted ? highlightColor : getAlphaColor(entity.color, 0.3 + Math.random() * 0.4);
                       ctx.moveTo(lastX, lastY);
                       ctx.lineTo(px, py);
                       ctx.stroke();
@@ -1232,6 +1287,29 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           const width = entity.p2.x - entity.p1.x;
           const height = entity.p2.y - entity.p1.y;
           ctx.rect(entity.p1.x, entity.p1.y, width, height);
+        } else if (entity.type === 'text') {
+          ctx.font = `${entity.fontWeight || 'normal'} ${entity.fontSize / view.zoom}px ${entity.fontFamily || 'sans-serif'}`;
+          ctx.fillStyle = entity.color || '#000000';
+          ctx.textAlign = entity.textAlign || 'left';
+          ctx.textBaseline = 'top';
+
+          const lines = entity.text.split('\n');
+          const lineHeight = (entity.fontSize * 1.25) / view.zoom;
+          lines.forEach((line, idx) => {
+            ctx.fillText(line, entity.point.x, entity.point.y + idx * lineHeight);
+          });
+
+          if (isHighlighted) {
+            ctx.strokeStyle = highlightColor;
+            ctx.lineWidth = 1 / view.zoom;
+            // Draw a precise box around all lines of text
+            const maxW = Math.max(...lines.map(line => ctx.measureText(line).width));
+            const h = lines.length * lineHeight;
+            let offsetX = 0;
+            if (ctx.textAlign === 'center') offsetX = -maxW / 2;
+            else if (ctx.textAlign === 'right') offsetX = -maxW;
+            ctx.strokeRect(entity.point.x + offsetX - 4/view.zoom, entity.point.y - 4/view.zoom, maxW + 8/view.zoom, h + 8/view.zoom);
+          }
         }
         ctx.stroke();
 
@@ -1269,6 +1347,15 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                  const width = entity.p2.x - entity.p1.x;
                  const height = entity.p2.y - entity.p1.y;
                  ctx.rect(entity.p1.x, entity.p1.y, width, height);
+             } else if (entity.type === 'text') {
+                 const lines = entity.text.split('\n');
+                 const lineHeight = (entity.fontSize * 1.25) / view.zoom;
+                 const maxW = Math.max(...lines.map(line => ctx.measureText(line).width));
+                 const h = lines.length * lineHeight;
+                 let offsetX = 0;
+                 if (ctx.textAlign === 'center') offsetX = -maxW / 2;
+                 else if (ctx.textAlign === 'right') offsetX = -maxW;
+                 ctx.rect(entity.point.x + offsetX - 4/view.zoom, entity.point.y - 4/view.zoom, maxW + 8/view.zoom, h + 8/view.zoom);
              }
              ctx.stroke();
         }
@@ -1432,7 +1519,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 const alphaSeed = (0.5 + ((i % 3) * 0.1)); // values from 0.5 to 0.7
                 ctx.beginPath();
                 ctx.lineWidth = Math.max(0.4, widthSeed * (defaultLineStyle.lineWidth / view.zoom));
-                ctx.strokeStyle = `rgba(85, 85, 85, ${alphaSeed})`;
+                ctx.strokeStyle = getAlphaColor(defaultLineStyle.color, alphaSeed);
                 ctx.moveTo(lastPt.x, lastPt.y);
                 ctx.lineTo(pt.x, pt.y);
                 ctx.stroke();
@@ -1444,7 +1531,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 ? '#9ca3af' // Gray for virtual
                 : (isKnownAngle 
                     ? '#22c55e' 
-                    : ((defaultLineStyle.mode === 'pencil') ? 'rgba(136, 136, 136, 0.5)' : (defaultLineStyle.mode === 'ink' ? '#555555' : 'rgba(0, 0, 0, 1.0)')));
+                    : (defaultLineStyle.color || ((defaultLineStyle.mode === 'pencil') ? 'rgba(136, 136, 136, 0.5)' : (defaultLineStyle.mode === 'ink' ? '#555555' : 'rgba(0, 0, 0, 1.0)'))));
             ctx.lineWidth = (drawing.wheelLength !== undefined ? 4 : 2) / view.zoom;
             ctx.setLineDash([5, 5]);
             ctx.beginPath();
@@ -1469,7 +1556,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
                         ctx.beginPath();
                         ctx.lineWidth = Math.max(0.2, (0.5 + Math.random() * 0.5) * (2 / view.zoom));
-                        ctx.strokeStyle = `rgba(85, 85, 85, ${0.3 + Math.random() * 0.4})`;
+                        ctx.strokeStyle = getAlphaColor(defaultLineStyle.color, 0.3 + Math.random() * 0.4);
                         ctx.moveTo(lastX, lastY);
                         ctx.lineTo(px, py);
                         ctx.stroke();
@@ -1612,7 +1699,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             const template = TEMPLATES.find(t => t.id === selectedTemplateId);
             if (template) {
                 ctx.save();
-                ctx.strokeStyle = (defaultLineStyle.mode === 'ink') ? '#555555' : '#000000';
+                ctx.strokeStyle = defaultLineStyle.color || ((defaultLineStyle.mode === 'ink') ? '#555555' : '#000000');
                 ctx.lineWidth = defaultLineStyle.lineWidth / view.zoom;
                 ctx.globalAlpha = 0.5;
                 
@@ -3091,6 +3178,22 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         const dy = rawPoint.y - lastClickPosRef.current.y;
         if (Math.sqrt(dx * dx + dy * dy) < 20 / view.zoom) {
             lastClickTimeRef.current = 0; // reset
+
+            const clickedText = getEntityAtPoint(rawPoint);
+            if (clickedText && clickedText.type === 'text') {
+                setTextDialog({
+                    id: clickedText.id,
+                    point: clickedText.point,
+                    text: clickedText.text,
+                    fontFamily: clickedText.fontFamily || 'sans-serif',
+                    fontSize: clickedText.fontSize || 14,
+                    fontWeight: (clickedText.fontWeight || 'normal') as 'normal' | 'bold',
+                    textAlign: (clickedText.textAlign || 'left') as 'left' | 'center' | 'right' | 'justify',
+                    color: clickedText.color || '#000000',
+                });
+                return;
+            }
+
             if (activeTool === 'Join') {
                 confirmJoin();
                 return;
@@ -3237,7 +3340,12 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     }
 
     const isFreehandActive = activeTool === 'Line' && defaultLineStyle.mode === 'ink' && !orthoMode;
-    const snapped = (isFreehandActive || (activeTool === 'Template' && !drawing))
+    const isTempOrtho = activeTool === 'Line' && !orthoMode && isShiftPressedRef.current;
+    
+    // We disable snapping for freehand mode, or for tempOrtho
+    const shouldSkipSnap = isFreehandActive || isTempOrtho || (activeTool === 'Template' && !drawing);
+    
+    const snapped = shouldSkipSnap
         ? { point: rawPoint, snapped: false, type: 'standard' as const, refPoint: undefined, constraintAxis: undefined, refPoint2: undefined, constraintAxis2: undefined, hasDoubleSmart: false }
         : getSnappedPoint(rawPoint, entities, activeTool, drawing);
 
@@ -3443,7 +3551,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 return next;
             });
         }
-    } else if (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle' || activeTool === 'Point' || activeTool === 'Arc') {
+    } else if (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle' || activeTool === 'Point' || activeTool === 'Arc' || activeTool === 'Testo') {
       const wasLocked = isLocked;
       setIsLocked(false);
       
@@ -3461,19 +3569,31 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                   hasDoubleSmart: false
               };
           } else {
-              const isOrthoHorizontal = activeTool === 'Line' && orthoMode && 
+              const isTempOrtho = activeTool === 'Line' && !orthoMode && isShiftPressedRef.current;
+              const effectiveOrthoMode = orthoMode || isTempOrtho;
+
+              const isOrthoHorizontal = activeTool === 'Line' && effectiveOrthoMode && 
                     Math.abs(rawPoint.x - drawing.start.x) >= Math.abs(rawPoint.y - drawing.start.y);
 
               let finalPoint = rawPoint;
-              if (activeTool === 'Line' && orthoMode) {
-                  finalPoint = isOrthoHorizontal 
-                    ? { x: finalPoint.x, y: drawing.start.y } 
-                    : { x: drawing.start.x, y: finalPoint.y };
+              if (activeTool === 'Line') {
+                  if (effectiveOrthoMode) {
+                      finalPoint = isOrthoHorizontal 
+                        ? { x: finalPoint.x, y: drawing.start.y } 
+                        : { x: drawing.start.x, y: finalPoint.y };
+                  } else if (!e.shiftKey && !isTempOrtho) {
+                      finalPoint = applyAngleSnapping(drawing.start, rawPoint);
+                  }
               }
 
-              const rawSnapped = getSnappedPoint(finalPoint, entities, activeTool, drawing);
+              let rawSnapped;
+              if (isTempOrtho) {
+                  rawSnapped = { point: finalPoint, snapped: false, type: 'standard' as const };
+              } else {
+                  rawSnapped = getSnappedPoint(finalPoint, entities, activeTool, drawing);
+              }
               
-              if (activeTool === 'Line' && orthoMode) {
+              if (activeTool === 'Line' && effectiveOrthoMode) {
                   rawSnapped.point = isOrthoHorizontal 
                     ? { x: rawSnapped.point.x, y: drawing.start.y } 
                     : { x: drawing.start.x, y: rawSnapped.point.y };
@@ -3741,6 +3861,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           if (activeTool === 'Line') {
               // Start next segment
               const isFreehandMode = defaultLineStyle.mode === 'ink' && !orthoMode;
+              const isTempOrthoNext = activeTool === 'Line' && !orthoMode && isShiftPressedRef.current;
               setDrawing({ 
                 start: snappedResult.point, 
                 current: snappedResult.point, 
@@ -3751,7 +3872,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 constraintAxis2: snappedResult.constraintAxis2,
                 hasDoubleSmart: snappedResult.hasDoubleSmart,
                 activeConstraint: undefined,
-                isVirtual: isShiftPressed, // Check if the NEXT one should be virtual
+                isVirtual: isShiftPressed && !isTempOrthoNext, // Check if the NEXT one should be virtual
                 isFreehand: isFreehandMode,
                 freehandPoints: isFreehandMode ? [snappedResult.point] : undefined
               });
@@ -3762,6 +3883,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       }
 
       const isFreehandMode = activeTool === 'Line' && defaultLineStyle.mode === 'ink' && !orthoMode;
+      const isTempOrthoStart = activeTool === 'Line' && !orthoMode && isShiftPressedRef.current;
       setDrawing({ 
         start: snapped.point, 
         current: snapped.point, 
@@ -3772,7 +3894,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         constraintAxis2: snapped.constraintAxis2,
         hasDoubleSmart: snapped.hasDoubleSmart,
         activeConstraint: undefined,
-        isVirtual: isShiftPressed, // Marking the start as virtual if Shift is held
+        isVirtual: isShiftPressed && !isTempOrthoStart, // Marking the start as virtual if Shift is held
         isFreehand: isFreehandMode,
         freehandPoints: isFreehandMode ? [snapped.point] : undefined
       });
@@ -3787,6 +3909,18 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           layer: activeLayerId
         };
         setEntities(prev => [...prev, newEntity]);
+        setDrawing(null);
+        return;
+      } else if (activeTool === 'Testo') {
+        setTextDialog({
+          point: snapped.point,
+          text: "",
+          fontFamily: defaultTextStyle?.fontFamily || 'sans-serif',
+          fontSize: defaultTextStyle?.fontSize || 14,
+          fontWeight: (defaultTextStyle?.fontWeight || 'normal') as 'normal' | 'bold',
+          textAlign: (defaultTextStyle?.textAlign || 'left') as 'left' | 'center' | 'right' | 'justify',
+          color: defaultLineStyle.color || '#000000',
+        });
         setDrawing(null);
         return;
       }
@@ -4218,12 +4352,30 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           const lastPt = prevPoints[prevPoints.length - 1];
           const distToLast = Math.sqrt(Math.pow(rawPoint.x - lastPt.x, 2) + Math.pow(rawPoint.y - lastPt.y, 2));
           let nextPoints = prevPoints;
+          let newPt = rawPoint;
+          
+          if (isShiftPressedRef.current) {
+              if (!freehandOrthoAnchorRef.current) {
+                  freehandOrthoAnchorRef.current = lastPt;
+              }
+              const anchor = freehandOrthoAnchorRef.current;
+              const dx = Math.abs(rawPoint.x - anchor.x);
+              const dy = Math.abs(rawPoint.y - anchor.y);
+              if (dx > dy) {
+                  newPt = { x: rawPoint.x, y: anchor.y };
+              } else {
+                  newPt = { x: anchor.x, y: rawPoint.y };
+              }
+          } else {
+              freehandOrthoAnchorRef.current = null;
+          }
+
           if (distToLast > 0.5) { // 0.5 in canvas units
-              nextPoints = [...prevPoints, rawPoint];
+              nextPoints = [...prevPoints, newPt];
           }
           setDrawing({
               ...drawing,
-              current: rawPoint,
+              current: newPt,
               freehandPoints: nextPoints,
               isFreehand: true
           });
@@ -4289,7 +4441,13 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
               activeConstraint: undefined
           });
       } else {
-          const rawSnapped = getSnappedPoint(rawPoint, entities, activeTool, drawing);
+          const isTempOrtho = activeTool === 'Line' && !orthoMode && isShiftPressedRef.current;
+          
+          let rawSnapped = getSnappedPoint(rawPoint, entities, activeTool, drawing);
+          if (isTempOrtho) {
+              rawSnapped = { point: rawPoint, snapped: false, type: 'standard' as const };
+          }
+
           if (rawSnapped.snapped && rawSnapped.type === 'standard') {
             setDrawing({ 
                 ...drawing, 
@@ -4303,31 +4461,38 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 activeConstraint: undefined
             });
           } else {
-            const isOrthoHorizontal = activeTool === 'Line' && orthoMode && 
+            const effectiveOrthoMode = orthoMode || isTempOrtho;
+            const isOrthoHorizontal = activeTool === 'Line' && effectiveOrthoMode && 
                   Math.abs(rawPoint.x - drawing.start.x) >= Math.abs(rawPoint.y - drawing.start.y);
 
             let finalPoint = rawPoint;
 
             if (activeTool === 'Line') {
-                if (orthoMode) {
+                if (effectiveOrthoMode) {
                     finalPoint = isOrthoHorizontal 
                       ? { x: finalPoint.x, y: drawing.start.y } 
                       : { x: drawing.start.x, y: finalPoint.y };
-                } else if (!e.shiftKey) {
+                } else if (!e.shiftKey && !isTempOrtho) {
                     finalPoint = applyAngleSnapping(drawing.start, rawPoint);
                 }
             }
 
-            const snapped = getSnappedPoint(finalPoint, entities, activeTool, drawing);
+            let snapped;
+            if (isTempOrtho) {
+                snapped = { point: finalPoint, snapped: false, type: 'standard' as const };
+            } else {
+                snapped = getSnappedPoint(finalPoint, entities, activeTool, drawing);
+            }
+            
             let snappedPoint = snapped.point;
 
-            if (activeTool === 'Line' && orthoMode) {
+            if (activeTool === 'Line' && effectiveOrthoMode) {
                 snappedPoint = isOrthoHorizontal 
                   ? { x: snappedPoint.x, y: drawing.start.y } 
                   : { x: drawing.start.x, y: snappedPoint.y };
             }
 
-            if (!snapped.snapped && !orthoMode && drawing.activeConstraint) {
+            if (!snapped.snapped && !effectiveOrthoMode && drawing.activeConstraint) {
                 if (drawing.activeConstraint.axis === 'x') snappedPoint.x = drawing.activeConstraint.value;
                 else snappedPoint.y = drawing.activeConstraint.value;
             }
@@ -4335,13 +4500,13 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             setDrawing({ 
                 ...drawing, 
                 current: snappedPoint, 
-                snapType: snapped.snapped ? snapped.type : undefined, 
-                refPoint: snapped.refPoint,
-                refEntityId: snapped.refEntityId,
-                constraintAxis: snapped.constraintAxis,
-                refPoint2: snapped.refPoint2,
-                constraintAxis2: snapped.constraintAxis2,
-                hasDoubleSmart: snapped.hasDoubleSmart,
+                snapType: snapped.snapped ? (snapped.type as any) : undefined, 
+                refPoint: (snapped as any).refPoint,
+                refEntityId: (snapped as any).refEntityId,
+                constraintAxis: (snapped as any).constraintAxis,
+                refPoint2: (snapped as any).refPoint2,
+                constraintAxis2: (snapped as any).constraintAxis2,
+                hasDoubleSmart: (snapped as any).hasDoubleSmart || false,
                 activeConstraint: undefined,
                 isVirtual: drawing.isVirtual // Preserve virtual status during move
             });
@@ -4404,6 +4569,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 if (ent.type === 'circle') return { ...ent, center: { x: ent.center.x + deltaX, y: ent.center.y + deltaY } };
                 if (ent.type === 'rectangle') return { ...ent, p1: { x: ent.p1.x + deltaX, y: ent.p1.y + deltaY }, p2: { x: ent.p2.x + deltaX, y: ent.p2.y + deltaY } };
                 if (ent.type === 'point') return { ...ent, point: { x: ent.point.x + deltaX, y: ent.point.y + deltaY } };
+                if (ent.type === 'text') return { ...ent, point: { x: ent.point.x + deltaX, y: ent.point.y + deltaY } };
                 if (ent.type === 'arc') return { ...ent, center: { x: ent.center.x + deltaX, y: ent.center.y + deltaY } };
                 if (ent.type === 'dimension') {
                     return { 
@@ -4527,7 +4693,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     }
 
     const isFreehandMode = activeTool === 'Line' && defaultLineStyle.mode === 'ink' && !orthoMode;
-    if (!drawing && !isFreehandMode && (activeTool === 'Line' || activeTool === 'Rectangle' || activeTool === 'Circle' || activeTool === 'Arc' || activeTool === 'Dimension' || activeTool === 'Move' || activeTool === 'Copy')) {
+    const isTempOrthoHover = activeTool === 'Line' && !orthoMode && isShiftPressedRef.current;
+    
+    if (!drawing && !isFreehandMode && !isTempOrthoHover && (activeTool === 'Line' || activeTool === 'Rectangle' || activeTool === 'Circle' || activeTool === 'Arc' || activeTool === 'Dimension' || activeTool === 'Move' || activeTool === 'Copy')) {
         const snapped = getSnappedPoint(rawPoint, entities, activeTool, null);
         if (snapped.snapped) {
             setHoverSnap(snapped);
@@ -4541,6 +4709,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   };
 
   const handleMouseUp = (e: React.MouseEvent) => {
+    freehandOrthoAnchorRef.current = null;
     if (activeTool === 'Line' && defaultLineStyle.mode === 'ink' && !orthoMode && drawing && drawing.isFreehand && drawing.freehandPoints && drawing.freehandPoints.length > 2) {
         const pts = drawing.freehandPoints;
         const newEntity: Entity = {
@@ -4997,6 +5166,55 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     });
   };
 
+  const handleCommitText = () => {
+    if (!textDialog) return;
+    if (textDialog.text.trim()) {
+        if (textDialog.id) {
+            // Modifica testo esistente
+            setEntities(prev => {
+                const next = prev.map(ent => {
+                    if (ent.id === textDialog.id) {
+                        return {
+                            ...ent,
+                            text: textDialog.text,
+                            fontFamily: textDialog.fontFamily,
+                            fontSize: textDialog.fontSize,
+                            fontWeight: textDialog.fontWeight,
+                            textAlign: textDialog.textAlign,
+                            color: textDialog.color,
+                        } as Entity;
+                    }
+                    return ent;
+                });
+                onCommitHistory?.(next);
+                return next;
+            });
+        } else {
+            // Inserisci nuovo testo
+            const newEntity: Entity = {
+                id: Date.now().toString(),
+                type: 'text',
+                color: textDialog.color,
+                lineWidth: defaultLineStyle.lineWidth,
+                mode: defaultLineStyle.mode,
+                point: textDialog.point,
+                layer: activeLayerId,
+                text: textDialog.text,
+                fontFamily: textDialog.fontFamily,
+                fontSize: textDialog.fontSize,
+                fontWeight: textDialog.fontWeight,
+                textAlign: textDialog.textAlign,
+            };
+            setEntities(prev => {
+                const next = [...prev, newEntity];
+                onCommitHistory?.(next);
+                return next;
+            });
+        }
+    }
+    setTextDialog(null);
+  };
+
   const scissorsSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="5" cy="7.5" r="3" stroke="#64748b" stroke-width="1.5"/><circle cx="5" cy="16.5" r="3" stroke="#64748b" stroke-width="1.5"/><path d="M7.5 9L12 12L22 9" stroke="#64748b" stroke-width="1.5" stroke-linecap="round"/><path d="M7.5 15L12 12L22 15" stroke="#64748b" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="12" r="1.2" fill="#475569"/></svg>`);
   
   const pencilSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M0,0 L3,1 L1,3 Z" fill="#1e293b"/><path d="M3,1 L7,3 L3,7 L1,3 Z" fill="#fed7aa"/><path d="M7,3 L21,17 L17,21 L3,7 Z" fill="#4f46e5"/><path d="M7,3 L21,17 L19,19 L5,5 Z" fill="#6366f1"/><path d="M21,17 L24,20 L20,24 L17,21 Z" fill="#94a3b8"/><path d="M24,20 L28,24 L24,28 L20,24 Z" fill="#fda4af"/></svg>`);
@@ -5007,7 +5225,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     <div 
       ref={containerRef} 
       className="w-full h-full relative" 
-      style={{ cursor: dragTavolaId ? 'grabbing' : hoverTavolaEdge ? 'grab' : (activeTool === 'Eraser' || (activeTool === 'Parallel' && selectedParallelLine)) ? 'none' : activeTool === 'Trim' ? `url("${scissorsSvg}") 16 16, crosshair` : defaultLineStyle.mode === 'ink' ? `url("${pencilSvg}") 0 0, crosshair` : rulerStyle === 'crosshair' ? `url("${crosshairSvg}") 48 48, crosshair` : `url("${tecnigrafoSvg}") 20 108, crosshair` }}
+      style={{ cursor: dragTavolaId ? 'grabbing' : hoverTavolaEdge ? 'grab' : activeTool === 'Testo' ? 'text' : (activeTool === 'Eraser' || (activeTool === 'Parallel' && selectedParallelLine)) ? 'none' : activeTool === 'Trim' ? `url("${scissorsSvg}") 16 16, crosshair` : defaultLineStyle.mode === 'ink' ? `url("${pencilSvg}") 0 0, crosshair` : rulerStyle === 'crosshair' ? `url("${crosshairSvg}") 48 48, crosshair` : `url("${tecnigrafoSvg}") 20 108, crosshair` }}
       onWheel={handleWheel} 
       onMouseDown={handleMouseDown} 
       onMouseMove={handleMouseMove} 
@@ -5018,6 +5236,173 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     >
       <canvas ref={canvasRef} />
       
+      {activeTool === 'Testo' && !textDialog && (
+        <div className="absolute top-4 left-[50%] translate-x-[-50%] z-40 bg-zinc-900/90 text-white border border-neutral-700 backdrop-blur-sm px-4 py-2 rounded-full shadow-2xl flex items-center gap-2 animate-bounce">
+          <span className="w-2 h-2 bg-indigo-400 rounded-full animate-ping"></span>
+          <p className="text-xs font-semibold select-none font-sans">
+            Fai clic su un punto del disegno per posizionare il testo
+          </p>
+        </div>
+      )}
+
+      {textDialog && (
+        <div 
+          className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in"
+          onClick={() => setTextDialog(null)}
+        >
+          <div 
+            className="bg-white border select-none border-neutral-200 rounded-xl shadow-2xl p-6 flex flex-col gap-4 w-96 max-w-[90vw] animate-scale-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center border-b border-neutral-100 pb-3">
+              <h3 className="text-xs font-black uppercase text-neutral-800 tracking-wider font-mono">
+                {textDialog.id ? "Modifica Testo" : "Inserisci Nuovo Testo"}
+              </h3>
+              <button 
+                onClick={() => setTextDialog(null)}
+                className="text-neutral-400 hover:text-neutral-600 font-mono text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest">
+                Contenuto Testo
+              </label>
+              <textarea
+                className="w-full bg-neutral-50 hover:bg-neutral-100 focus:bg-white text-xs p-2.5 rounded-lg border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium transition-colors"
+                rows={3}
+                placeholder="Scrivi qui il testo..."
+                value={textDialog.text}
+                onChange={(e) => setTextDialog({ ...textDialog, text: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleCommitText();
+                  }
+                }}
+                autoFocus
+              />
+              <p className="text-[9px] text-neutral-400 font-mono text-right mt-0.5">
+                Premi Invio per confermare • Shift+Invio per nuova riga
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest">
+                  Tipo Carattere
+                </label>
+                <select
+                  className="w-full bg-neutral-50 hover:bg-neutral-100 border border-neutral-300 text-xs rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 font-semibold"
+                  value={textDialog.fontFamily}
+                  onChange={(e) => setTextDialog({ ...textDialog, fontFamily: e.target.value })}
+                >
+                  <option value="sans-serif">Sans Serif</option>
+                  <option value="serif">Serif (Classico)</option>
+                  <option value="monospace">Monospace (Dati)</option>
+                  <option value="Courier New">Courier New</option>
+                  <option value="Georgia">Georgia</option>
+                  <option value="Arial">Arial</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest">
+                  Grandezza (px)
+                </label>
+                <input
+                  type="number"
+                  min="6"
+                  max="144"
+                  className="w-full bg-neutral-50 hover:bg-neutral-100 border border-neutral-300 text-xs rounded-lg p-2 font-bold text-center focus:ring-2 focus:ring-indigo-500"
+                  value={textDialog.fontSize}
+                  onChange={(e) => setTextDialog({ ...textDialog, fontSize: parseInt(e.target.value) || 12 })}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest">
+                  Allineamento
+                </label>
+                <select
+                  className="w-full bg-neutral-50 hover:bg-neutral-100 border border-neutral-300 text-xs rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 font-semibold"
+                  value={textDialog.textAlign}
+                  onChange={(e) => setTextDialog({ ...textDialog, textAlign: e.target.value as any })}
+                >
+                  <option value="left">Sinistra</option>
+                  <option value="center">Centro</option>
+                  <option value="right">Destra</option>
+                  <option value="justify">Giustificato</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest">
+                  Formato
+                </label>
+                <div className="grid grid-cols-2 gap-2 h-full">
+                  <button
+                    type="button"
+                    className={`text-xs py-1.5 rounded-lg border font-bold transition-colors ${textDialog.fontWeight === 'bold' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-neutral-50 hover:bg-neutral-100 border-neutral-300 text-neutral-700'}`}
+                    onClick={() => setTextDialog({ ...textDialog, fontWeight: textDialog.fontWeight === 'bold' ? 'normal' : 'bold' })}
+                  >
+                    Grassetto
+                  </button>
+                  <span className="text-[10px] text-neutral-400 self-center text-center font-mono select-none uppercase">
+                    {textDialog.fontWeight === 'bold' ? 'BOLD' : 'REGULAR'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest">
+                Colore Testo
+              </label>
+              <div className="grid grid-cols-5 gap-2">
+                {['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#64748b'].map((c) => {
+                  const isSelected = textDialog.color === c;
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setTextDialog({ ...textDialog, color: c })}
+                      className="h-6 w-full rounded border-2 transition-transform hover:scale-110 active:scale-95 shadow-sm"
+                      style={{ 
+                        backgroundColor: c,
+                        borderColor: isSelected ? '#4f46e5' : 'transparent',
+                      }}
+                      title={c}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-neutral-100 pt-3 mt-1">
+              <button
+                type="button"
+                className="px-4 py-2 border border-neutral-300 rounded-lg hover:bg-neutral-50 text-neutral-700 text-xs font-semibold tracking-wide font-sans transition-colors"
+                onClick={() => setTextDialog(null)}
+              >
+                Annulla
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold tracking-wide font-sans shadow-md transition-colors"
+                onClick={handleCommitText}
+              >
+                {textDialog.id ? "Salva Modifiche" : "Inserisci"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showManualInput && (
           <ManualInputOverlay
               type={activeTool === "Parallel" ? "parallel" : (activeTool.toLowerCase() as any)}

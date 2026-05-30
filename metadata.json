@@ -1,5 +1,5 @@
 {
-  "name": "gecolacad 2.0_a",
+  "name": "gecolacad 3.0",
   "description": "A minimalist, fast 2D CAD application for the browser.",
   "requestFramePermissions": [
     "microphone"
