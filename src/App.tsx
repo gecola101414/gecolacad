@@ -13,6 +13,7 @@ import { TemplatePreview } from "./components/TemplatePreview";
 import { TEMPLATES } from './data/templates';
 import { Entity, Point, Layer, Measurement, Tavola } from "./types";
 import { mergeAllSegments } from "./utils/entityUtils";
+import { parseScriptToEntities, updateScriptVariables } from "./utils/parametricParser";
 import {
   Minus,
   Circle,
@@ -105,7 +106,19 @@ export default function App() {
     { id: "tav4", name: "Tavola n. 4", format: "A1", scale: 500, unit: "cm", position: { x: 40, y: 30 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 4", autore: "Ing. Domenico Gimondo", data: "2026" } },
     { id: "tav5", name: "Tavola n. 5", format: "A0", scale: 1000, unit: "cm", position: { x: 0, y: 0 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 5", autore: "Ing. Domenico Gimondo", data: "2026" } },
   ]);
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere' | 'testo'>('penne');
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere' | 'testo' | 'gemini'>('penne');
+  const [geminiPrompt, setGeminiPrompt] = useState("");
+  const [geminiResponse, setGeminiResponse] = useState<{
+    explanation: string;
+    parameters: { name: string; value: number; label: string }[];
+    script: string;
+  } | null>(null);
+  const [geminiDslScript, setGeminiDslScript] = useState("");
+  const [geminiParams, setGeminiParams] = useState<Record<string, number>>({});
+  const [geminiIsLoading, setGeminiIsLoading] = useState(false);
+  const [geminiInsertX, setGeminiInsertX] = useState(0);
+  const [geminiInsertY, setGeminiInsertY] = useState(0);
+  
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [editingCartiglioTavolaId, setEditingCartiglioTavolaId] = useState<string | null>(null);
@@ -239,6 +252,37 @@ export default function App() {
     
     // reset input so the same file can be imported again
     event.target.value = '';
+  };
+
+  const handleImportGemini = () => {
+    if (!geminiDslScript) return;
+    try {
+      const p = parseScriptToEntities(geminiDslScript, { x: Number(geminiInsertX), y: Number(geminiInsertY) }, activeLayerId);
+      
+      // Automatic Layer Addition if any referred layers don't exist!
+      const existingNames = new Set(layers.map(l => l.name));
+      const layersToCreate: Layer[] = [];
+      for (const reqLayer of p.referencedLayers) {
+        if (!existingNames.has(reqLayer)) {
+          layersToCreate.push({
+            id: reqLayer,
+            name: reqLayer,
+            visible: true,
+            frozen: false
+          });
+        }
+      }
+      if (layersToCreate.length > 0) {
+        setLayers(prev => [...prev, ...layersToCreate]);
+      }
+
+      updateEntitiesWithHistory(prev => [...prev, ...p.entities]);
+      setShortcutToast(`Importati ${p.entities.length} elementi parametrici!`);
+      setTimeout(() => setShortcutToast(null), 3000);
+    } catch (err) {
+      console.error(err);
+      alert("Errore nell'importazione degli oggetti geometrici.");
+    }
   };
 
   const cadCanvasRef = useRef<any>(null);
@@ -525,6 +569,20 @@ export default function App() {
           <Type size={16} />
           <span className="text-[10px]">Testo</span>
         </button>
+        <button
+          onClick={() => {
+            if (activeSidebarTab === 'gemini' && showProperties) {
+              setShowProperties(false);
+            } else {
+              setActiveSidebarTab('gemini');
+              setShowProperties(true);
+            }
+          }}
+          className={`px-4 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 ${showProperties && activeSidebarTab === 'gemini' ? "bg-amber-50 text-amber-700 font-bold border-x border-amber-200" : "hover:bg-neutral-200 text-neutral-600"}`}
+        >
+          <Sparkles size={16} className={showProperties && activeSidebarTab === 'gemini' ? "text-amber-500 animate-pulse" : "text-amber-500"} />
+          <span className="text-[10px]">Gemini AI</span>
+        </button>
         <div className="flex-1"></div>
         <div className="flex items-center gap-1.5 px-2 border-l border-neutral-300 bg-neutral-50 h-full">
            <button onClick={handleOpenFile} title="Apri File" className="flex flex-col items-center justify-center p-1.5 hover:bg-neutral-200 text-neutral-600 rounded gap-0.5">
@@ -610,6 +668,11 @@ export default function App() {
           >
             <span className={`inline-block w-2 h-2 rounded-full ${orthoMode ? "bg-emerald-600 animate-pulse" : "bg-neutral-400"}`} />
             MODO ORTO: {orthoMode ? "ATTIVO (0°/90°)" : "DISATTIVATO"}
+            {orthoMode && (
+              <span className="text-[10px] bg-emerald-200/50 text-emerald-950 px-1 py-0.5 rounded ml-1 font-medium select-none animate-pulse">
+                🔮 Shift o Diagonale
+              </span>
+            )}
           </button>
           <div className="flex gap-1 rounded bg-neutral-200 p-0.5">
             <button
@@ -874,6 +937,7 @@ export default function App() {
                   : activeSidebarTab === "layers" ? "Gestione Layers" 
                   : activeSidebarTab === "maschere" ? "Archivio Maschere" 
                   : activeSidebarTab === "testo" ? "Impostazioni Testo"
+                  : activeSidebarTab === "gemini" ? "Disegno Gemini AI"
                   : "Mazzo Penne & Stili"}
               </span>
               <button 
@@ -930,6 +994,222 @@ export default function App() {
                     </div>
                   ))}
                   <div className="h-20"></div>
+                </div>
+              ) : activeSidebarTab === "gemini" ? (
+                <div className="space-y-4">
+                  <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg shadow-sm">
+                    <p className="text-[11px] text-amber-900 leading-normal font-sans">
+                      <span className="font-bold">🔮 DIALOGA CON GEMINI CAD:</span> Descrivi cosa vuoi disegnare. Riceverai un codice parametrico visualizzabile ed modificabile in tempo reale.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4">
+                    {/* Prompt input */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-mono">
+                        Cosa desideri disegnare?
+                      </label>
+                      <textarea
+                        className="w-full bg-neutral-50 hover:bg-neutral-100 focus:bg-white border border-neutral-300 text-xs rounded p-2 focus:ring-2 focus:ring-indigo-500 outline-none transition-all placeholder:text-neutral-400 font-sans leading-relaxed"
+                        rows={3}
+                        value={geminiPrompt}
+                        onChange={(e) => setGeminiPrompt(e.target.value)}
+                        placeholder="Es: un tavolo da pranzo 160x80 con 6 sedie, oppure una scala con 5 alzate..."
+                      />
+                    </div>
+
+                    {/* Presets */}
+                    <div className="space-y-1.5 pt-1">
+                      <span className="text-[9px] text-neutral-400 font-bold uppercase tracking-wider block font-mono">Esempi rapidi:</span>
+                      <div className="grid grid-cols-2 gap-1">
+                        {[
+                          { label: "Tavolo e sedie", text: "tavolo rettangolare 160x90 con 6 sedie attorno" },
+                          { label: "Ingranaggio", text: "ingranaggio circolare raggio 35 con 10 denti rettangolari" },
+                          { label: "Scala a gradini", text: "una scala a gradini con 5 alzate da 18 e pedate da 28" },
+                          { label: "Piscina ovale", text: "piscina ovale formata da un rettangolo centrale 100x50 e due semicerchi laterali" }
+                        ].map((preset, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setGeminiPrompt(preset.text)}
+                            className="bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-[9px] px-1.5 py-1 rounded transition-colors font-medium border border-neutral-200 text-left truncate"
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Generate Button */}
+                    <button
+                      onClick={async () => {
+                        if (!geminiPrompt.trim()) return;
+                        setGeminiIsLoading(true);
+                        try {
+                          const response = await fetch("/api/ai-draw", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ prompt: geminiPrompt })
+                          });
+                          if (!response.ok) {
+                            throw new Error("Generazione fallita.");
+                          }
+                          const data = await response.json();
+                          if (data.script) {
+                            setGeminiResponse(data);
+                            setGeminiDslScript(data.script);
+                            
+                            // Initialize parameters
+                            const initialParams: Record<string, number> = {};
+                            if (data.parameters) {
+                              data.parameters.forEach((p: any) => {
+                                initialParams[p.name] = p.value;
+                              });
+                            }
+                            setGeminiParams(initialParams);
+                          }
+                        } catch (err: any) {
+                          console.error(err);
+                          alert("Impossibile connettersi o ricevere dati da Gemini: " + err.message);
+                        } finally {
+                          setGeminiIsLoading(false);
+                        }
+                      }}
+                      disabled={geminiIsLoading || !geminiPrompt.trim()}
+                      className={`w-full py-2 px-3 rounded-md font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-sm ${
+                        geminiIsLoading 
+                          ? "bg-neutral-200 text-neutral-400 cursor-not-allowed" 
+                          : "bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 active:from-amber-700 text-white hover:shadow-md cursor-pointer"
+                      }`}
+                    >
+                      <Sparkles size={14} className={geminiIsLoading ? "animate-spin text-amber-500" : "text-white"} />
+                      <span>{geminiIsLoading ? "Elaborazione IA..." : "Chiedi a Gemini"}</span>
+                    </button>
+
+                    {/* Gemini Result / Script Area */}
+                    {geminiResponse && (
+                      <div className="space-y-4 pt-3 border-t border-neutral-100">
+                        {/* Explanation */}
+                        {geminiResponse.explanation && (
+                          <div className="bg-neutral-50 border border-neutral-200 rounded p-2 text-[10.5px] text-neutral-600 leading-relaxed font-sans">
+                            <span className="font-bold text-neutral-800 block mb-0.5">Note di Progetto:</span>
+                            {geminiResponse.explanation}
+                          </div>
+                        )}
+
+                        {/* Interactive Sliders/Inputs for Parameters */}
+                        {geminiResponse.parameters && geminiResponse.parameters.length > 0 && (
+                          <div className="space-y-2 bg-indigo-50/50 border border-indigo-100 rounded p-2.5">
+                            <span className="text-[9px] font-black uppercase text-indigo-800 tracking-wider font-mono flex items-center gap-1">
+                              <Sparkles size={10} className="text-indigo-500 animate-pulse" />
+                              Parametri Dinamici (Tweak)
+                            </span>
+                            
+                            <div className="space-y-1.5">
+                              {geminiResponse.parameters.map((p, idx) => {
+                                const currentVal = geminiParams[p.name] !== undefined ? geminiParams[p.name] : p.value;
+                                return (
+                                  <div key={idx} className="space-y-0.5">
+                                    <div className="flex justify-between items-center text-[10px] font-bold text-neutral-600">
+                                      <span className="truncate max-w-[150px]">{p.label || p.name}</span>
+                                      <span className="font-mono text-indigo-700 font-black bg-indigo-100/50 px-1.5 py-0.5 rounded text-[8.5px]">{currentVal}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="range"
+                                        min={Math.max(1, Math.round(p.value * 0.2))}
+                                        max={Math.round(p.value * 5)}
+                                        value={currentVal}
+                                        onChange={(e) => {
+                                          const newVal = Number(e.target.value);
+                                          const updated = { ...geminiParams, [p.name]: newVal };
+                                          setGeminiParams(updated);
+                                          
+                                          // Immediately rewrite variable declaration inside DSL script
+                                          const updatedScript = updateScriptVariables(geminiDslScript, updated);
+                                          setGeminiDslScript(updatedScript);
+                                        }}
+                                        className="flex-1 accent-indigo-600 h-1 bg-neutral-300 rounded-lg appearance-none cursor-pointer"
+                                      />
+                                      <input
+                                        type="number"
+                                        value={currentVal}
+                                        onChange={(e) => {
+                                          const newVal = Number(e.target.value);
+                                          const updated = { ...geminiParams, [p.name]: newVal };
+                                          setGeminiParams(updated);
+                                          
+                                          // Immediately rewrite variable declaration
+                                          const updatedScript = updateScriptVariables(geminiDslScript, updated);
+                                          setGeminiDslScript(updatedScript);
+                                        }}
+                                        className="w-12 bg-white border border-neutral-300 rounded text-center text-[10px] font-bold py-0.5 outline-none focus:border-indigo-500"
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Interactive Script Text Area */}
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center">
+                            <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-mono">
+                              Codice Disegno (DSL)
+                            </label>
+                            <span className="text-[8px] bg-emerald-100 text-emerald-800 font-bold uppercase font-mono px-1.5 rounded">
+                              Modificabile!
+                            </span>
+                          </div>
+                          
+                          <textarea
+                            className="w-full bg-slate-900 text-emerald-400 text-[10px] leading-tight font-mono rounded p-2 min-h-[140px] focus:ring-1 focus:ring-emerald-500 focus:outline-none shadow-inner border border-slate-700"
+                            value={geminiDslScript}
+                            onChange={(e) => setGeminiDslScript(e.target.value)}
+                            spellCheck={false}
+                          />
+                        </div>
+
+                        {/* Insertion offset */}
+                        <div className="space-y-1 bg-neutral-50 rounded p-2 border border-neutral-200">
+                          <label className="text-[9px] font-black uppercase text-neutral-400 tracking-widest block font-mono mb-1">
+                            Punto di Inserimento (X, Y)
+                          </label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="flex items-center gap-1 bg-white border border-neutral-300 rounded px-1.5 py-0.5">
+                              <span className="text-[9px] text-neutral-400 font-bold font-mono">X:</span>
+                              <input
+                                type="number"
+                                className="w-full text-xs font-bold outline-none border-none p-0 bg-transparent text-neutral-800"
+                                value={geminiInsertX}
+                                onChange={(e) => setGeminiInsertX(Number(e.target.value))}
+                              />
+                            </div>
+                            <div className="flex items-center gap-1 bg-white border border-neutral-300 rounded px-1.5 py-0.5">
+                              <span className="text-[9px] text-neutral-400 font-bold font-mono">Y:</span>
+                              <input
+                                type="number"
+                                className="w-full text-xs font-bold outline-none border-none p-0 bg-transparent text-neutral-800"
+                                value={geminiInsertY}
+                                onChange={(e) => setGeminiInsertY(Number(e.target.value))}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Apply Drawing Button */}
+                        <button
+                          onClick={handleImportGemini}
+                          className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-black text-xs uppercase tracking-widest rounded-md flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+                        >
+                          <Check size={14} />
+                          <span>Importa nel Disegno</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ) : activeSidebarTab === "testo" ? (
                 <div className="space-y-6">

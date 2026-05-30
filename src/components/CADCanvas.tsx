@@ -293,6 +293,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     arcStartPoint?: Point;
     arcDirection?: number;
     snapType?: 'standard' | 'smart';
+    startSnapped?: boolean;
     refPoint?: Point;
     refEntityId?: string;
     constraintAxis?: 'x' | 'y';
@@ -3340,7 +3341,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     }
 
     const isFreehandActive = activeTool === 'Line' && defaultLineStyle.mode === 'ink' && !orthoMode;
-    const isTempOrtho = activeTool === 'Line' && !orthoMode && isShiftPressedRef.current;
+    const isTempOrtho = false;
     
     // We disable snapping for freehand mode, or for tempOrtho
     const shouldSkipSnap = isFreehandActive || isTempOrtho || (activeTool === 'Template' && !drawing);
@@ -3569,15 +3570,26 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                   hasDoubleSmart: false
               };
           } else {
-              const isTempOrtho = activeTool === 'Line' && !orthoMode && isShiftPressedRef.current;
-              const effectiveOrthoMode = orthoMode || isTempOrtho;
+              const isTempOrtho = false;
+
+              // Find snap status at rawPoint (without ortho constraint applied)
+              let rawSnappedFromRawPoint: any = { point: rawPoint, snapped: false, type: 'standard', refPoint: undefined, constraintAxis: undefined, refPoint2: undefined, constraintAxis2: undefined, hasDoubleSmart: false };
+              if (!isTempOrtho) {
+                  rawSnappedFromRawPoint = getSnappedPoint(rawPoint, entities, activeTool, drawing);
+              }
+
+              const isBothSnappedException = false;
+
+              const effectiveOrthoMode = activeTool === 'Line' && (orthoMode ? !isShiftPressedRef.current : isShiftPressedRef.current);
 
               const isOrthoHorizontal = activeTool === 'Line' && effectiveOrthoMode && 
                     Math.abs(rawPoint.x - drawing.start.x) >= Math.abs(rawPoint.y - drawing.start.y);
 
               let finalPoint = rawPoint;
               if (activeTool === 'Line') {
-                  if (effectiveOrthoMode) {
+                  if (isBothSnappedException) {
+                      finalPoint = rawPoint;
+                  } else if (effectiveOrthoMode) {
                       finalPoint = isOrthoHorizontal 
                         ? { x: finalPoint.x, y: drawing.start.y } 
                         : { x: drawing.start.x, y: finalPoint.y };
@@ -3586,14 +3598,16 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                   }
               }
 
-              let rawSnapped;
+              let rawSnapped: any;
               if (isTempOrtho) {
-                  rawSnapped = { point: finalPoint, snapped: false, type: 'standard' as const };
+                  rawSnapped = { point: finalPoint, snapped: false, type: 'standard' };
+              } else if (isBothSnappedException) {
+                  rawSnapped = rawSnappedFromRawPoint;
               } else {
                   rawSnapped = getSnappedPoint(finalPoint, entities, activeTool, drawing);
               }
               
-              if (activeTool === 'Line' && effectiveOrthoMode) {
+              if (activeTool === 'Line' && effectiveOrthoMode && !isBothSnappedException) {
                   rawSnapped.point = isOrthoHorizontal 
                     ? { x: rawSnapped.point.x, y: drawing.start.y } 
                     : { x: drawing.start.x, y: rawSnapped.point.y };
@@ -3635,7 +3649,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                   }
 
                   if (activeTool === 'Line') {
-                      if (orthoMode) {
+                      if (effectiveOrthoMode) {
                           const isOrthoHorizontal = Math.abs(dx) >= Math.abs(dy);
                           if (isOrthoHorizontal) {
                               ux = dx >= 0 ? 1 : -1;
@@ -3808,71 +3822,27 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           }
           if (newEntity && !drawing.isVirtual) {
               setEntities(prev => {
-                if (newEntity!.type === 'line') {
-                    const newE = newEntity as LineEntity;
-                    
-                    // Look for any line that can be merged with this one
-                    const mergeTargetIndex = prev.findIndex(ent => {
-                        if (ent.type === 'line' && ent.layer === newE.layer && ent.mode === newE.mode) {
-                            const entL = ent as LineEntity;
-                            // Check if ends match start or vice versa
-                            const connected = (Math.abs(entL.end.x - newE.start.x) < 0.1 && Math.abs(entL.end.y - newE.start.y) < 0.1) ||
-                                              (Math.abs(entL.start.x - newE.end.x) < 0.1 && Math.abs(entL.start.y - newE.end.y) < 0.1);
-                            if (!connected) return false;
-                            
-                            const dx1 = entL.end.x - entL.start.x;
-                            const dy1 = entL.end.y - entL.start.y;
-                            const dx2 = newE.end.x - newE.start.x;
-                            const dy2 = newE.end.y - newE.start.y;
-                            const collinear = Math.abs(dx1 * dy2 - dy1 * dx2) < 2.0;
-
-                            return collinear;
-                        }
-                        return false;
-                    });
-                    
-                    if (mergeTargetIndex !== -1) {
-                         const target = prev[mergeTargetIndex] as LineEntity;
-                         const updated = [...prev];
-                         
-                         // Determine new endpoints
-                         let start = target.start;
-                         let end = target.end;
-                         
-                         if (Math.abs(target.end.x - newE.start.x) < 0.1 && Math.abs(target.end.y - newE.start.y) < 0.1) {
-                             end = newE.end;
-                         } else {
-                             start = newE.start;
-                         }
-                         
-                         updated[mergeTargetIndex] = {
-                             ...target,
-                             start,
-                             end,
-                             inkPoints: target.inkPoints && newE.inkPoints ? [...target.inkPoints, ...newE.inkPoints] : undefined
-                         };
-                         return updated;
-                    }
-                }
-                return [...prev, newEntity!];
+                  onCommitHistory?.(prev);
+                  return [...prev, newEntity!];
               });
           }
           
           if (activeTool === 'Line') {
               // Start next segment
               const isFreehandMode = defaultLineStyle.mode === 'ink' && !orthoMode;
-              const isTempOrthoNext = activeTool === 'Line' && !orthoMode && isShiftPressedRef.current;
+              const isTempOrthoNext = false;
               setDrawing({ 
                 start: snappedResult.point, 
                 current: snappedResult.point, 
                 snapType: snappedResult.type, 
+                startSnapped: snappedResult.snapped || true,
                 refPoint: snappedResult.refPoint,
                 constraintAxis: snappedResult.constraintAxis,
                 refPoint2: snappedResult.refPoint2,
                 constraintAxis2: snappedResult.constraintAxis2,
                 hasDoubleSmart: snappedResult.hasDoubleSmart,
                 activeConstraint: undefined,
-                isVirtual: isShiftPressed && !isTempOrthoNext, // Check if the NEXT one should be virtual
+                isVirtual: false,
                 isFreehand: isFreehandMode,
                 freehandPoints: isFreehandMode ? [snappedResult.point] : undefined
               });
@@ -3883,18 +3853,19 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       }
 
       const isFreehandMode = activeTool === 'Line' && defaultLineStyle.mode === 'ink' && !orthoMode;
-      const isTempOrthoStart = activeTool === 'Line' && !orthoMode && isShiftPressedRef.current;
+      const isTempOrthoStart = false;
       setDrawing({ 
         start: snapped.point, 
         current: snapped.point, 
         snapType: snapped.type, 
+        startSnapped: snapped.snapped,
         refPoint: snapped.refPoint,
         constraintAxis: snapped.constraintAxis,
         refPoint2: snapped.refPoint2,
         constraintAxis2: snapped.constraintAxis2,
         hasDoubleSmart: snapped.hasDoubleSmart,
         activeConstraint: undefined,
-        isVirtual: isShiftPressed && !isTempOrthoStart, // Marking the start as virtual if Shift is held
+        isVirtual: false,
         isFreehand: isFreehandMode,
         freehandPoints: isFreehandMode ? [snapped.point] : undefined
       });
@@ -4441,14 +4412,30 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
               activeConstraint: undefined
           });
       } else {
-          const isTempOrtho = activeTool === 'Line' && !orthoMode && isShiftPressedRef.current;
+          const isTempOrtho = false;
           
           let rawSnapped = getSnappedPoint(rawPoint, entities, activeTool, drawing);
           if (isTempOrtho) {
               rawSnapped = { point: rawPoint, snapped: false, type: 'standard' as const };
           }
 
-          if (rawSnapped.snapped && rawSnapped.type === 'standard') {
+          const isBothSnappedException = false;
+
+          if (isBothSnappedException) {
+            setDrawing({ 
+                ...drawing, 
+                current: rawSnapped.point, 
+                snapType: rawSnapped.type, 
+                refPoint: rawSnapped.refPoint,
+                refEntityId: rawSnapped.refEntityId,
+                constraintAxis: rawSnapped.constraintAxis,
+                refPoint2: rawSnapped.refPoint2,
+                constraintAxis2: rawSnapped.constraintAxis2,
+                hasDoubleSmart: rawSnapped.hasDoubleSmart || false,
+                activeConstraint: undefined,
+                isVirtual: drawing.isVirtual
+            });
+          } else if (rawSnapped.snapped && rawSnapped.type === 'standard') {
             setDrawing({ 
                 ...drawing, 
                 current: rawSnapped.point, 
@@ -4461,7 +4448,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 activeConstraint: undefined
             });
           } else {
-            const effectiveOrthoMode = orthoMode || isTempOrtho;
+            const effectiveOrthoMode = activeTool === 'Line' && (orthoMode ? !isShiftPressedRef.current : isShiftPressedRef.current);
             const isOrthoHorizontal = activeTool === 'Line' && effectiveOrthoMode && 
                   Math.abs(rawPoint.x - drawing.start.x) >= Math.abs(rawPoint.y - drawing.start.y);
 
@@ -4693,7 +4680,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     }
 
     const isFreehandMode = activeTool === 'Line' && defaultLineStyle.mode === 'ink' && !orthoMode;
-    const isTempOrthoHover = activeTool === 'Line' && !orthoMode && isShiftPressedRef.current;
+    const isTempOrthoHover = false;
     
     if (!drawing && !isFreehandMode && !isTempOrthoHover && (activeTool === 'Line' || activeTool === 'Rectangle' || activeTool === 'Circle' || activeTool === 'Arc' || activeTool === 'Dimension' || activeTool === 'Move' || activeTool === 'Copy')) {
         const snapped = getSnappedPoint(rawPoint, entities, activeTool, null);
@@ -5030,7 +5017,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             layer: activeLayerId
         };
         setEntities(prev => { onCommitHistory?.(prev); return [...prev, newEntity]; });
-        setDrawing({ start: finalPoint, current: finalPoint, snapType: 'standard' });
+        setDrawing({ start: finalPoint, current: finalPoint, snapType: 'standard', startSnapped: true });
     } else if (tool === 'Circle' && drawing) {
         const R = data.val1;
         const newEntity: Entity = {

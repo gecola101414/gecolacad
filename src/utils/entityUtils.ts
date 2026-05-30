@@ -49,6 +49,14 @@ export const mergeAllSegments = (entities: Entity[]): Entity[] => {
                         else if (connectionType === 'start-start') { start = l1.end; end = l2.end; /* naive reversal */ }
                         else if (connectionType === 'end-end') { start = l1.start; end = l2.start; /* naive reversal */ }
                         
+                        const l1Length = Math.sqrt((l1.end.x - l1.start.x) ** 2 + (l1.end.y - l1.start.y) ** 2);
+                        const l2Length = Math.sqrt((l2.end.x - l2.start.x) ** 2 + (l2.end.y - l2.start.y) ** 2);
+                        const mergedLength = Math.sqrt((end.x - start.x) ** 2 + (end.y - start.y) ** 2);
+                        if (mergedLength < Math.max(l1Length, l2Length) - 0.1) {
+                            // This merge collapses the line, so skip merging
+                            continue;
+                        }
+
                         const mergedLine: LineEntity = {
                             ...l1,
                             start: start,
