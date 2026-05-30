@@ -50,8 +50,8 @@ export const GUIDE_DATABASE: Record<string, GuideItem> = {
   },
   "Trim": {
     title: "Taglia Segmenti (Trim)",
-    description: "Accorcia e tronca una linea geometrica rimuovendo la parte in eccesso che collide o si interseca con un'altra figura d'appoggio CAD.",
-    tip: "Fai clic sulla linea complice che funge da coltello da taglio, quindi fai clic sul pezzo che desideri recidere.",
+    description: "Accorcia e tronca l'eccedenza di una linea o di un arco che si interseca con altri elementi. Supporta anche il taglio massivo: clicca e trascina per aprire una finestra di selezione e tagliare istantaneamente tutte le linee al suo interno come se fosse una fustella!",
+    tip: "Oltre al click singolo, puoi tenere premuto il tasto sinistro in un'area vuota e trascinare per tagliare in blocco tutti i segmenti racchiusi dalla finestra.",
     hotkey: "X"
   },
   "Eraser": {

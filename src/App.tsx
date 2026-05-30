@@ -50,7 +50,8 @@ import {
   Type,
   FileUp,
   Code,
-  BookOpen
+  BookOpen,
+  Grid
 } from "lucide-react";
 
 const ParallelIcon = ({ size = 16 }: { size?: number }) => (
@@ -66,6 +67,23 @@ const ParallelIcon = ({ size = 16 }: { size?: number }) => (
   >
     <path d="M5 20L15 4" />
     <path d="M9 20L19 4" />
+  </svg>
+);
+
+const MirrorIcon = ({ size = 16 }: { size?: number }) => (
+  <svg 
+    width={size} 
+    height={size} 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    stroke="currentColor" 
+    strokeWidth="2" 
+    strokeLinecap="round" 
+    strokeLinejoin="round"
+  >
+    <path d="M10 5L3 12L10 19V5Z" />
+    <line x1="12" y1="2" x2="12" y2="22" strokeDasharray="3 3" />
+    <path d="M14 5L21 12L14 19V5Z" strokeDasharray="2 2" />
   </svg>
 );
 
@@ -115,6 +133,7 @@ export default function App() {
     { id: "Maschere", name: "Maschere", visible: true, frozen: false },
     { id: "Misure", name: "Misure", visible: true, frozen: false },
     { id: "Spessori", name: "Spessori", visible: true, frozen: false },
+    { id: "Hatch", name: "Hatch", visible: true, frozen: false },
   ]);
   const [activeLayerId, setActiveLayerId] = useState<string>("0");
   const [defaultLineStyle, setDefaultLineStyle] = useState({
@@ -156,7 +175,7 @@ export default function App() {
   const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere' | 'testo' | 'gemini' | 'manuale'>('penne');
   const [hoveredGuide, setHoveredGuide] = useState<GuideItem | null>(null);
   const [guideLockedBy, setGuideLockedBy] = useState<string | null>(null);
-  const [showFloatingManual, setShowFloatingManual] = useState(true);
+  const [showFloatingManual, setShowFloatingManual] = useState(false);
   const [geminiPrompt, setGeminiPrompt] = useState("");
   const [geminiResponse, setGeminiResponse] = useState<{
     explanation: string;
@@ -412,7 +431,7 @@ export default function App() {
     }
 
     // If not in a drawing tool, switch to Line
-    if (!["Line", "Circle", "Arc", "Rectangle", "Point", "Dimension"].includes(selectedTool)) {
+    if (!["Line", "Circle", "Arc", "Hatch", "Dimension"].includes(selectedTool)) {
       setSelectedCategory("Disegno");
       setSelectedTool("Line");
       setShortcutToast("Strumento: Linea");
@@ -455,8 +474,8 @@ export default function App() {
         { name: "Line", icon: Minus },
         { name: "Circle", icon: Circle },
         { name: "Arc", icon: History },
-        { name: "Rectangle", icon: Square },
-        { name: "Point", icon: Dot },
+        { name: "Hatch", icon: Grid },
+        { name: "Specchio", icon: MirrorIcon },
         { name: "Testo", icon: Type },
         { name: "Trim", icon: Scissors },
         { name: "Eraser", icon: Eraser },
@@ -678,8 +697,25 @@ export default function App() {
               setShowProperties(true);
             }
           }}
-          className={`px-4 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 ${showProperties && activeSidebarTab === 'manuale' ? "bg-emerald-50 text-emerald-950 font-bold border-x border-emerald-200" : "hover:bg-neutral-200"}`}
+          className={`px-5 py-1.5 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 relative select-none h-full min-w-[76px] ${showProperties && activeSidebarTab === 'manuale' ? "bg-emerald-50 text-emerald-950 font-bold border-x border-emerald-200" : "hover:bg-neutral-200 text-neutral-600"}`}
         >
+          {/* Spuntatura interattiva in alto a destra */}
+          <div 
+            className="absolute top-1 right-1 flex items-center justify-center z-20 p-0.5 rounded cursor-pointer hover:bg-neutral-300/40"
+            onClick={(e) => {
+              e.stopPropagation(); // Evita l'apertura del pannello laterale quando si clicca solo la spunta
+              setShowFloatingManual(!showFloatingManual);
+            }}
+            title={showFloatingManual ? "Help in linea ATTIVO - Ogni volta che tocchi uno strumento avrai la guida rapida pop-up (Clicca la spunta per disattivare)" : "Help in linea DISATTIVATO - Le spiegazioni automatiche non si apriranno in pop-up per non appesantire (Clicca la spunta per attivare)"}
+          >
+            <input
+              type="checkbox"
+              checked={showFloatingManual}
+              onChange={() => {}} // Gestito interamente da onClick per compatibilità stopPropagation
+              className="w-3 h-3 cursor-pointer accent-emerald-600 border border-neutral-300 rounded transition-all focus:ring-0"
+            />
+          </div>
+
           <BookOpen size={16} className={showProperties && activeSidebarTab === 'manuale' ? "text-emerald-600 animate-pulse" : "text-neutral-500"} />
           <span className="text-[10px] font-bold">Manuale</span>
         </button>
@@ -742,6 +778,10 @@ export default function App() {
                 setIsRaccordoDialogOpen(true);
               } else {
                 setSelectedTool(tool.name);
+                if (tool.name === 'Hatch') {
+                  setActiveSidebarTab('maschere');
+                  setShowProperties(true);
+                }
               }
             }}
             className={`px-2 py-0.5 rounded flex items-center gap-1 text-xs ${selectedTool === tool.name ? "bg-indigo-100 text-indigo-900 border border-indigo-300" : "hover:bg-neutral-200"}`}
@@ -1476,91 +1516,227 @@ export default function App() {
                 </div>
               ) : activeSidebarTab === "penne" ? (
                 selectedEntity ? (
-                  <>
-                    <label className="block text-sm">
-                      Tipo Strumento:
-                      <div className="flex gap-2 mt-1">
-                        <button
-                          onClick={() =>
-                            updateEntity(selectedEntity.id, { mode: "ink" })
-                          }
-                          className={`p-2 rounded flex-1 text-xs font-bold transition-all ${selectedEntity.mode === "ink" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
+                  selectedEntity.type === "hatch" ? (
+                    <div className="space-y-4 font-sans">
+                      <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 p-3 rounded-lg shadow-sm">
+                        <p className="text-[10px] leading-tight font-mono font-bold uppercase">
+                          ⚙️ MODIFICA RIEMPIMENTO (HATCH)
+                        </p>
+                      </div>
+                      
+                      {/* Pattern Selector */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block">Stile Retino (Pattern)</label>
+                        <select
+                          className="w-full bg-white border border-neutral-300 text-xs rounded p-2 font-semibold capitalize focus:ring-2 focus:ring-indigo-500"
+                          value={(selectedEntity as any).pattern || 'ANSI31'}
+                          onChange={(e) => updateEntity(selectedEntity.id, { pattern: e.target.value })}
                         >
-                          Schizzo
-                        </button>
-                        <button
-                          onClick={() =>
-                            updateEntity(selectedEntity.id, { mode: "pencil" })
-                          }
-                          className={`p-2 rounded flex-1 text-xs font-bold transition-all ${selectedEntity.mode === "pencil" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
-                        >
-                          Kina
-                        </button>
+                          <option value="Solid">Pieno (Solid)</option>
+                          <option value="ANSI31">ANSI31 (Obliquo Semplice)</option>
+                          <option value="ANSI32">ANSI32 (Obliquo Doppio)</option>
+                          <option value="ANSI33">ANSI33 (Dashed/Solid Obliquo)</option>
+                          <option value="ANSI34">ANSI34 (Obliquo Tratteggiato)</option>
+                          <option value="Grid">Griglia (Quadrettato)</option>
+                          <option value="Cross">Incrocio (Griglia 45°)</option>
+                          <option value="Stripe">Strisce Verticali</option>
+                          <option value="Horizontal">Strisce Orizzontali</option>
+                          <option value="Zigzag">Zig-Zag</option>
+                          <option value="Waves">Onde</option>
+                          <option value="Brick">Mattoni CAD</option>
+                          <option value="Checker">Scacchiera (Checker)</option>
+                          <option value="Triangles">Triangoli</option>
+                          <option value="Honey">Nido d'ape (Honey)</option>
+                          <option value="Gravel">Ghiaia (Pebbles)</option>
+                          <option value="Cobble">Ciottolato (Cobble)</option>
+                          <option value="Plaid">Tartan (Plaid)</option>
+                          <option value="Stars">Stelle</option>
+                          <option value="Basket">Basket Weave</option>
+                        </select>
                       </div>
-                    </label>
-                    <label className="block text-sm">
-                      Pennino:
-                      <div className="flex gap-2 mt-1">
-                        {[1, 2.5, 4].map((w) => (
-                          <button
-                            key={w}
-                            onClick={() =>
-                              updateEntity(selectedEntity.id, { lineWidth: w })
-                            }
-                            className={`p-2 rounded flex-1 text-xs font-bold ${selectedEntity.lineWidth === w ? "bg-indigo-600 text-white" : "bg-neutral-200 text-neutral-900 border border-neutral-400"}`}
-                          >
-                            p{w === 1 ? '1' : w === 2.5 ? '2' : '4'} ({w} mm)
-                          </button>
-                        ))}
-                      </div>
-                    </label>
-                    <label className="block text-sm mt-4">
-                      Colore:
-                      <div className="grid grid-cols-5 gap-2 mt-2">
-                        {['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#64748b'].map((c) => (
-                          <button
-                            key={c}
-                            onClick={() => updateEntity(selectedEntity.id, { color: c })}
-                            className={`w-full aspect-square rounded-full flex items-center justify-center transition-transform ${selectedEntity.color === c ? "ring-2 ring-offset-2 ring-indigo-500 scale-110 shadow-md" : "hover:scale-105 border border-black/10"}`}
-                            style={{ backgroundColor: c }}
-                          >
-                            {selectedEntity.color === c && <Check size={10} className="text-white drop-shadow-md" />}
-                          </button>
-                        ))}
-                      </div>
-                    </label>
-                    {selectedEntity.type === "dimension" && (
-                      <>
-                        <label className="block text-sm">
-                          Text:{" "}
+                      
+                      {/* Scale Slider / Input */}
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block">Dimensione / Scala</label>
+                          <span className="text-[10px] font-mono font-bold text-neutral-600">{(selectedEntity as any).scale || 15}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="4"
+                          max="180"
+                          step="1"
+                          className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                          value={(selectedEntity as any).scale || 15}
+                          onChange={(e) => updateEntity(selectedEntity.id, { scale: Number(e.target.value) })}
+                        />
+                        <div className="flex items-center gap-1">
                           <input
-                            type="text"
-                            value={(selectedEntity as any).customText || ""}
-                            onChange={(e) =>
-                              updateEntity(selectedEntity.id, {
-                                customText: e.target.value,
-                              })
-                            }
-                            className="w-full bg-neutral-100 p-2 mt-1 rounded text-xs"
+                            type="number"
+                            min="2"
+                            max="500"
+                            className="w-full bg-white border border-neutral-300 text-xs rounded p-1.5 text-center font-mono font-semibold"
+                            value={(selectedEntity as any).scale || 15}
+                            onChange={(e) => updateEntity(selectedEntity.id, { scale: Math.max(2, Number(e.target.value)) })}
                           />
-                        </label>
-                        <button
-                          className="w-full bg-indigo-600 text-white p-2 text-xs font-bold rounded"
-                          onClick={() => setIsDimensionDialogOpen(true)}
-                        >
-                          Edit Style
-                        </button>
-                      </>
-                    )}
-                  </>
+                        </div>
+                      </div>
+
+                      {/* Angle Slider / Input */}
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-sans">Inclinazione Retino (°)</label>
+                          <span className="text-[10px] font-mono font-bold text-neutral-600">{(selectedEntity as any).angle || 0}°</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="360"
+                          step="1"
+                          className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                          value={(selectedEntity as any).angle || 0}
+                          onChange={(e) => updateEntity(selectedEntity.id, { angle: Number(e.target.value) })}
+                        />
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            min="0"
+                            max="360"
+                            className="w-full bg-white border border-neutral-300 text-xs rounded p-1.5 text-center font-mono font-semibold"
+                            value={(selectedEntity as any).angle || 0}
+                            onChange={(e) => updateEntity(selectedEntity.id, { angle: Number(e.target.value) % 360 })}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Color selection */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-sans">Colore del Retino</label>
+                        <div className="grid grid-cols-5 gap-2 mt-2">
+                          {['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#64748b'].map((c) => (
+                            <button
+                              key={c}
+                              onClick={() => updateEntity(selectedEntity.id, { color: c })}
+                              className={`w-full aspect-square rounded-full flex items-center justify-center transition-transform ${selectedEntity.color === c ? "ring-2 ring-offset-2 ring-indigo-500 scale-110 shadow-md" : "hover:scale-105 border border-black/10"}`}
+                              style={{ backgroundColor: c }}
+                            >
+                              {selectedEntity.color === c && <Check size={10} className="text-white drop-shadow-md" />}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <label className="block text-sm">
+                        Tipo Strumento:
+                        <div className="flex gap-2 mt-1">
+                          <button
+                            onClick={() =>
+                              updateEntity(selectedEntity.id, { mode: "ink" })
+                            }
+                            className={`p-2 rounded flex-1 text-xs font-bold transition-all ${selectedEntity.mode === "ink" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
+                          >
+                            Schizzo
+                          </button>
+                          <button
+                            onClick={() =>
+                              updateEntity(selectedEntity.id, { mode: "pencil" })
+                            }
+                            className={`p-2 rounded flex-1 text-xs font-bold transition-all ${selectedEntity.mode === "pencil" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
+                          >
+                            Kina
+                          </button>
+                        </div>
+                      </label>
+                      <label className="block text-sm">
+                        Pennino:
+                        <div className="flex gap-2 mt-1">
+                          {[1, 2.5, 4].map((w) => (
+                            <button
+                              key={w}
+                              onClick={() =>
+                                updateEntity(selectedEntity.id, { lineWidth: w })
+                              }
+                              className={`p-2 rounded flex-1 text-xs font-bold ${selectedEntity.lineWidth === w ? "bg-indigo-600 text-white" : "bg-neutral-200 text-neutral-900 border border-neutral-400"}`}
+                            >
+                              p{w === 1 ? '1' : w === 2.5 ? '2' : '4'} ({w} mm)
+                            </button>
+                          ))}
+                        </div>
+                      </label>
+                      <label className="block text-sm mt-4">
+                        Colore:
+                        <div className="grid grid-cols-5 gap-2 mt-2">
+                          {['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#64748b'].map((c) => (
+                            <button
+                              key={c}
+                              onClick={() => updateEntity(selectedEntity.id, { color: c })}
+                              className={`w-full aspect-square rounded-full flex items-center justify-center transition-transform ${selectedEntity.color === c ? "ring-2 ring-offset-2 ring-indigo-500 scale-110 shadow-md" : "hover:scale-105 border border-black/10"}`}
+                              style={{ backgroundColor: c }}
+                            >
+                              {selectedEntity.color === c && <Check size={10} className="text-white drop-shadow-md" />}
+                            </button>
+                          ))}
+                        </div>
+                      </label>
+                      {selectedEntity.type === "dimension" && (
+                        <>
+                          <label className="block text-sm">
+                            Text:{" "}
+                            <input
+                              type="text"
+                              value={(selectedEntity as any).customText || ""}
+                              onChange={(e) =>
+                                updateEntity(selectedEntity.id, {
+                                  customText: e.target.value,
+                                })
+                              }
+                              className="w-full bg-neutral-100 p-2 mt-1 rounded text-xs"
+                            />
+                          </label>
+                          <button
+                            className="w-full bg-indigo-600 text-white p-2 text-xs font-bold rounded"
+                            onClick={() => setIsDimensionDialogOpen(true)}
+                          >
+                            Edit Style
+                          </button>
+                        </>
+                      )}
+                    </>
+                  )
                 ) : (
                   <div className="space-y-6">
-                    <div className="bg-neutral-800 text-neutral-100 p-3 rounded-lg shadow-lg border border-neutral-700">
-                      <p className="text-[10px] leading-tight font-mono opacity-80">
-                        <span className="text-amber-400 font-bold">PENNE TECNICHE:</span><br/>
-                        Scegli lo spessore del pennino. Il layer viene aggiornato automaticamente in base alla selezione.
-                      </p>
-                    </div>
+                    {selectedTool === 'Hatch' ? (
+                      <div className="bg-emerald-950 border border-emerald-800 text-emerald-100 p-4 rounded-xl shadow-lg">
+                        <p className="text-xs leading-normal font-sans">
+                          <span className="text-emerald-400 font-extrabold block mb-2 text-[10px] font-mono tracking-widest uppercase">✨ RIEMPIMENTO (HATCH):</span>
+                          Clicca in un qualsiasi punto interno a un'area chiusa per riempirla automaticamente con un retino geometrico (Hatch).
+                        </p>
+                        <div className="mt-3 text-[10px] text-emerald-300 font-medium space-y-2 pr-1">
+                          <div>• I contorni esterni (linee, cerchi, archi) devono intersecarsi o toccarsi completamente.</div>
+                          <div>• Clicca sul retino disegnato nel foglio per sbloccarne la configurazione (scala, rotazione, pattern).</div>
+                        </div>
+                      </div>
+                    ) : selectedTool === 'Specchio' ? (
+                      <div className="bg-indigo-950 border border-indigo-800 text-indigo-100 p-4 rounded-xl shadow-lg">
+                        <p className="text-xs leading-normal font-sans">
+                          <span className="text-indigo-400 font-extrabold block mb-2 text-[10px] font-mono tracking-widest uppercase">✨ SPECCHIO (SYMMETRY):</span>
+                          Scegli l'oggetto da specchiare cliccandoci sopra, quindi determina l'asse di simmetria:
+                        </p>
+                        <div className="mt-3 text-[10px] text-indigo-300 font-medium space-y-2 pr-1">
+                          <div>• <b>Clic su una Linea</b>: Seleziona direttamente una linea esistente come asse di simmetria.</div>
+                          <div>• <b>Symmetry a 2 Punti</b>: Clicca su due punti qualsiasi del foglio per tracciare un asse di simmetria personalizzato ad hoc.</div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-neutral-800 text-neutral-100 p-3 rounded-lg shadow-lg border border-neutral-700">
+                        <p className="text-[10px] leading-tight font-mono opacity-80">
+                          <span className="text-amber-400 font-bold">PENNE TECNICHE:</span><br/>
+                          Scegli lo spessore del pennino. Il layer viene aggiornato automaticamente in base alla selezione.
+                        </p>
+                      </div>
+                    )}
 
                     <div className="space-y-4">
                       <div className="space-y-2">

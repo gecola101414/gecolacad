@@ -24,6 +24,856 @@ const normalizeAngle = (a: number) => {
   return deg;
 };
 
+const mirrorPoint = (p: Point, a: Point, b: Point): Point => {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq < 1e-10) return p;
+  const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
+  const hx = a.x + t * dx;
+  const hy = a.y + t * dy;
+  return {
+    x: 2 * hx - p.x,
+    y: 2 * hy - p.y
+  };
+};
+
+const mirrorAngle = (angleDeg: number, axisAngleDeg: number): number => {
+  let res = 2 * axisAngleDeg - angleDeg;
+  res = res % 360;
+  if (res < 0) res += 360;
+  return res;
+};
+
+const mirrorEntity = (entity: Entity, axisPt1: Point, axisPt2: Point): Entity => {
+  const common = {
+    id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5),
+    layer: entity.layer,
+    color: entity.color,
+    lineWidth: entity.lineWidth,
+    mode: entity.mode,
+    dashed: entity.dashed,
+    groupId: entity.groupId,
+  };
+
+  const axisAngleRad = Math.atan2(axisPt2.y - axisPt1.y, axisPt2.x - axisPt1.x);
+  const axisAngleDeg = axisAngleRad * 180 / Math.PI;
+
+  if (entity.type === 'line') {
+    const newStart = mirrorPoint(entity.start, axisPt1, axisPt2);
+    const newEnd = mirrorPoint(entity.end, axisPt1, axisPt2);
+    let newInkPoints: any[] | undefined;
+    if (entity.inkPoints) {
+      newInkPoints = entity.inkPoints.map((p: any) => {
+        const mp = mirrorPoint(p, axisPt1, axisPt2);
+        if (entity.isFreehand) {
+            return { ...p, x: mp.x, y: mp.y };
+        } else {
+            // For non-freehand ink points, they represent relative offsets (often structural noise)
+            // It might just be easier to discard them and let it regenerate or apply mirror
+            // Actually, if we mirror the base line, the dx/dy is mirrored, so the nx/ny is mirrored.
+            // But let's just mirror the offset points directly as vectors for simplicity
+            const dx = axisPt2.x - axisPt1.x;
+            const dy = axisPt2.y - axisPt1.y;
+            const lenSq = dx * dx + dy * dy;
+            if (lenSq < 1e-10) return p;
+            const t = (p.x * dx + p.y * dy) / lenSq;
+            const projX = t * dx;
+            const projY = t * dy;
+            const mirrorVecX = 2 * projX - p.x;
+            const mirrorVecY = 2 * projY - p.y;
+            return { ...p, x: mirrorVecX, y: mirrorVecY };
+        }
+      });
+    }
+    return {
+      ...entity,
+      ...common,
+      start: newStart,
+      end: newEnd,
+      inkPoints: newInkPoints,
+    } as any;
+  } else if (entity.type === 'circle') {
+    const newCenter = mirrorPoint(entity.center, axisPt1, axisPt2);
+    return {
+      ...entity,
+      ...common,
+      center: newCenter,
+    } as any;
+  } else if (entity.type === 'arc') {
+    const newCenter = mirrorPoint(entity.center, axisPt1, axisPt2);
+    const newStartAngle = mirrorAngle(entity.endAngle, axisAngleDeg);
+    const newEndAngle = mirrorAngle(entity.startAngle, axisAngleDeg);
+    return {
+      ...entity,
+      ...common,
+      center: newCenter,
+      startAngle: newStartAngle,
+      endAngle: newEndAngle,
+    } as any;
+  } else if (entity.type === 'rectangle') {
+    const newP1 = mirrorPoint(entity.p1, axisPt1, axisPt2);
+    const newP2 = mirrorPoint(entity.p2, axisPt1, axisPt2);
+    return {
+      ...entity,
+      ...common,
+      p1: { x: Math.min(newP1.x, newP2.x), y: Math.min(newP1.y, newP2.y) },
+      p2: { x: Math.max(newP1.x, newP2.x), y: Math.max(newP1.y, newP2.y) },
+    } as any;
+  } else if (entity.type === 'hatch') {
+    const h = entity as any;
+    const mirroredPoints = h.points ? h.points.map((p: Point) => mirrorPoint(p, axisPt1, axisPt2)) : [];
+    // Calculate the mirrored angle. A naive angle mirror
+    const newAngle = -h.angle;
+    return {
+        ...entity,
+        ...common,
+        points: mirroredPoints,
+        angle: newAngle
+    } as any;
+  } else if (entity.type === 'point') {
+    const newPoint = mirrorPoint(entity.point, axisPt1, axisPt2);
+    return {
+      ...entity,
+      ...common,
+      point: newPoint,
+    } as any;
+  } else if (entity.type === 'text') {
+    const newPoint = mirrorPoint(entity.point, axisPt1, axisPt2);
+    let newAlign = entity.textAlign;
+    if (entity.textAlign === 'left') newAlign = 'right';
+    else if (entity.textAlign === 'right') newAlign = 'left';
+    return {
+      ...entity,
+      ...common,
+      point: newPoint,
+      textAlign: newAlign,
+    } as any;
+  } else if (entity.type === 'dimension') {
+    const newStart = mirrorPoint(entity.start, axisPt1, axisPt2);
+    const newEnd = mirrorPoint(entity.end, axisPt1, axisPt2);
+    return {
+      ...entity,
+      ...common,
+      start: newStart,
+      end: newEnd,
+    } as any;
+  } else if (entity.type === 'hatch') {
+    const h = entity as any;
+    const newPoints = h.points ? h.points.map((p: Point) => mirrorPoint(p, axisPt1, axisPt2)) : [];
+    return {
+      ...entity,
+      ...common,
+      points: newPoints,
+    } as any;
+  }
+
+  return { ...(entity as any), id: common.id };
+};
+
+const drawTempEntityPreview = (ctx: CanvasRenderingContext2D, entity: Entity) => {
+  ctx.beginPath();
+  if (entity.type === 'line') {
+    if (entity.mode === 'ink' && entity.inkPoints) {
+      let lastX = entity.start.x;
+      let lastY = entity.start.y;
+      for (let i = 0; i < entity.inkPoints.length; i++) {
+        const pt = entity.inkPoints[i];
+        const px = entity.isFreehand ? pt.x : lastX;
+        const py = entity.isFreehand ? pt.y : lastY;
+        ctx.beginPath();
+        ctx.moveTo(lastX, lastY);
+        ctx.lineTo(px, py);
+        ctx.stroke();
+        lastX = px;
+        lastY = py;
+      }
+    } else {
+      ctx.moveTo(entity.start.x, entity.start.y);
+      ctx.lineTo(entity.end.x, entity.end.y);
+      ctx.stroke();
+    }
+  } else if (entity.type === 'circle') {
+    ctx.arc(entity.center.x, entity.center.y, entity.radius, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (entity.type === 'arc') {
+    ctx.arc(entity.center.x, entity.center.y, entity.radius, entity.startAngle * Math.PI / 180, entity.endAngle * Math.PI / 180);
+    ctx.stroke();
+  } else if (entity.type === 'rectangle') {
+    const width = entity.p2.x - entity.p1.x;
+    const height = entity.p2.y - entity.p1.y;
+    ctx.rect(entity.p1.x, entity.p1.y, width, height);
+    ctx.stroke();
+  } else if (entity.type === 'point') {
+    ctx.arc(entity.point.x, entity.point.y, 2, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (entity.type === 'text') {
+    ctx.save();
+    ctx.font = `${entity.fontWeight || 'normal'} ${entity.fontSize}px ${entity.fontFamily || 'sans-serif'}`;
+    ctx.textAlign = (entity.textAlign || 'left') as CanvasTextAlign;
+    ctx.textBaseline = 'top';
+    const lines = entity.text.split('\n');
+    lines.forEach((line, idx) => {
+      ctx.fillText(line, entity.point.x, entity.point.y);
+    });
+    ctx.restore();
+  } else if (entity.type === 'dimension') {
+    ctx.moveTo(entity.start.x, entity.start.y);
+    ctx.lineTo(entity.end.x, entity.end.y);
+    ctx.stroke();
+  } else if (entity.type === 'hatch') {
+    const h = entity as any;
+    if (h.points && h.points.length > 0) {
+      ctx.moveTo(h.points[0].x, h.points[0].y);
+      for (let i = 1; i < h.points.length; i++) {
+        ctx.lineTo(h.points[i].x, h.points[i].y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
+  }
+};
+
+const isPointInPolygon = (p: Point, poly: Point[]): boolean => {
+  if (!poly || poly.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y;
+    const xj = poly[j].x, yj = poly[j].y;
+    
+    const intersect = ((yi > p.y) !== (yj > p.y))
+        && (p.x < (xj - xi) * (p.y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+};
+
+const distanceToSegmentPt = (p: Point, s: Point, e: Point): number => {
+  const l2 = (e.x - s.x) ** 2 + (e.y - s.y) ** 2;
+  if (l2 === 0) return Math.sqrt((p.x - s.x) ** 2 + (p.y - s.y) ** 2);
+  let t = ((p.x - s.x) * (e.x - s.x) + (p.y - s.y) * (e.y - s.y)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.sqrt((p.x - (s.x + t * (e.x - s.x))) ** 2 + (p.y - (s.y + t * (e.y - s.y))) ** 2);
+};
+
+const traceContour = (grid: boolean[][], startX: number, startY: number): Point[] => {
+  const height = grid.length;
+  const width = grid[0].length;
+  const contour: Point[] = [];
+  
+  const dxs = [0, 1, 1, 1, 0, -1, -1, -1];
+  const dys = [-1, -1, 0, 1, 1, 1, 0, -1];
+
+  let cx = startX;
+  let cy = startY;
+  let sDir = 6;
+
+  contour.push({ x: cx, y: cy });
+
+  let loops = 0;
+  const maxLoops = 15000;
+  let firstMove = true;
+  let startX2 = -1, startY2 = -1;
+
+  while (loops < maxLoops) {
+    loops++;
+    let foundNext = false;
+    let nextX = -1, nextY = -1;
+    let nextDirIdx = -1;
+
+    for (let i = 0; i < 8; i++) {
+      const idx = (sDir + i) % 8;
+      const nx = cx + dxs[idx];
+      const ny = cy + dys[idx];
+
+      if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+        if (grid[ny][nx]) {
+          nextX = nx;
+          nextY = ny;
+          nextDirIdx = idx;
+          foundNext = true;
+          break;
+        }
+      }
+    }
+
+    if (!foundNext) {
+      break;
+    }
+
+    if (cx === startX && cy === startY && !firstMove) {
+      break;
+    }
+
+    if (firstMove) {
+      startX2 = nextX;
+      startY2 = nextY;
+      firstMove = false;
+    } else if (nextX === startX2 && nextY === startY2 && cx === startX) {
+      break;
+    }
+
+    contour.push({ x: nextX, y: nextY });
+    sDir = (nextDirIdx + 5) % 8;
+    cx = nextX;
+    cy = nextY;
+  }
+
+  return contour;
+};
+
+const simplifyPolygon = (points: Point[], epsilon: number): Point[] => {
+  if (points.length <= 2) return points;
+
+  let dmax = 0;
+  let index = 0;
+  const end = points.length - 1;
+
+  for (let i = 1; i < end; i++) {
+    const d = distanceToSegmentPt(points[i], points[0], points[end]);
+    if (d > dmax) {
+      index = i;
+      dmax = d;
+    }
+  }
+
+  if (dmax > epsilon) {
+    const results1 = simplifyPolygon(points.slice(0, index + 1), epsilon);
+    const results2 = simplifyPolygon(points.slice(index), epsilon);
+    return results1.slice(0, results1.length - 1).concat(results2);
+  } else {
+    return [points[0], points[end]];
+  }
+};
+
+const drawHatchPattern = (ctx: CanvasRenderingContext2D, entity: any, zoom: number) => {
+  const { pattern, scale, angle, color, points } = entity;
+  if (!points || points.length < 3) return;
+
+  ctx.save();
+  
+  // Set clipping path to the closed shape boundary
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+  ctx.closePath();
+  ctx.clip();
+
+  // If solid fill, draw solid color and return
+  if (pattern?.toLowerCase() === 'solid') {
+    ctx.fillStyle = color || 'rgba(99, 102, 241, 0.45)';
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
+  // Draw optional light background coloring for beautiful hatch readability on technical papers
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.015)';
+  ctx.fill();
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of points) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const diag = Math.sqrt((maxX - minX) ** 2 + (maxY - minY) ** 2);
+  const halfDiag = Math.max(50, diag / 2);
+
+  ctx.translate(cx, cy);
+  ctx.rotate((angle || 0) * Math.PI / 180);
+
+  ctx.strokeStyle = color || '#3b82f6';
+  ctx.lineWidth = Math.max(0.7, 1.2 / zoom);
+  ctx.fillStyle = color || '#3b82f6';
+  ctx.setLineDash([]);
+
+  const step = Math.max(2, scale || 14);
+  const pat = (pattern || 'ansi31').toLowerCase();
+
+  const isInk = entity.mode === 'ink';
+  const originalMoveTo = ctx.moveTo;
+  const originalLineTo = ctx.lineTo;
+  const originalArc = ctx.arc;
+  const originalFillRect = ctx.fillRect;
+  const originalEllipse = ctx.ellipse;
+
+  if (isInk) {
+    let curX = 0;
+    let curY = 0;
+    (ctx as any).moveTo = function(x: number, y: number) {
+      curX = x;
+      curY = y;
+      originalMoveTo.call(ctx, x, y);
+    };
+    (ctx as any).lineTo = function(x: number, y: number) {
+      const dx = x - curX;
+      const dy = y - curY;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (len > 0.05) {
+        const stepCount = Math.max(2, Math.floor(len / 3));
+        const nx = -dy / len;
+        const ny = dx / len;
+        originalMoveTo.call(ctx, curX, curY);
+        for (let i = 1; i <= stepCount; i++) {
+          const t = i / stepCount;
+          const wave = Math.sin(t * Math.PI * 6 + curX * 0.2) * 0.3 + Math.cos(t * Math.PI * 4 + curY * 0.2) * 0.3;
+          const jiggleX = nx * wave * (step * 0.1);
+          const jiggleY = ny * wave * (step * 0.1);
+          originalLineTo.call(ctx, curX + dx * t + jiggleX, curY + dy * t + jiggleY);
+        }
+      } else {
+        originalLineTo.call(ctx, x, y);
+      }
+      curX = x;
+      curY = y;
+    };
+    (ctx as any).arc = function(x: number, y: number, r: number, sa: number, ea: number, ccw?: boolean) {
+        const wave = Math.sin(x * 0.1) + Math.cos(y * 0.1);
+        const jx = wave * (step * 0.05);
+        const jy = -wave * (step * 0.05);
+        originalArc.call(ctx, x + jx, y + jy, r * (1 + 0.1 * wave), sa, ea, ccw);
+    };
+    (ctx as any).fillRect = function(x: number, y: number, w: number, h: number) {
+        const wave = Math.sin(x * 0.1) + Math.cos(y * 0.1);
+        const jx = wave * (step * 0.05);
+        const jy = -wave * (step * 0.05);
+        originalFillRect.call(ctx, x + jx, y + jy, w * (1 + 0.1 * wave), h * (1 - 0.1 * wave));
+    };
+    (ctx as any).ellipse = function(x: number, y: number, rx: number, ry: number, rot: number, sa: number, ea: number, ccw?: boolean) {
+        const wave = Math.sin(x * 0.1) + Math.cos(y * 0.1);
+        const jx = wave * (step * 0.05);
+        const jy = -wave * (step * 0.05);
+        originalEllipse.call(ctx, x + jx, y + jy, rx * (1 + 0.1 * wave), ry * (1 - 0.1 * wave), rot, sa, ea, ccw);
+    };
+  }
+
+  try {
+    if (pat === 'ansi31') {
+    ctx.rotate(Math.PI / 4);
+    ctx.beginPath();
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      ctx.moveTo(x, -halfDiag);
+      ctx.lineTo(x, halfDiag);
+    }
+    ctx.stroke();
+  } else if (pat === 'ansi32') {
+    ctx.rotate(Math.PI / 4);
+    ctx.beginPath();
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      ctx.moveTo(x, -halfDiag);
+      ctx.lineTo(x, halfDiag);
+      ctx.moveTo(x + step * 0.25, -halfDiag);
+      ctx.lineTo(x + step * 0.25, halfDiag);
+    }
+    ctx.stroke();
+  } else if (pat === 'ansi33') {
+    ctx.rotate(Math.PI / 4);
+    for (let x = -halfDiag, idx = 0; x <= halfDiag; x += step / 2, idx++) {
+      ctx.beginPath();
+      if (idx % 2 === 0) {
+        ctx.setLineDash([]);
+      } else {
+        ctx.setLineDash([Math.max(1, step * 0.15), Math.max(1, step * 0.15)]);
+      }
+      ctx.moveTo(x, -halfDiag);
+      ctx.lineTo(x, halfDiag);
+      ctx.stroke();
+    }
+  } else if (pat === 'ansi34') {
+    ctx.rotate(Math.PI / 4);
+    ctx.setLineDash([Math.max(1, step * 0.2), Math.max(1, step * 0.2)]);
+    ctx.beginPath();
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      ctx.moveTo(x, -halfDiag);
+      ctx.lineTo(x, halfDiag);
+    }
+    ctx.stroke();
+  } else if (pat === 'grid') {
+    ctx.beginPath();
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      ctx.moveTo(x, -halfDiag);
+      ctx.lineTo(x, halfDiag);
+    }
+    for (let y = -halfDiag; y <= halfDiag; y += step) {
+      ctx.moveTo(-halfDiag, y);
+      ctx.lineTo(halfDiag, y);
+    }
+    ctx.stroke();
+  } else if (pat === 'cross') {
+    ctx.rotate(Math.PI / 4);
+    ctx.beginPath();
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      ctx.moveTo(x, -halfDiag);
+      ctx.lineTo(x, halfDiag);
+    }
+    for (let y = -halfDiag; y <= halfDiag; y += step) {
+      ctx.moveTo(-halfDiag, y);
+      ctx.lineTo(halfDiag, y);
+    }
+    ctx.stroke();
+  } else if (pat === 'dots') {
+    const r = Math.max(0.5, step / 14);
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      for (let y = -halfDiag; y <= halfDiag; y += step) {
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  } else if (pat === 'stripe') {
+    ctx.beginPath();
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      ctx.moveTo(x, -halfDiag);
+      ctx.lineTo(x, halfDiag);
+    }
+    ctx.stroke();
+  } else if (pat === 'horizontal') {
+    ctx.beginPath();
+    for (let y = -halfDiag; y <= halfDiag; y += step) {
+      ctx.moveTo(-halfDiag, y);
+      ctx.lineTo(halfDiag, y);
+    }
+    ctx.stroke();
+  } else if (pat === 'zigzag') {
+    ctx.beginPath();
+    const wl = step * 0.9;
+    for (let y = -halfDiag; y <= halfDiag; y += step) {
+      ctx.moveTo(-halfDiag, y);
+      let up = true;
+      for (let x = -halfDiag; x <= halfDiag; x += wl) {
+        ctx.lineTo(x, up ? y + step * 0.25 : y - step * 0.25);
+        up = !up;
+      }
+    }
+    ctx.stroke();
+  } else if (pat === 'waves') {
+    ctx.beginPath();
+    const wl = step;
+    for (let y = -halfDiag; y <= halfDiag; y += step) {
+      ctx.moveTo(-halfDiag, y);
+      for (let x = -halfDiag; x <= halfDiag; x += 2) {
+        const sineY = y + Math.sin(x / (wl / 4.5)) * (step * 0.2);
+        ctx.lineTo(x, sineY);
+      }
+    }
+    ctx.stroke();
+  } else if (pat === 'brick') {
+    const bHeight = step;
+    const bWidth = step * 2.2;
+    ctx.beginPath();
+    for (let y = -halfDiag; y <= halfDiag; y += bHeight) {
+      ctx.moveTo(-halfDiag, y);
+      ctx.lineTo(halfDiag, y);
+    }
+    let rowIndex = 0;
+    for (let y = -halfDiag; y <= halfDiag; y += bHeight) {
+      const offsetX = (rowIndex % 2 === 0) ? 0 : bWidth / 2;
+      for (let x = -halfDiag + offsetX - bWidth; x <= halfDiag + bWidth; x += bWidth) {
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y + bHeight);
+      }
+      rowIndex++;
+    }
+    ctx.stroke();
+  } else if (pat === 'checker') {
+    for (let x = -halfDiag, i = 0; x <= halfDiag; x += step, i++) {
+      for (let y = -halfDiag, j = 0; y <= halfDiag; y += step, j++) {
+        if ((i + j) % 2 === 0) {
+          ctx.fillRect(x, y, step, step);
+        }
+      }
+    }
+  } else if (pat === 'triangles') {
+    const h = step * Math.sin(Math.PI / 3);
+    for (let y = -halfDiag; y <= halfDiag; y += h) {
+      for (let x = -halfDiag; x <= halfDiag; x += step) {
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + step / 2, y + h);
+        ctx.lineTo(x - step / 2, y + h);
+        ctx.closePath();
+        ctx.stroke();
+      }
+    }
+  } else if (pat === 'honey') {
+    const r = step / 1.73;
+    const h = r * Math.sin(Math.PI / 3);
+    for (let y = -halfDiag - r; y <= halfDiag + r; y += h * 2) {
+      let isAlt = false;
+      for (let x = -halfDiag - r; x <= halfDiag + r; x += r * 1.5) {
+        ctx.beginPath();
+        const startOffset = isAlt ? h : 0;
+        for (let side = 0; side < 6; side++) {
+          const rad = (side * Math.PI) / 3;
+          const px = x + r * Math.cos(rad);
+          const py = y + startOffset + r * Math.sin(rad);
+          if (side === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.stroke();
+        isAlt = !isAlt;
+      }
+    }
+  } else if (pat === 'gravel') {
+    const size = step * 0.35;
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      for (let y = -halfDiag; y <= halfDiag; y += step) {
+        const rx = x + (Math.sin(x * y) * step * 0.15);
+        const ry = y + (Math.cos(x + y) * step * 0.15);
+        ctx.beginPath();
+        ctx.moveTo(rx - size * 0.5, ry - size * 0.2);
+        ctx.lineTo(rx + size * 0.1, ry - size * 0.5);
+        ctx.lineTo(rx + size * 0.5, ry + size * 0.1);
+        ctx.lineTo(rx - size * 0.1, ry + size * 0.4);
+        ctx.closePath();
+        ctx.stroke();
+      }
+    }
+  } else if (pat === 'cobble') {
+    const r = step * 0.33;
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      for (let y = -halfDiag; y <= halfDiag; y += step) {
+        const rx = x + (Math.sin(x * y) * step * 0.12);
+        const ry = y + (Math.cos(x + y) * step * 0.12);
+        ctx.beginPath();
+        ctx.ellipse(rx, ry, r * 1.15, r * 0.75, Math.sin(x * y), 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+  } else if (pat === 'plaid') {
+    ctx.beginPath();
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      ctx.moveTo(x, -halfDiag); ctx.lineTo(x, halfDiag);
+      ctx.moveTo(x + step * 0.2, -halfDiag); ctx.lineTo(x + step * 0.2, halfDiag);
+    }
+    for (let y = -halfDiag; y <= halfDiag; y += step) {
+      ctx.moveTo(-halfDiag, y); ctx.lineTo(halfDiag, y);
+      ctx.moveTo(-halfDiag, y + step * 0.2); ctx.lineTo(halfDiag, y + step * 0.2);
+    }
+    ctx.stroke();
+  } else if (pat === 'stars') {
+    const r = step * 0.28;
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      for (let y = -halfDiag; y <= halfDiag; y += step) {
+        ctx.beginPath();
+        ctx.moveTo(x, y - r);
+        ctx.lineTo(x + r * 0.2, y - r * 0.2);
+        ctx.lineTo(x + r, y);
+        ctx.lineTo(x + r * 0.2, y + r * 0.2);
+        ctx.lineTo(x, y + r);
+        ctx.lineTo(x - r * 0.2, y + r * 0.2);
+        ctx.lineTo(x - r, y);
+        ctx.lineTo(x - r * 0.2, y - r * 0.2);
+        ctx.closePath();
+        ctx.stroke();
+      }
+    }
+  } else if (pat === 'basket') {
+    const half = step / 2;
+    ctx.beginPath();
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      for (let y = -halfDiag; y <= halfDiag; y += step) {
+        if (Math.floor(x/step + y/step) % 2 === 0) {
+          ctx.moveTo(x, y + half * 0.3); ctx.lineTo(x + step, y + half * 0.3);
+          ctx.moveTo(x, y + half * 1.0); ctx.lineTo(x + step, y + half * 1.0);
+          ctx.moveTo(x, y + half * 1.7); ctx.lineTo(x + step, y + half * 1.7);
+        } else {
+          ctx.moveTo(x + half * 0.3, y); ctx.lineTo(x + half * 0.3, y + step);
+          ctx.moveTo(x + half * 1.0, y); ctx.lineTo(x + half * 1.0, y + step);
+          ctx.moveTo(x + half * 1.7, y); ctx.lineTo(x + half * 1.7, y + step);
+        }
+      }
+    }
+    ctx.stroke();
+  } else {
+    ctx.rotate(Math.PI / 4);
+    ctx.beginPath();
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      ctx.moveTo(x, -halfDiag);
+      ctx.lineTo(x, halfDiag);
+    }
+    ctx.stroke();
+  }
+
+  } finally {
+    if (isInk) {
+      (ctx as any).moveTo = originalMoveTo;
+      (ctx as any).lineTo = originalLineTo;
+      (ctx as any).arc = originalArc;
+      (ctx as any).fillRect = originalFillRect;
+      (ctx as any).ellipse = originalEllipse;
+    }
+  }
+
+  ctx.restore();
+};
+
+const findBoundaryPolygon = (
+  clickPoint: Point,
+  entities: Entity[],
+  view: any,
+  width: number,
+  height: number,
+  screenToCanvas: (x: number, y: number) => Point,
+  layers: Layer[]
+): Point[] | null => {
+  const offCanvas = document.createElement('canvas');
+  offCanvas.width = width;
+  offCanvas.height = height;
+  const oCtx = offCanvas.getContext('2d');
+  if (!oCtx) return null;
+
+  oCtx.fillStyle = '#ffffff';
+  oCtx.fillRect(0, 0, width, height);
+
+  oCtx.save();
+  oCtx.translate(view.pan.x, view.pan.y);
+  oCtx.scale(view.zoom, view.zoom);
+
+  oCtx.strokeStyle = '#000000';
+  oCtx.lineWidth = 0.5 / view.zoom;
+  oCtx.lineJoin = 'round';
+  oCtx.lineCap = 'round';
+
+  entities.forEach(ent => {
+    const layer = layers.find(l => l.id === ent.layer);
+    if (layer && (!layer.visible || layer.frozen)) return;
+    if (ent.type === 'dimension' || ent.type === 'text' || ent.type === 'point' || ent.type === 'hatch') {
+      return;
+    }
+
+    oCtx.beginPath();
+    if (ent.type === 'line') {
+      oCtx.moveTo(ent.start.x, ent.start.y);
+      oCtx.lineTo(ent.end.x, ent.end.y);
+    } else if (ent.type === 'circle') {
+      oCtx.arc(ent.center.x, ent.center.y, ent.radius, 0, Math.PI * 2);
+    } else if (ent.type === 'arc') {
+      oCtx.arc(ent.center.x, ent.center.y, ent.radius, ent.startAngle * Math.PI / 180, ent.endAngle * Math.PI / 180);
+    } else if (ent.type === 'rectangle') {
+      oCtx.rect(ent.p1.x, ent.p1.y, ent.p2.x - ent.p1.x, ent.p2.y - ent.p1.y);
+    }
+    oCtx.stroke();
+  });
+  oCtx.restore();
+
+  const startX = Math.round(clickPoint.x);
+  const startY = Math.round(clickPoint.y);
+
+  if (startX < 0 || startX >= width || startY < 0 || startY >= height) {
+    return null;
+  }
+
+  const imgData = oCtx.getImageData(0, 0, width, height);
+  const data = imgData.data;
+
+  const isWhite = (x: number, y: number): boolean => {
+    const idx = (y * width + x) * 4;
+    return data[idx] > 220 && data[idx + 1] > 220 && data[idx + 2] > 220;
+  };
+
+  if (!isWhite(startX, startY)) {
+    return null;
+  }
+
+  const filled = Array.from({ length: height }, () => new Uint8Array(width));
+  const queue: [number, number][] = [[startX, startY]];
+  filled[startY][startX] = 1;
+
+  let head = 0;
+  let touchesBorder = false;
+  const maxPixels = width * height * 0.90;
+  let pixelCount = 0;
+
+  while (head < queue.length) {
+    const [cx, cy] = queue[head++];
+    pixelCount++;
+
+    if (pixelCount > maxPixels) {
+      touchesBorder = true;
+      break;
+    }
+
+    if (cx === 0 || cx === width - 1 || cy === 0 || cy === height - 1) {
+      touchesBorder = true;
+      break;
+    }
+
+    const neighbors = [
+      [cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]
+    ];
+
+    for (const [nx, ny] of neighbors) {
+      if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+        if (!filled[ny][nx] && isWhite(nx, ny)) {
+          filled[ny][nx] = 1;
+          queue.push([nx, ny]);
+        }
+      }
+    }
+  }
+
+  if (touchesBorder) {
+    return null;
+  }
+
+  let foundStart = false;
+  let bX = 0, bY = 0;
+  outer: for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (filled[y][x]) {
+        bX = x;
+        bY = y;
+        foundStart = true;
+        break outer;
+      }
+    }
+  }
+
+  if (!foundStart) return null;
+
+  const grid = Array.from({ length: height }, () => new Array(width).fill(false));
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (filled[y][x]) grid[y][x] = true;
+    }
+  }
+
+  const rawContour = traceContour(grid, bX, bY);
+  if (rawContour.length < 3) return null;
+
+  const downsampled: Point[] = [];
+  const step = Math.max(1, Math.floor(rawContour.length / 600));
+  for (let i = 0; i < rawContour.length; i += step) {
+    downsampled.push(rawContour[i]);
+  }
+  if (downsampled.length > 0) {
+    downsampled.push(downsampled[0]);
+  }
+
+  const simplifiedScreen = simplifyPolygon(downsampled, 2.0);
+  const canvasPoints = simplifiedScreen.map(pt => screenToCanvas(pt.x, pt.y));
+
+  if (canvasPoints.length > 1) {
+    const p1 = canvasPoints[0];
+    const pE = canvasPoints[canvasPoints.length - 1];
+    const dist = Math.sqrt((p1.x - pE.x)**2 + (p1.y - pE.y)**2);
+    if (dist < 1e-4) {
+      canvasPoints.pop();
+    }
+  }
+
+  return canvasPoints;
+};
+
 const getIntersection = (a: Point, b: Point, c: Point, d: Point): Point | null => {
     const denom = (b.x - a.x) * (d.y - c.y) - (b.y - a.y) * (d.x - c.x);
     if (Math.abs(denom) < 1e-10) return null; // Parallel
@@ -289,6 +1139,34 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const dragTavolaIdRef = useRef<string | null>(null);
   useEffect(() => { dragTavolaIdRef.current = dragTavolaId; }, [dragTavolaId]);
 
+  const [helpPanelOffset, setHelpPanelOffset] = useState<{x: number, y: number} | null>(null);
+  const helpDragRef = useRef<{startX: number, startY: number, initialOffset: {x: number, y: number}}>({startX: 0, startY: 0, initialOffset: {x: 0, y: 0}});
+  const [isHelpDragging, setIsHelpDragging] = useState(false);
+
+  const onHelpPointerDown = (e: React.PointerEvent) => {
+      setIsHelpDragging(true);
+      helpDragRef.current.startX = e.clientX;
+      helpDragRef.current.startY = e.clientY;
+      helpDragRef.current.initialOffset = helpPanelOffset || {x: 0, y: 0};
+      e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onHelpPointerMove = (e: React.PointerEvent) => {
+      if (isHelpDragging) {
+          const dx = e.clientX - helpDragRef.current.startX;
+          const dy = e.clientY - helpDragRef.current.startY;
+          setHelpPanelOffset({
+              x: helpDragRef.current.initialOffset.x + dx,
+              y: helpDragRef.current.initialOffset.y + dy
+          });
+      }
+  };
+
+  const onHelpPointerUp = (e: React.PointerEvent) => {
+      setIsHelpDragging(false);
+      e.currentTarget.releasePointerCapture(e.pointerId);
+  };
+
   const [copySourceEntityIds, setCopySourceEntityIds] = useState<string[]>([]);
   const [clonedEntityIds, setClonedEntityIds] = useState<Set<string>>(new Set());
   const [selectedRaccordoLineIds, setSelectedRaccordoLineIds] = useState<string[]>([]);
@@ -298,6 +1176,15 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     if (activeTool !== 'Raccordo') {
       setSelectedRaccordoLineIds([]);
       setSelectedRaccordoClickPoints([]);
+    }
+    if (activeTool !== 'Specchio') {
+      setSpecchioState('axis_start');
+      setSpecchioAxisPt1(null);
+      setSpecchioFinalAxis(null);
+      setSpecchioHoverAxisLine(null);
+      setSpecchioSelectedIds([]);
+      setSpecchioMode('copy');
+      setShowSpecchioDialog(false);
     }
   }, [activeTool]);
   const holdTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -384,6 +1271,13 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const [isParallelWheelActive, setIsParallelWheelActive] = useState(false);
   const [isJollyActive, setIsJollyActive] = useState(false);
   const [parallelSign, setParallelSign] = useState<number>(1);
+  const [specchioState, setSpecchioState] = useState<'axis_start' | 'axis_end' | 'objects' | 'dialog'>('axis_start');
+  const [specchioAxisPt1, setSpecchioAxisPt1] = useState<Point | null>(null);
+  const [specchioFinalAxis, setSpecchioFinalAxis] = useState<{start: Point, end: Point, isExisting: boolean, entityId?: string} | null>(null);
+  const [specchioHoverAxisLine, setSpecchioHoverAxisLine] = useState<Entity | null>(null);
+  const [specchioSelectedIds, setSpecchioSelectedIds] = useState<string[]>([]);
+  const [specchioMode, setSpecchioMode] = useState<'copy' | 'move'>('copy');
+  const [showSpecchioDialog, setShowSpecchioDialog] = useState(false);
   const lastControlledPointRef = useRef<Point>({ x: 0, y: 0 });
   const actualMousePosRef = useRef<Point>({ x: 0, y: 0 });
   const mouseScreenPosRef = useRef<Point>({ x: 0, y: 0 });
@@ -584,6 +1478,12 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 return !(rMaxX < minX || rMinX > maxX || rMaxY < minY || rMinY > maxY);
             }
             if (ent.type === 'point') return isPointInside(ent.point);
+            if (ent.type === 'hatch') {
+                const h = ent as any;
+                if (!h.points || h.points.length === 0) return false;
+                // Crossing: true if any point is inside the rect, or if the rect intersects boundary, but let's approximate with any point inside
+                return h.points.some((p: Point) => isPointInside(p));
+            }
             return false;
         } else {
             // Window selection (Left to Right): select only if fully inside
@@ -594,6 +1494,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             }
             if (ent.type === 'rectangle') return isPointInside(ent.p1) && isPointInside(ent.p2);
             if (ent.type === 'point') return isPointInside(ent.point);
+            if (ent.type === 'hatch') {
+                const h = ent as any;
+                if (!h.points || h.points.length === 0) return false;
+                return h.points.every((p: Point) => isPointInside(p));
+            }
             return false;
         }
     }).map(e => e.id);
@@ -780,7 +1685,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
     }
 
-    const isDrawingTool = ['Line', 'Circle', 'Arc', 'Rectangle', 'Point', 'Dimension'].includes(activeTool);
+    const isDrawingTool = ['Line', 'Circle', 'Arc', 'Rectangle', 'Hatch', 'Dimension'].includes(activeTool);
     if (isDrawingTool && (drawing ? true : isShiftPressedRef.current)) {
         const threshold = 12 / view.zoom;
         const uniqueKeyPoints: Point[] = [];
@@ -975,6 +1880,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       } else if (ent.type === 'arc') {
          const dist = Math.sqrt((point.x - ent.center.x) ** 2 + (point.y - ent.center.y) ** 2);
          if (Math.abs(dist - ent.radius) < 10 / view.zoom) hit = true;
+      } else if (ent.type === 'hatch') {
+         const h = ent as any;
+         if (h.points && isPointInPolygon(point, h.points)) hit = true;
       } else if (ent.type === 'dimension') {
         const dx = ent.end.x - ent.start.x;
         const dy = ent.end.y - ent.start.y;
@@ -1007,6 +1915,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         if (point.x >= tx - pad && point.x <= tx + w + pad &&
             point.y >= ty - pad && point.y <= ty + h + pad) {
             hit = true;
+        }
+      } else if (ent.type === 'hatch') {
+        const h = ent as any;
+        if (h.points && isPointInPolygon(point, h.points)) {
+          hit = true;
         }
       }
       
@@ -1341,7 +2254,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       };
 
       // Draw existing entities
-      entities.forEach(entity => {
+      [...entities].sort((a, b) => {
+        if (a.type === 'hatch' && b.type !== 'hatch') return -1;
+        if (a.type !== 'hatch' && b.type === 'hatch') return 1;
+        return 0;
+      }).forEach(entity => {
         const layer = layers.find(l => l.id === entity.layer);
         if (layer && !layer.visible) return;
         
@@ -1352,6 +2269,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         ctx.globalAlpha = entity.opacity !== undefined ? entity.opacity : 1.0;
         if (layer && layer.frozen) {
             ctx.globalAlpha *= 0.4;
+        }
+        if (activeTool === 'Specchio' && specchioMode === 'move' && specchioSelectedIds.includes(entity.id)) {
+            ctx.globalAlpha *= 0.2;
         }
         ctx.shadowBlur = 0; // Remove blur for sharp lines
 
@@ -1559,6 +2479,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             else if (ctx.textAlign === 'right') offsetX = -maxW;
             ctx.strokeRect(entity.point.x + offsetX - 4/view.zoom, entity.point.y - 4/view.zoom, maxW + 8/view.zoom, h + 8/view.zoom);
           }
+        } else if (entity.type === 'hatch') {
+          drawHatchPattern(ctx, entity, view.zoom);
+          ctx.beginPath();
         }
         ctx.stroke();
 
@@ -2314,15 +3237,18 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           const rectW = Math.abs(selectionWindow.current.x - selectionWindow.start.x);
           const rectH = Math.abs(selectionWindow.current.y - selectionWindow.start.y);
 
-          // Standard selection colors (blue for window, green for crossing)
+          // Standard selection colors (blue for window, green for crossing, or custom orange-red for Trim)
           const isCrossing = selectionWindow.current.x < selectionWindow.start.x;
           
-          if (isCrossing) {
-              ctx.fillStyle = 'rgba(187, 247, 187, 0.2)';
-              ctx.strokeStyle = '#22c55e';
+          if (activeTool === 'Trim') {
+              ctx.fillStyle = 'rgba(239, 68, 68, 0.15)';
+              ctx.strokeStyle = '#f97316';
+          } else if (isCrossing) {
+               ctx.fillStyle = 'rgba(187, 247, 187, 0.2)';
+               ctx.strokeStyle = '#22c55e';
           } else {
-              ctx.fillStyle = 'rgba(191, 219, 254, 0.2)';
-              ctx.strokeStyle = '#3b82f6';
+               ctx.fillStyle = 'rgba(191, 219, 254, 0.2)';
+               ctx.strokeStyle = '#3b82f6';
           }
 
           ctx.setLineDash([5 / view.zoom, 5 / view.zoom]);
@@ -2416,6 +3342,106 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           }
           ctx.restore();
           ctx.setLineDash([]);
+      }
+
+      // Draw Specchio preview in real-time
+      if (activeTool === 'Specchio') {
+          ctx.save();
+          ctx.translate(view.pan.x, view.pan.y);
+          ctx.scale(view.zoom, view.zoom);
+
+          const rawPoint = actualMousePosRef.current;
+
+          // Draw the hovering axis if not yet set
+          if (specchioState === 'axis_start' && specchioHoverAxisLine && specchioHoverAxisLine.type === 'line') {
+              const line = specchioHoverAxisLine as LineEntity;
+              ctx.save();
+              ctx.strokeStyle = '#10b981'; // Green hover
+              ctx.lineWidth = 2 / view.zoom;
+              ctx.setLineDash([6 / view.zoom, 6 / view.zoom]);
+              ctx.beginPath();
+              ctx.moveTo(line.start.x, line.start.y);
+              ctx.lineTo(line.end.x, line.end.y);
+              ctx.stroke();
+              ctx.restore();
+          } else if (specchioState === 'axis_end' && specchioAxisPt1) {
+              const snappedPoint = getSnappedPoint(rawPoint, entities, activeTool, { type: 'line', start: specchioAxisPt1 } as DrawingState).snapped ? getSnappedPoint(rawPoint, entities, activeTool, { type: 'line', start: specchioAxisPt1 } as DrawingState).point : rawPoint;
+              let finalPt2 = snappedPoint;
+              if (orthoMode) {
+                  const dx = Math.abs(finalPt2.x - specchioAxisPt1.x);
+                  const dy = Math.abs(finalPt2.y - specchioAxisPt1.y);
+                  if (dx > dy) finalPt2.y = specchioAxisPt1.y;
+                  else finalPt2.x = specchioAxisPt1.x;
+              }
+              ctx.save();
+              ctx.setLineDash([10 / view.zoom, 10 / view.zoom]);
+              ctx.strokeStyle = '#10b981'; 
+              ctx.lineWidth = 1.5 / view.zoom;
+              ctx.beginPath();
+              ctx.moveTo(specchioAxisPt1.x, specchioAxisPt1.y);
+              ctx.lineTo(finalPt2.x, finalPt2.y);
+              ctx.stroke();
+              ctx.restore();
+          }
+
+          // If axis is finalized, highlight it with the extensions
+          if (specchioFinalAxis) {
+              ctx.save();
+              ctx.setLineDash([5 / view.zoom, 5 / view.zoom]);
+              ctx.strokeStyle = '#10b981'; 
+              ctx.lineWidth = 1.5 / view.zoom;
+
+              if (specchioFinalAxis.isExisting) {
+                  // Draw small extensions for existing lines
+                  const p1 = specchioFinalAxis.start;
+                  const p2 = specchioFinalAxis.end;
+                  const dx = p2.x - p1.x;
+                  const dy = p2.y - p1.y;
+                  const len = Math.hypot(dx, dy);
+                  if (len > 0) {
+                      const ux = dx / len;
+                      const uy = dy / len;
+                      const extLen = 20 / view.zoom;
+                      ctx.beginPath();
+                      ctx.moveTo(p1.x, p1.y);
+                      ctx.lineTo(p1.x - ux * extLen, p1.y - uy * extLen);
+                      ctx.moveTo(p2.x, p2.y);
+                      ctx.lineTo(p2.x + ux * extLen, p2.y + uy * extLen);
+                      ctx.stroke();
+                  }
+              }
+              ctx.restore();
+
+              // Highlight selected objects and draw preview
+              if (specchioSelectedIds.length > 0) {
+                  specchioSelectedIds.forEach(id => {
+                      const ent = entities.find(e => e.id === id);
+                      if (ent) {
+                          // highlight source
+                          ctx.save();
+                          if (specchioMode === 'move') {
+                              ctx.globalAlpha = 0.2;
+                          }
+                          ctx.setLineDash([4 / view.zoom, 4 / view.zoom]);
+                          ctx.strokeStyle = '#3b82f6';
+                          ctx.lineWidth = 1.5 / view.zoom;
+                          drawTempEntityPreview(ctx, ent);
+                          ctx.restore();
+
+                          // draw mirror preview
+                          const previewEnt = mirrorEntity(ent, specchioFinalAxis.start, specchioFinalAxis.end);
+                          ctx.save();
+                          ctx.setLineDash([2 / view.zoom, 2 / view.zoom]);
+                          ctx.strokeStyle = '#8b5cf6cc';
+                          ctx.lineWidth = 1.2 / view.zoom;
+                          drawTempEntityPreview(ctx, previewEnt);
+                          ctx.restore();
+                      }
+                  });
+              }
+          }
+
+          ctx.restore();
       }
 
       // LENTE INGRANDIMENTO HUD FOR PRECISION MODE (Right click activated)
@@ -2957,6 +3983,31 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 } else {
                     newEntities.push(ent);
                 }
+            } else if (ent.type === 'hatch') {
+                const h = ent as any;
+                let hitHatch = false;
+                if (h.points) {
+                    hitHatch = h.points.some((p: Point) => Math.sqrt((rawPoint.x - p.x)**2 + (rawPoint.y - p.y)**2) <= radius) || isPointInPolygon(rawPoint, h.points);
+                }
+                if (hitHatch) {
+                    const lastErase = lastEraseTimeByEntityId.current[ent.id] || 0;
+                    if (now - lastErase > 450) {
+                        lastEraseTimeByEntityId.current[ent.id] = now;
+                        changed = true;
+                        const currentOpacity = ent.opacity !== undefined ? ent.opacity : 1.0;
+                        const nextOpacity = currentOpacity - 0.35;
+                        if (nextOpacity > 0.1) {
+                            newEntities.push({
+                                ...ent,
+                                opacity: nextOpacity
+                            });
+                        }
+                    } else {
+                        newEntities.push(ent);
+                    }
+                } else {
+                    newEntities.push(ent);
+                }
             } else {
                 let hitPoint = false;
                 if (ent.type === 'point') {
@@ -3328,6 +4379,400 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     return null;
   };
 
+  const isPointInsideBox = (p: Point, box: { minX: number; maxX: number; minY: number; maxY: number }) => {
+    return p.x >= box.minX && p.x <= box.maxX && p.y >= box.minY && p.y <= box.maxY;
+  };
+
+  const getLineBoxIntersections = (p1: Point, p2: Point, box: { minX: number; maxX: number; minY: number; maxY: number }): Point[] => {
+    const intersections: Point[] = [];
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+
+    // Left border: x = minX
+    if (dx !== 0) {
+      const t = (box.minX - p1.x) / dx;
+      if (t >= 0 && t <= 1) {
+        const y = p1.y + t * dy;
+        if (y >= box.minY && y <= box.maxY) {
+          intersections.push({ x: box.minX, y });
+        }
+      }
+    }
+    // Right border: x = maxX
+    if (dx !== 0) {
+      const t = (box.maxX - p1.x) / dx;
+      if (t >= 0 && t <= 1) {
+        const y = p1.y + t * dy;
+        if (y >= box.minY && y <= box.maxY) {
+          intersections.push({ x: box.maxX, y });
+        }
+      }
+    }
+    // Top border: y = minY
+    if (dy !== 0) {
+      const t = (box.minY - p1.y) / dy;
+      if (t >= 0 && t <= 1) {
+        const x = p1.x + t * dx;
+        if (x >= box.minX && x <= box.maxX) {
+          intersections.push({ x, y: box.minY });
+        }
+      }
+    }
+    // Bottom border: y = maxY
+    if (dy !== 0) {
+      const t = (box.maxY - p1.y) / dy;
+      if (t >= 0 && t <= 1) {
+        const x = p1.x + t * dx;
+        if (x >= box.minX && x <= box.maxX) {
+          intersections.push({ x, y: box.maxY });
+        }
+      }
+    }
+
+    const uniquePts: Point[] = [];
+    for (const pt of intersections) {
+      if (!uniquePts.some(u => Math.sqrt((u.x - pt.x)**2 + (u.y - pt.y)**2) < 0.001)) {
+        uniquePts.push(pt);
+      }
+    }
+    return uniquePts;
+  };
+
+  const trimLineWithBox = (line: LineEntity, box: { minX: number; maxX: number; minY: number; maxY: number }): Entity[] => {
+    if (line.isFreehand && line.inkPoints && line.inkPoints.length > 0) {
+        const result: Entity[] = [];
+        let currentSegment: any[] = [];
+        
+        for (let i = 0; i < line.inkPoints.length; i++) {
+            const pt = line.inkPoints[i];
+            const isInside = isPointInsideBox(pt, box);
+            
+            if (!isInside) {
+                currentSegment.push(pt);
+            } else {
+                if (currentSegment.length > 1) {
+                    result.push({
+                        ...line,
+                        id: line.id + "_trim_freehand_" + Math.random().toString(36).substr(2, 5),
+                        start: { x: currentSegment[0].x, y: currentSegment[0].y },
+                        end: { x: currentSegment[currentSegment.length - 1].x, y: currentSegment[currentSegment.length - 1].y },
+                        inkPoints: [...currentSegment]
+                    });
+                }
+                currentSegment = [];
+            }
+        }
+        
+        if (currentSegment.length > 1) {
+            result.push({
+                ...line,
+                id: line.id + "_trim_freehand_" + Math.random().toString(36).substr(2, 5),
+                start: { x: currentSegment[0].x, y: currentSegment[0].y },
+                end: { x: currentSegment[currentSegment.length - 1].x, y: currentSegment[currentSegment.length - 1].y },
+                inkPoints: [...currentSegment]
+            });
+        }
+        
+        return result;
+    }
+
+    const p1 = line.start;
+    const p2 = line.end;
+    const p1In = isPointInsideBox(p1, box);
+    const p2In = isPointInsideBox(p2, box);
+
+    if (p1In && p2In) {
+      return [];
+    }
+
+    const intersections = getLineBoxIntersections(p1, p2, box);
+
+    if (intersections.length === 0) {
+      return [{ ...line }];
+    }
+
+    if (p1In && !p2In) {
+      const q = intersections[0];
+      return [{
+        ...line,
+        start: q,
+        end: p2
+      }];
+    }
+
+    if (!p1In && p2In) {
+      const q = intersections[0];
+      return [{
+        ...line,
+        start: p1,
+        end: q
+      }];
+    }
+
+    if (intersections.length >= 2) {
+      const sorted = [...intersections].sort((a, b) => {
+        const distA = (a.x - p1.x) ** 2 + (a.y - p1.y) ** 2;
+        const distB = (b.x - p1.x) ** 2 + (b.y - p1.y) ** 2;
+        return distA - distB;
+      });
+      const q1 = sorted[0];
+      const q2 = sorted[1];
+
+      return [
+        {
+          ...line,
+          start: p1,
+          end: q1
+        },
+        {
+          ...line,
+          start: q2,
+          end: p2,
+          id: line.id + "_trim_line_" + Math.random().toString(36).substr(2, 5)
+        }
+      ];
+    }
+
+    return [{ ...line }];
+  };
+
+  const getCircleBoxIntersections = (center: Point, radius: number, box: { minX: number; maxX: number; minY: number; maxY: number }): Point[] => {
+    const intersections: Point[] = [];
+
+    const xBorders = [box.minX, box.maxX];
+    for (const xVal of xBorders) {
+      const dSq = radius ** 2 - (xVal - center.x) ** 2;
+      if (dSq >= 0) {
+        const d = Math.sqrt(dSq);
+        const y1 = center.y + d;
+        const y2 = center.y - d;
+        if (y1 >= box.minY && y1 <= box.maxY) {
+          intersections.push({ x: xVal, y: y1 });
+        }
+        if (d > 0 && y2 >= box.minY && y2 <= box.maxY) {
+          intersections.push({ x: xVal, y: y2 });
+        }
+      }
+    }
+
+    const yBorders = [box.minY, box.maxY];
+    for (const yVal of yBorders) {
+      const dSq = radius ** 2 - (yVal - center.y) ** 2;
+      if (dSq >= 0) {
+        const d = Math.sqrt(dSq);
+        const x1 = center.x + d;
+        const x2 = center.x - d;
+        if (x1 >= box.minX && x1 <= box.maxX) {
+          intersections.push({ x: x1, y: yVal });
+        }
+        if (d > 0 && x2 >= box.minX && x2 <= box.maxX) {
+          intersections.push({ x: x2, y: yVal });
+        }
+      }
+    }
+
+    const uniquePts: Point[] = [];
+    for (const pt of intersections) {
+      if (!uniquePts.some(u => Math.sqrt((u.x - pt.x)**2 + (u.y - pt.y)**2) < 0.001)) {
+        uniquePts.push(pt);
+      }
+    }
+    return uniquePts;
+  };
+
+  const trimCircleWithBox = (circle: CircleEntity, box: { minX: number; maxX: number; minY: number; maxY: number }): Entity[] => {
+    const { center, radius } = circle;
+    const intersections = getCircleBoxIntersections(center, radius, box);
+
+    if (intersections.length === 0) {
+      if (isPointInsideBox(center, box)) {
+        return [];
+      }
+      return [{ ...circle }];
+    }
+
+    const angles = intersections.map(pt => {
+      let angle = Math.atan2(pt.y - center.y, pt.x - center.x) * 180 / Math.PI;
+      return normalizeAngle(angle);
+    });
+
+    angles.sort((a, b) => a - b);
+
+    const sectors: { start: number; end: number }[] = [];
+    if (angles.length > 0) {
+      for (let i = 0; i < angles.length; i++) {
+        const start = angles[i];
+        const end = angles[(i + 1) % angles.length];
+        sectors.push({ start, end });
+      }
+    }
+
+    const resultSegments: Entity[] = [];
+
+    for (const sector of sectors) {
+      let angleSpan = sector.end - sector.start;
+      if (angleSpan < 0) angleSpan += 360;
+      const midAngle = normalizeAngle(sector.start + angleSpan / 2);
+      const midRad = midAngle * Math.PI / 180;
+      const midPoint = {
+        x: center.x + radius * Math.cos(midRad),
+        y: center.y + radius * Math.sin(midRad)
+      };
+
+      if (!isPointInsideBox(midPoint, box)) {
+        resultSegments.push({
+          ...circle,
+          type: 'arc',
+          startAngle: sector.start,
+          endAngle: sector.end,
+          id: circle.id + "_trim_arc_" + Math.random().toString(36).substr(2, 5)
+        } as ArcEntity);
+      }
+    }
+
+    if (resultSegments.length > 0) {
+      resultSegments[0].id = circle.id;
+    }
+
+    return resultSegments;
+  };
+
+  const trimArcWithBox = (arc: ArcEntity, box: { minX: number; maxX: number; minY: number; maxY: number }): Entity[] => {
+    const { center, radius, startAngle, endAngle } = arc;
+    const rawIntersections = getCircleBoxIntersections(center, radius, box);
+
+    const validIntersections = rawIntersections.filter(pt => {
+      const angle = normalizeAngle(Math.atan2(pt.y - center.y, pt.x - center.x) * 180 / Math.PI);
+      return isAngleInArc(angle, startAngle, endAngle);
+    });
+
+    if (validIntersections.length === 0) {
+      let span = endAngle - startAngle;
+      while (span < 0) span += 360;
+      const midAngle = normalizeAngle(startAngle + span / 2);
+      const midRad = midAngle * Math.PI / 180;
+      const midPoint = {
+        x: center.x + radius * Math.cos(midRad),
+        y: center.y + radius * Math.sin(midRad)
+      };
+
+      if (isPointInsideBox(midPoint, box)) {
+        return [];
+      }
+      return [{ ...arc }];
+    }
+
+    const angles = validIntersections.map(pt => {
+      return normalizeAngle(Math.atan2(pt.y - center.y, pt.x - center.x) * 180 / Math.PI);
+    });
+
+    angles.sort((a, b) => {
+      return getClockwiseDistance(a, startAngle) - getClockwiseDistance(b, startAngle);
+    });
+
+    const intervals: { start: number; end: number }[] = [];
+    let currentStart = startAngle;
+    for (const angle of angles) {
+      intervals.push({ start: currentStart, end: angle });
+      currentStart = angle;
+    }
+    intervals.push({ start: currentStart, end: endAngle });
+
+    const resultSegments: Entity[] = [];
+    for (const interval of intervals) {
+      let span = getClockwiseDistance(interval.end, interval.start);
+      if (span < 0.01) continue;
+
+      const midAngle = normalizeAngle(interval.start + span / 2);
+      const midRad = midAngle * Math.PI / 180;
+      const midPoint = {
+        x: center.x + radius * Math.cos(midRad),
+        y: center.y + radius * Math.sin(midRad)
+      };
+
+      if (!isPointInsideBox(midPoint, box)) {
+        resultSegments.push({
+          ...arc,
+          startAngle: interval.start,
+          endAngle: interval.end,
+          id: arc.id + "_trim_arc_" + Math.random().toString(36).substr(2, 5)
+        } as ArcEntity);
+      }
+    }
+
+    if (resultSegments.length > 0) {
+      resultSegments[0].id = arc.id;
+    }
+
+    return resultSegments;
+  };
+
+  const executeWindowTrim = (start: Point, current: Point) => {
+    const minX = Math.min(start.x, current.x);
+    const maxX = Math.max(start.x, current.x);
+    const minY = Math.min(start.y, current.y);
+    const maxY = Math.max(start.y, current.y);
+
+    const box = { minX, maxX, minY, maxY };
+
+    const sizeX = maxX - minX;
+    const sizeY = maxY - minY;
+    if (sizeX < 1e-3 || sizeY < 1e-3) return;
+
+    setEntities(prev => {
+      let changed = false;
+      const newEntities = prev.flatMap(ent => {
+        if (ent.type !== 'line' && ent.type !== 'circle' && ent.type !== 'arc') {
+          return [ent];
+        }
+
+        const layer = layers.find(l => l.id === ent.layer);
+        if (layer && (!layer.visible || layer.frozen)) {
+          return [ent];
+        }
+
+        let trimmed: Entity[] = [];
+        if (ent.type === 'line') {
+          trimmed = trimLineWithBox(ent, box);
+        } else if (ent.type === 'circle') {
+          trimmed = trimCircleWithBox(ent, box);
+        } else if (ent.type === 'arc') {
+          trimmed = trimArcWithBox(ent, box);
+        }
+
+        let isEntityChanged = false;
+        if (trimmed.length !== 1) {
+          isEntityChanged = true;
+        } else if (trimmed[0].id !== ent.id) {
+          isEntityChanged = true;
+        } else if (ent.type === 'line' && trimmed[0].type === 'line') {
+          const t0 = trimmed[0] as LineEntity;
+          if (t0.start.x !== ent.start.x || t0.start.y !== ent.start.y ||
+              t0.end.x !== ent.end.x || t0.end.y !== ent.end.y) {
+            isEntityChanged = true;
+          }
+        } else if (ent.type === 'arc' && trimmed[0].type === 'arc') {
+          const t0 = trimmed[0] as ArcEntity;
+          if (t0.startAngle !== ent.startAngle || t0.endAngle !== ent.endAngle) {
+            isEntityChanged = true;
+          }
+        }
+
+        if (isEntityChanged) {
+          changed = true;
+        }
+
+        return trimmed;
+      });
+
+      if (changed) {
+        onCommitHistory?.(newEntities);
+        return newEntities;
+      }
+      return prev;
+    });
+  };
+
   const executeTrim = (rawPoint: Point) => {
     const target = getTrimTargetAtPoint(rawPoint);
     if (!target) return;
@@ -3616,6 +5061,60 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         } else {
             onSelect(null);
         }
+    } else if (activeTool === 'Specchio') {
+        if (specchioState === 'axis_start') {
+            const found = getEntityAtPoint(rawPoint);
+            if (found && found.type === 'line') {
+                setSpecchioFinalAxis({ start: found.start, end: found.end, isExisting: true, entityId: found.id });
+                setSpecchioState('objects');
+            } else {
+                setSpecchioAxisPt1(rawPoint);
+                setSpecchioState('axis_end');
+            }
+        } else if (specchioState === 'axis_end' && specchioAxisPt1) {
+            const snappedPoint = getSnappedPoint(rawPoint, entities, activeTool, { type: 'line', start: specchioAxisPt1 } as DrawingState).snapped 
+                ? getSnappedPoint(rawPoint, entities, activeTool, { type: 'line', start: specchioAxisPt1 } as DrawingState).point 
+                : rawPoint;
+            
+            let finalPt2 = snappedPoint;
+            if (orthoMode) {
+               const dx = Math.abs(finalPt2.x - specchioAxisPt1.x);
+               const dy = Math.abs(finalPt2.y - specchioAxisPt1.y);
+               if (dx > dy) {
+                   finalPt2.y = specchioAxisPt1.y;
+               } else {
+                   finalPt2.x = specchioAxisPt1.x;
+               }
+            }
+
+            const newAxisId = Date.now().toString() + "-axis";
+            const newAxis: LineEntity & { isSimmetryAxis?: boolean } = {
+                id: newAxisId,
+                type: 'line',
+                start: specchioAxisPt1,
+                end: finalPt2,
+                color: '#10b981', 
+                lineWidth: 1.5,
+                dashed: [10, 10],
+                mode: 'ink',
+                layer: activeLayerId,
+                isSimmetryAxis: true
+            };
+            setEntities(prev => {
+                const next = [...prev, newAxis];
+                onCommitHistory?.(next);
+                return next;
+            });
+            setSpecchioFinalAxis({ start: specchioAxisPt1, end: finalPt2, isExisting: false, entityId: newAxisId });
+            setSpecchioState('objects');
+        } else if (specchioState === 'objects') {
+            const found = getEntityAtPoint(rawPoint);
+            if (found && found.id !== specchioFinalAxis?.entityId) {
+                setSpecchioSelectedIds(prev => prev.includes(found.id) ? prev.filter(id => id !== found.id) : [...prev, found.id]);
+            } else {
+                setSelectionWindow({ start: Math.abs(actualMousePosRef.current.x - rawPoint.x) > 2 ? rawPoint : actualMousePosRef.current, current: actualMousePosRef.current });
+            }
+        }
     } else if (activeTool === 'Parallel') {
         if (!selectedParallelLine) {
             const found = getLineAtPoint(rawPoint);
@@ -3803,6 +5302,32 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 onCommitHistory?.(next);
                 return next;
             });
+        }
+    } else if (activeTool === 'Hatch') {
+        const clickedHatch = entities.find(ent => ent.type === 'hatch' && (ent as any).points && isPointInPolygon(rawPoint, (ent as any).points));
+        if (clickedHatch) {
+            onSelect(clickedHatch.id);
+        } else {
+            const poly = findBoundaryPolygon(screenPos, entities, view, rect.width, rect.height, screenToCanvas, layers);
+            if (poly) {
+                const hatchLayerExists = layers.some(l => l.id === 'Hatch');
+                const newHatch: Entity = {
+                    id: Date.now().toString(),
+                    type: 'hatch',
+                    pattern: 'ANSI31',
+                    scale: 30,
+                    angle: 0,
+                    color: defaultLineStyle.color || '#3b82f6',
+                    mode: defaultLineStyle.mode,
+                    points: poly,
+                    layer: hatchLayerExists ? 'Hatch' : activeLayerId
+                } as any;
+                setEntities(prev => {
+                    onCommitHistory?.(prev);
+                    return [...prev, newHatch];
+                });
+                onSelect(newHatch.id);
+            }
         }
     } else if (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle' || activeTool === 'Point' || activeTool === 'Arc' || activeTool === 'Testo') {
       const wasLocked = isLocked;
@@ -4409,7 +5934,12 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         executeEraser(rawPoint, true);
     } else if (activeTool === 'Trim') {
         const rawPoint = getDampenedCoordinate(screenToCanvas(e.clientX - rect.left, e.clientY - rect.top), e);
-        executeTrim(rawPoint);
+        const target = getTrimTargetAtPoint(rawPoint);
+        if (target) {
+            executeTrim(rawPoint);
+        } else {
+            setSelectionWindow({ start: rawPoint, current: rawPoint });
+        }
     } else if (activeTool === 'Cancella') {
         const rawPoint = getDampenedCoordinate(screenToCanvas(e.clientX - rect.left, e.clientY - rect.top), e);
         const found = getEntityAtPoint(rawPoint);
@@ -4579,6 +6109,12 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                         ...ent,
                         p1: { x: ent.p1.x + dx, y: ent.p1.y + dy },
                         p2: { x: ent.p2.x + dx, y: ent.p2.y + dy }
+                    };
+                } else if (ent.type === 'hatch') {
+                    const h = ent as any;
+                    return {
+                        ...ent,
+                        points: h.points ? h.points.map((p: Point) => ({ x: p.x + dx, y: p.y + dy })) : []
                     };
                 } else if (ent.type === 'point') {
                     return {
@@ -4834,6 +6370,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 }
                 if (ent.type === 'circle') return { ...ent, center: { x: ent.center.x + deltaX, y: ent.center.y + deltaY } };
                 if (ent.type === 'rectangle') return { ...ent, p1: { x: ent.p1.x + deltaX, y: ent.p1.y + deltaY }, p2: { x: ent.p2.x + deltaX, y: ent.p2.y + deltaY } };
+                if (ent.type === 'hatch') {
+                    const h = ent as any;
+                    return { ...ent, points: h.points ? h.points.map((p: Point) => ({ x: p.x + deltaX, y: p.y + deltaY })) : [] };
+                }
                 if (ent.type === 'point') return { ...ent, point: { x: ent.point.x + deltaX, y: ent.point.y + deltaY } };
                 if (ent.type === 'text') return { ...ent, point: { x: ent.point.x + deltaX, y: ent.point.y + deltaY } };
                 if (ent.type === 'arc') return { ...ent, center: { x: ent.center.x + deltaX, y: ent.center.y + deltaY } };
@@ -4956,6 +6496,17 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     } else if (activeTool === 'Cancella') {
         setHighlightedTrimLine(getEntityAtPoint(rawPoint) || null);
         setHighlightedTrimSegment(null);
+    } else if (activeTool === 'Specchio') {
+        if (specchioState === 'axis_start') {
+            const target = getEntityAtPoint(rawPoint);
+            if (target && target.type === 'line') {
+                setSpecchioHoverAxisLine(target);
+            } else {
+                setSpecchioHoverAxisLine(null);
+            }
+        } else {
+            setSpecchioHoverAxisLine(null);
+        }
     }
 
     const isFreehandMode = activeTool === 'Line' && defaultLineStyle.mode === 'ink' && !orthoMode;
@@ -5015,7 +6566,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     if (selectionWindow) {
         const rawIds = getEntitiesInWindow(selectionWindow.start, selectionWindow.current, entities);
         const ids = resolveGroups(rawIds, entities);
-        if (activeTool === 'Cancella' && ids.length > 0) {
+        if (activeTool === 'Trim') {
+            executeWindowTrim(selectionWindow.start, selectionWindow.current);
+        } else if (activeTool === 'Cancella' && ids.length > 0) {
             setEntities(prev => {
                 onCommitHistory?.(prev);
                 return prev.filter(ent => !ids.includes(ent.id));
@@ -5027,6 +6580,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             }
         } else if (activeTool === 'Join') {
             setDragEntityIds(prev => Array.from(new Set([...prev, ...ids])));
+        } else if (activeTool === 'Specchio' && specchioState === 'objects') {
+            setSpecchioSelectedIds(prev => {
+                const newIds = ids.filter(id => id !== specchioFinalAxis?.entityId);
+                return Array.from(new Set([...prev, ...newIds]));
+            });
         }
         setSelectionWindow(null);
         return;
@@ -5121,7 +6679,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     }
     
     // Toggle style if in drawing mode and NOT yet drawing the first point
-    const isDrawingTool = ['Line', 'Circle', 'Arc', 'Rectangle', 'Point', 'Dimension'].includes(activeTool);
+    const isDrawingTool = ['Line', 'Circle', 'Arc', 'Rectangle', 'Hatch', 'Dimension'].includes(activeTool);
     if (isDrawingTool && !drawing) {
         setDefaultLineStyle(prev => ({ ...prev, mode: prev.mode === 'ink' ? 'pencil' : 'ink' }));
         return;
@@ -5140,6 +6698,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         setIsParallelWheelActive(false);
         setSelectedRaccordoLineIds([]);
         setSelectedRaccordoClickPoints([]);
+        setSpecchioAxisPt1(null);
+        setSpecchioHoverAxisLine(null);
     };
 
     escAction();
@@ -5201,6 +6761,15 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             setDragEntityIds([]);
             setShowManualInput(false);
             setIsParallelWheelActive(false);
+            if (activeTool === 'Specchio') {
+                setSpecchioState('axis_start');
+                setSpecchioAxisPt1(null);
+                setSpecchioFinalAxis(null);
+                setSpecchioHoverAxisLine(null);
+                setSpecchioSelectedIds([]);
+                setSpecchioMode('copy');
+                setShowSpecchioDialog(false);
+            }
         } else if (e.key === 'Enter') {
             if (activeTool === 'Join') confirmJoin();
         } else if (!showManualInput && /^[0-9\.\-]$/.test(e.key)) {
@@ -5483,11 +7052,113 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     setTextDialog(null);
   };
 
+  const confirmSpecchio = (action: 'copy' | 'move') => {
+      if (!specchioFinalAxis || specchioSelectedIds.length === 0) return;
+      
+      setEntities(prev => {
+          let next = [...prev];
+          const newEntities: Entity[] = [];
+          
+          if (action === 'move') {
+              next = next.filter(e => !specchioSelectedIds.includes(e.id));
+          }
+           
+          specchioSelectedIds.forEach(id => {
+              const ent = prev.find(e => e.id === id);
+              if (ent) {
+                  newEntities.push(mirrorEntity(ent, specchioFinalAxis.start, specchioFinalAxis.end));
+              }
+          });
+          
+          next = [...next, ...newEntities];
+          onCommitHistory?.(next);
+          return next;
+      });
+      
+      setSpecchioState('axis_start');
+      setSpecchioAxisPt1(null);
+      setSpecchioFinalAxis(null);
+      setSpecchioHoverAxisLine(null);
+      setSpecchioSelectedIds([]);
+      setSpecchioMode('copy');
+      setShowSpecchioDialog(false);
+      setActiveTool('Select');
+  };
+
   const scissorsSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="5" cy="7.5" r="3" stroke="#64748b" stroke-width="1.5"/><circle cx="5" cy="16.5" r="3" stroke="#64748b" stroke-width="1.5"/><path d="M7.5 9L12 12L22 9" stroke="#64748b" stroke-width="1.5" stroke-linecap="round"/><path d="M7.5 15L12 12L22 15" stroke="#64748b" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="12" r="1.2" fill="#475569"/></svg>`);
   
   const pencilSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M0,0 L3,1 L1,3 Z" fill="#1e293b"/><path d="M3,1 L7,3 L3,7 L1,3 Z" fill="#fed7aa"/><path d="M7,3 L21,17 L17,21 L3,7 Z" fill="#4f46e5"/><path d="M7,3 L21,17 L19,19 L5,5 Z" fill="#6366f1"/><path d="M21,17 L24,20 L20,24 L17,21 Z" fill="#94a3b8"/><path d="M24,20 L28,24 L24,28 L20,24 Z" fill="#fda4af"/></svg>`);
 
   const crosshairSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="96" height="96" viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg"><line x1="0" y1="48" x2="96" y2="48" stroke="rgba(255,40,40,0.85)" stroke-width="1.5"/><line x1="48" y1="0" x2="48" y2="96" stroke="rgba(255,40,40,0.85)" stroke-width="1.5"/><circle cx="48" cy="48" r="4" fill="transparent" stroke="rgba(0,0,0,0.6)" stroke-width="1"/></svg>`);
+
+  let helpContent = null;
+  let helpTitle = activeTool;
+
+  if (activeTool === 'Specchio') {
+      helpContent = (
+          <div className="flex flex-col gap-3">
+             <div className="text-xs font-medium text-neutral-200">
+                <strong className="text-emerald-400 block mb-1">Premessa: Specchia gli oggetti</strong>
+                Dobbiamo definire un asse di simmetria attorno al quale riflettere gli oggetti.
+                <p className="mt-2">
+                 {specchioState === 'axis_start' ? "1. Scegli un asse: clicca su una linea esistente OPPURE specifica 2 punti." :
+                  specchioState === 'axis_end' ? "2. Clicca per stabilire il secondo punto dell'asse." :
+                  "3. Seleziona gli oggetti da specchiare e conferma."}
+                </p>
+             </div>
+             {specchioState === 'objects' && specchioSelectedIds.length > 0 && (
+                 <div className="flex items-center gap-2 bg-white/10 rounded-xl p-2 pl-3" onPointerDown={e => e.stopPropagation()}>
+                    <span className="text-xs font-medium text-neutral-300 mr-1">{specchioSelectedIds.length} elem.</span>
+                    <button 
+                      onClick={() => setSpecchioMode('copy')}
+                      className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${specchioMode === 'copy' ? 'bg-emerald-500 text-white shadow-sm' : 'bg-transparent text-neutral-400 hover:text-white hover:bg-white/5'}`}
+                    >
+                      Copia
+                    </button>
+                    <button 
+                      onClick={() => setSpecchioMode('move')}
+                      className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${specchioMode === 'move' ? 'bg-emerald-500 text-white shadow-sm' : 'bg-transparent text-neutral-400 hover:text-white hover:bg-white/5'}`}
+                    >
+                      Sposta
+                    </button>
+                    <div className="w-px h-4 bg-white/20 mx-1"></div>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); confirmSpecchio(specchioMode); }}
+                      className="bg-white text-zinc-900 hover:bg-neutral-200 px-3 py-1 rounded-lg text-xs font-black uppercase transition-transform active:scale-95 shadow-lg"
+                    >
+                      OK
+                    </button>
+                 </div>
+             )}
+          </div>
+      );
+  } else if (activeTool === 'Line') {
+      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Specifica punto iniziale</strong>Clicca nell'area di disegno per iniziare. Successivamente potrai definire lunghezza e angolazione digitandole o tracciando col mouse. Termina con Esc o Invio.</p>;
+  } else if (activeTool === 'Rectangle') {
+      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Primo vertice</strong>Clicca per definire il punto di partenza del rettangolo, poi clicca l'angolo opposto. Puoi digitare i valori numerici (Base, Altezza).</p>;
+  } else if (activeTool === 'Circle') {
+      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Centro del cerchio</strong>Clicca per stabilire il centro, poi muovi il mouse e clicca per definire il raggio, oppure digita la misura.</p>;
+  } else if (activeTool === 'Arc') {
+      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Centro dell'arco</strong>Clicca il punto centrale, poi il punto di partenza dell'arco, e infine il punto di chiusura.</p>;
+  } else if (activeTool === 'Cancella') {
+      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Seleziona da cancellare</strong>Clicca direttamente sugli elementi per eliminarli. Trascina una finestra tenendo premuto per eliminarne molti in colpo solo.</p>;
+  } else if (activeTool === 'Hatch') {
+      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Punta un'area chiusa</strong>Clicca all'interno di un'area chiusa (contorno perimetrale di linee, cerchi...) per generare automaticamente il riempimento Hatch.</p>;
+  } else if (activeTool === 'Trim') {
+      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Evidenzia per tagliare</strong>Passa il cursore sulle porzioni di linea: verranno evidenziati in rosso i segmenti in eccesso. Clicca per tagliare fino alla prima intersezione.</p>;
+  } else if (activeTool === 'Move') {
+      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Trascina la finestra selezione</strong>Seleziona gli elementi tracciando un box. Dopo la selezione, clicca e trascina per spostare il blocco di oggetti.</p>;
+  } else if (activeTool === 'Copy') {
+      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Trascina la finestra selezione</strong>Seleziona gli elementi tracciando un box. Successivamente clicca e trascina nella nuova posizione per crearne le copie.</p>;
+  } else if (activeTool === 'Parallel') {
+      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Punta una linea base</strong>Avvicina il mouse ad un elemento finché non vedi la linea parallela di anteprima. Usa la rotellina per variare la distanza di scostamento prima di cliccare.</p>;
+  } else if (activeTool === 'Join') {
+      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Seleziona da unire</strong>Inquadra intersezioni o singoli tratti liberi. Al termine della selezione premi `Invio` per confermare e unire tutto in polilinea.</p>;
+  } else if (activeTool === 'Testo') {
+      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Origine del testo</strong>Clicca nel punto in cui vuoi inserire la casella di testo per aprire l'editor e cominciare a digitare.</p>;
+  } else if (activeTool === 'Raccordo') {
+      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Scegli 2 rette</strong>Assicurati di aver impostato il raggio, poi fai clic in sequenza su due linee che si toccano (o si sfiorano) all'angolo che vuoi arrotondare.</p>;
+  }
 
   return (
     <div 
@@ -5503,13 +7174,30 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       onDrop={handleDrop}
     >
       <canvas ref={canvasRef} />
-      
-      {activeTool === 'Testo' && !textDialog && (
-        <div className="absolute top-4 left-[50%] translate-x-[-50%] z-40 bg-zinc-900/90 text-white border border-neutral-700 backdrop-blur-sm px-4 py-2 rounded-full shadow-2xl flex items-center gap-2 animate-bounce">
-          <span className="w-2 h-2 bg-indigo-400 rounded-full animate-ping"></span>
-          <p className="text-xs font-semibold select-none font-sans">
-            Fai clic su un punto del disegno per posizionare il testo
-          </p>
+
+      {helpContent && activeTool !== 'Select' && (
+        <div 
+          onPointerDown={onHelpPointerDown}
+          onPointerMove={onHelpPointerMove}
+          onPointerUp={onHelpPointerUp}
+          className="absolute z-50 bg-zinc-900/90 text-white border border-neutral-700 backdrop-blur-sm rounded-xl shadow-2xl flex flex-col pointer-events-auto cursor-move select-none animate-fade-in"
+          style={{ 
+              top: 20, 
+              left: '50%',
+              transform: `translate(calc(-50% + ${helpPanelOffset?.x || 0}px), ${helpPanelOffset?.y || 0}px)`,
+              touchAction: 'none'
+          }}
+        >
+          <div className="flex items-center px-4 py-2 bg-white/5 border-b border-white/10 rounded-t-xl gap-2 text-neutral-400">
+             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="9" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="19" r="1"/>
+                <circle cx="15" cy="5" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="19" r="1"/>
+             </svg>
+             <span className="text-xs font-bold uppercase tracking-wider">{helpTitle}</span>
+          </div>
+          <div className="p-4 py-3 flex flex-col gap-3">
+             {helpContent}
+          </div>
         </div>
       )}
 

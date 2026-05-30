@@ -1,0 +1,1 @@
+      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Punta un'area chiusa</strong>Clicca all'interno di un'area chiusa (contorno perimetrale di linee, cerchi...) per generare automaticamente il riempimento Hatch.</p>;

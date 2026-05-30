@@ -1,0 +1,2 @@
+    } else if (activeTool === 'Hatch') {
+  } else if (activeTool === 'Hatch') {
