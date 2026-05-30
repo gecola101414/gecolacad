@@ -291,12 +291,21 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
             onWheel={e => e.stopPropagation()}
         >
             <form 
-                className="bg-slate-900/95 backdrop-blur-xl text-white p-3 rounded-lg shadow-[0_10px_40px_rgba(0,0,0,0.6)] flex flex-col gap-3 min-w-[200px] border border-emerald-500/40 pointer-events-auto text-xs"
+                className="bg-slate-900/60 backdrop-blur-xl text-white p-3 rounded-lg shadow-[0_10px_40px_rgba(0,0,0,0.6)] flex flex-col gap-3 min-w-[200px] border border-emerald-500/40 pointer-events-auto text-xs"
                 onSubmit={handleSubmit}
                 onKeyDown={handleKeyDown}
             >
-                <div className="flex justify-between items-center pb-2 border-b border-slate-700">
-                    <div className="text-[10px] uppercase font-bold tracking-tight text-emerald-400">
+                {/* Drag handle */}
+                <div 
+                    className="flex justify-between items-center pb-2 border-b border-slate-700 cursor-move"
+                    onPointerDown={e => {
+                        // Logic for dragging would be implemented here in a more complete way
+                        // For now, it serves as a handle and stops propagation
+                        e.stopPropagation();
+                    }}
+                >
+                    <div className="text-[10px] uppercase font-bold tracking-tight text-emerald-400 flex items-center gap-2">
+                        <MoveHorizontal size={12} />
                         {drawing?.lockedDir ? "Linea Ortogonale" : "Input"}
                     </div>
                     {isListening && (
@@ -307,6 +316,13 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
                             </div>
                         </div>
                     )}
+                    <button 
+                        type="button" 
+                        onClick={onClose}
+                        className="text-slate-400 hover:text-white"
+                    >
+                        ✕
+                    </button>
                 </div>
                 
                 <div className="flex flex-col gap-3">

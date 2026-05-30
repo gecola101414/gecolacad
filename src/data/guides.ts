@@ -174,6 +174,18 @@ export const GUIDE_DATABASE: Record<string, GuideItem> = {
     tip: "Usa il clic destro sul foglio mentre trascini una maschera per ruotarla di 45° prima di posizionarla!",
     hotkey: "M"
   },
+  "Specchio": {
+    title: "Specchio (Mirror)",
+    description: "Crea una copia speculare di uno o più elementi rispetto a un asse di simmetria definito da due punti. Ideale per progettazione meccanica simmetrica.",
+    tip: "Seleziona gli oggetti, clicca sull'asse di simmetria: il sistema genererà automaticamente la riflessione speculare.",
+    hotkey: "S"
+  },
+  "Hatch": {
+    title: "Tratteggio (Hatch)",
+    description: "Applica un riempimento o un motivo di tratteggio all'interno di una forma chiusa delimitata da segmenti. Utile per evidenziare sezioni di taglio o materiali.",
+    tip: "Seleziona l'area chiusa, scegli il tipo di tratteggio, la scala e l'angolo nel pannello delle proprietà.",
+    hotkey: "H"
+  },
   "Annulla": {
     title: "Annulla Ultima Azione (Undo)",
     description: "Ripristina lo stato del disegno ad una modifica precedente, annullando l'ultimo tracciato, cancellazione o modifica effettuata.",

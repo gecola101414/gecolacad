@@ -123,7 +123,7 @@ const OrthoIcon = ({ size = 16 }: { size?: number }) => (
 );
 
 export default function App() {
-  const [selectedTool, setSelectedTool] = useState("Line");
+  const [selectedTool, setSelectedTool] = useState<string | null>(null);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [layers, setLayers] = useState<Layer[]>([
     { id: "0", name: "0", visible: true, frozen: false },
@@ -440,10 +440,11 @@ export default function App() {
   };
 
   const handleGuideHover = (key: string) => {
-    if (GUIDE_DATABASE[key]) {
-      setHoveredGuide(GUIDE_DATABASE[key]);
-      setGuideLockedBy(key);
-    }
+    // Disable automatic popup on hover as requested
+    // if (GUIDE_DATABASE[key]) {
+    //   setHoveredGuide(GUIDE_DATABASE[key]);
+    //   setGuideLockedBy(key);
+    // }
   };
 
   const handleGuideClick = (key: string) => {
@@ -565,9 +566,6 @@ export default function App() {
             key={cat.name}
             onClick={() => {
               setSelectedCategory(cat.name);
-              if (cat.name === "Disegno") {
-                setSelectedTool("Line");
-              }
             }}
             className={`px-4 flex flex-col items-center justify-center gap-0.5 ${selectedCategory === cat.name ? "bg-neutral-100" : "hover:bg-neutral-200"}`}
           >
@@ -773,7 +771,12 @@ export default function App() {
             key={tool.name}
             onMouseEnter={() => handleGuideHover(tool.name)}
             onClick={() => {
-              handleGuideClick(tool.name);
+              const guide = GUIDE_DATABASE[tool.name];
+              if (guide) {
+                setHoveredGuide(guide);
+                setGuideLockedBy(tool.name);
+                setShowFloatingManual(true);
+              }
               if (tool.name === "Raccordo") {
                 setIsRaccordoDialogOpen(true);
               } else {
@@ -863,9 +866,9 @@ export default function App() {
       </div>
 
       {/* Main Area */}
-      <div className="flex flex-1 overflow-hidden relative">
+      <div className="flex flex-1 overflow-auto relative">
         <main
-          className="flex-1 overflow-hidden relative"
+          className="flex-1 overflow-auto relative"
         >
           <CADCanvas
             ref={cadCanvasRef}
@@ -902,6 +905,10 @@ export default function App() {
             onDoubleClickTavola={setDoubleClickedTavolaId}
             selectedTemplateId={selectedTemplateId}
             selectedEntityId={selectedId}
+            onActionStart={() => {
+              setHoveredGuide(null);
+              setGuideLockedBy(null);
+            }}
             raccordoConfig={raccordoConfig}
             onEditRaccordo={(raccordoEntity) => {
               setEditingRaccordo(raccordoEntity);
@@ -2300,7 +2307,7 @@ export default function App() {
 
       {/* Floating Interactive Manual Companion */}
       {showFloatingManual && hoveredGuide && (
-        <div className="absolute bottom-6 right-6 z-50 w-80 bg-neutral-900/95 backdrop-blur-md text-white rounded-lg shadow-xl border border-neutral-700/80 p-4 transition-all duration-300 transform scale-100 ease-out flex flex-col gap-2">
+        <div className="fixed bottom-6 right-6 z-50 w-80 bg-neutral-900/40 backdrop-blur-lg text-neutral-100 rounded-lg shadow-xl border border-neutral-700/30 p-4 transition-all duration-300 transform scale-100 ease-out flex flex-col gap-2">
           <div className="flex items-center justify-between border-b border-neutral-800 pb-1.5 flex-nowrap">
             <div className="flex items-center gap-1.5 text-emerald-400 font-sans font-bold text-xs uppercase tracking-wider">
               <BookOpen size={14} className="animate-pulse" />

@@ -1129,9 +1129,10 @@ interface CADCanvasProps {
   defaultTextStyle?: { fontFamily: string, fontSize: number, fontWeight: string, textAlign: 'left' | 'center' | 'right' | 'justify' };
   raccordoConfig?: { type: 'curvo' | 'rettilineo'; value: number };
   onEditRaccordo?: (raccordoEntity: Entity) => void;
+  onActionStart?: () => void;
 }
 
-export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, raccordoConfig, onEditRaccordo }, ref) => {
+export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, raccordoConfig, onEditRaccordo, onActionStart }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [view, setView] = useState({ zoom: 0.15, pan: { x: window.innerWidth > 0 ? (window.innerWidth / 2) - 150 : 250, y: window.innerHeight > 0 ? (window.innerHeight / 2) - 220 : 80 } });
   const [dragTavolaId, setDragTavolaId] = useState<string | null>(null);
@@ -2206,11 +2207,15 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     const container = containerRef.current;
     if (!canvas || !container) return;
     const resizeObserver = new ResizeObserver(entries => {
-      for (let entry of entries) {
-        canvas.width = entry.contentRect.width;
-        canvas.height = entry.contentRect.height;
-        renderRef.current?.();
-      }
+      window.requestAnimationFrame(() => {
+        for (let entry of entries) {
+          if (canvas.width !== entry.contentRect.width || canvas.height !== entry.contentRect.height) {
+            canvas.width = entry.contentRect.width;
+            canvas.height = entry.contentRect.height;
+            renderRef.current?.();
+          }
+        }
+      });
     });
     resizeObserver.observe(container);
     return () => resizeObserver.disconnect();
@@ -4797,6 +4802,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    if (onActionStart) onActionStart();
     if (e.button === 2) return; // Let onContextMenu handle right clicks
     if (e.button === 1) {
       e.preventDefault();
@@ -7132,33 +7138,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
              )}
           </div>
       );
-  } else if (activeTool === 'Line') {
-      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Specifica punto iniziale</strong>Clicca nell'area di disegno per iniziare. Successivamente potrai definire lunghezza e angolazione digitandole o tracciando col mouse. Termina con Esc o Invio.</p>;
-  } else if (activeTool === 'Rectangle') {
-      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Primo vertice</strong>Clicca per definire il punto di partenza del rettangolo, poi clicca l'angolo opposto. Puoi digitare i valori numerici (Base, Altezza).</p>;
-  } else if (activeTool === 'Circle') {
-      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Centro del cerchio</strong>Clicca per stabilire il centro, poi muovi il mouse e clicca per definire il raggio, oppure digita la misura.</p>;
-  } else if (activeTool === 'Arc') {
-      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Centro dell'arco</strong>Clicca il punto centrale, poi il punto di partenza dell'arco, e infine il punto di chiusura.</p>;
-  } else if (activeTool === 'Cancella') {
-      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Seleziona da cancellare</strong>Clicca direttamente sugli elementi per eliminarli. Trascina una finestra tenendo premuto per eliminarne molti in colpo solo.</p>;
-  } else if (activeTool === 'Hatch') {
-      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Punta un'area chiusa</strong>Clicca all'interno di un'area chiusa (contorno perimetrale di linee, cerchi...) per generare automaticamente il riempimento Hatch.</p>;
-  } else if (activeTool === 'Trim') {
-      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Evidenzia per tagliare</strong>Passa il cursore sulle porzioni di linea: verranno evidenziati in rosso i segmenti in eccesso. Clicca per tagliare fino alla prima intersezione.</p>;
-  } else if (activeTool === 'Move') {
-      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Trascina la finestra selezione</strong>Seleziona gli elementi tracciando un box. Dopo la selezione, clicca e trascina per spostare il blocco di oggetti.</p>;
-  } else if (activeTool === 'Copy') {
-      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Trascina la finestra selezione</strong>Seleziona gli elementi tracciando un box. Successivamente clicca e trascina nella nuova posizione per crearne le copie.</p>;
-  } else if (activeTool === 'Parallel') {
-      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Punta una linea base</strong>Avvicina il mouse ad un elemento finché non vedi la linea parallela di anteprima. Usa la rotellina per variare la distanza di scostamento prima di cliccare.</p>;
-  } else if (activeTool === 'Join') {
-      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Seleziona da unire</strong>Inquadra intersezioni o singoli tratti liberi. Al termine della selezione premi `Invio` per confermare e unire tutto in polilinea.</p>;
-  } else if (activeTool === 'Testo') {
-      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Origine del testo</strong>Clicca nel punto in cui vuoi inserire la casella di testo per aprire l'editor e cominciare a digitare.</p>;
-  } else if (activeTool === 'Raccordo') {
-      helpContent = <p className="text-xs font-medium text-neutral-200 leading-tight"><strong className="text-emerald-400 block mb-1">Passo 1: Scegli 2 rette</strong>Assicurati di aver impostato il raggio, poi fai clic in sequenza su due linee che si toccano (o si sfiorano) all'angolo che vuoi arrotondare.</p>;
   }
+
 
   return (
     <div 
@@ -7359,7 +7340,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         </div>
       )}
 
-      {showManualInput && (
+      {/* {showManualInput && (
           <ManualInputOverlay
               type={activeTool === "Parallel" ? "parallel" : (activeTool.toLowerCase() as any)}
               drawing={drawing || undefined}
@@ -7382,7 +7363,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
               }}
               position={bubblePosition}
           />
-      )}
+      )} */}
     </div>
   );
 });
