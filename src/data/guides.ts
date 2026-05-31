@@ -176,8 +176,8 @@ export const GUIDE_DATABASE: Record<string, GuideItem> = {
   },
   "Specchio": {
     title: "Specchio (Mirror)",
-    description: "Crea una copia speculare di uno o più elementi rispetto a un asse di simmetria definito da due punti. Ideale per progettazione meccanica simmetrica.",
-    tip: "Seleziona gli oggetti, clicca sull'asse di simmetria: il sistema genererà automaticamente la riflessione speculare.",
+    description: "Crea un asse di simmetria come un normale segmento... poi seleziona gli oggetti.",
+    tip: "Crea un asse di simmetria come un normale segmento... poi seleziona gli oggetti.",
     hotkey: "S"
   },
   "Hatch": {

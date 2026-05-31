@@ -1841,13 +1841,9 @@ export default function App() {
                     ) : selectedTool === 'Specchio' ? (
                       <div className="bg-indigo-950 border border-indigo-800 text-indigo-100 p-4 rounded-xl shadow-lg">
                         <p className="text-xs leading-normal font-sans">
-                          <span className="text-indigo-400 font-extrabold block mb-2 text-[10px] font-mono tracking-widest uppercase">✨ SPECCHIO (SYMMETRY):</span>
-                          Scegli l'oggetto da specchiare cliccandoci sopra, quindi determina l'asse di simmetria:
+                          <span className="text-indigo-400 font-extrabold block mb-2 text-[10px] font-mono tracking-widest uppercase">✨ SPECCHIO (MIRROR):</span>
+                          Crea un asse di simmetria come un normale segmento... poi seleziona gli oggetti.
                         </p>
-                        <div className="mt-3 text-[10px] text-indigo-300 font-medium space-y-2 pr-1">
-                          <div>• <b>Clic su una Linea</b>: Seleziona direttamente una linea esistente come asse di simmetria.</div>
-                          <div>• <b>Symmetry a 2 Punti</b>: Clicca su due punti qualsiasi del foglio per tracciare un asse di simmetria personalizzato ad hoc.</div>
-                        </div>
                       </div>
                     ) : (
                       <div className="bg-neutral-800 text-neutral-100 p-3 rounded-lg shadow-lg border border-neutral-700">

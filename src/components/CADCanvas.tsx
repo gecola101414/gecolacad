@@ -761,7 +761,7 @@ const findBoundaryPolygon = (
   oCtx.scale(view.zoom, view.zoom);
 
   oCtx.strokeStyle = '#000000';
-  oCtx.lineWidth = 0.5 / view.zoom;
+  oCtx.lineWidth = 1.2 / view.zoom;
   oCtx.lineJoin = 'round';
   oCtx.lineCap = 'round';
 
@@ -774,8 +774,16 @@ const findBoundaryPolygon = (
 
     oCtx.beginPath();
     if (ent.type === 'line') {
-      oCtx.moveTo(ent.start.x, ent.start.y);
-      oCtx.lineTo(ent.end.x, ent.end.y);
+      if (ent.inkPoints && ent.inkPoints.length > 0) {
+        // Handle freehand/pencil strokes by following all their intermediate points
+        oCtx.moveTo(ent.inkPoints[0].x, ent.inkPoints[0].y);
+        for (let i = 1; i < ent.inkPoints.length; i++) {
+          oCtx.lineTo(ent.inkPoints[i].x, ent.inkPoints[i].y);
+        }
+      } else {
+        oCtx.moveTo(ent.start.x, ent.start.y);
+        oCtx.lineTo(ent.end.x, ent.end.y);
+      }
     } else if (ent.type === 'circle') {
       oCtx.arc(ent.center.x, ent.center.y, ent.radius, 0, Math.PI * 2);
     } else if (ent.type === 'arc') {
@@ -881,7 +889,7 @@ const findBoundaryPolygon = (
     downsampled.push(downsampled[0]);
   }
 
-  const simplifiedScreen = simplifyPolygon(downsampled, 2.0);
+  const simplifiedScreen = simplifyPolygon(downsampled, 0.8);
   const canvasPoints = simplifiedScreen.map(pt => screenToCanvas(pt.x, pt.y));
 
   if (canvasPoints.length > 1) {
@@ -7668,12 +7676,12 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       helpContent = (
           <div className="flex flex-col gap-3">
              <div className="text-xs font-medium text-neutral-200">
-                <strong className="text-emerald-400 block mb-1">Premessa: Specchia gli oggetti</strong>
-                Dobbiamo definire un asse di simmetria attorno al quale riflettere gli oggetti.
+                <strong className="text-emerald-400 block mb-1">Mirror: Specchia gli oggetti</strong>
+                Traccia un asse di simmetria come fai per una linea, quindi seleziona gli oggetti.
                 <p className="mt-2">
-                 {specchioState === 'axis_start' ? "1. Scegli un asse: clicca su una linea esistente OPPURE specifica 2 punti." :
+                 {specchioState === 'axis_start' ? "1. Crea un asse di simmetria come un normale segmento..." :
                   specchioState === 'axis_end' ? "2. Clicca per stabilire il secondo punto dell'asse." :
-                  "3. Seleziona gli oggetti da specchiare e conferma."}
+                  "3. Ora seleziona gli oggetti da specchiare e conferma."}
                 </p>
              </div>
              {specchioState === 'objects' && specchioSelectedIds.length > 0 && (
@@ -7727,9 +7735,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           onPointerUp={onHelpPointerUp}
           className="absolute z-50 bg-zinc-950/95 text-white border border-neutral-700 rounded-xl shadow-2xl flex flex-col pointer-events-auto cursor-move select-none animate-fade-in"
           style={{ 
-              bottom: 20, 
-              left: 20,
-              transform: `translate(${helpPanelOffset?.x || 0}px, ${helpPanelOffset?.y || 0}px)`,
+              bottom: 40, 
+              left: '50%',
+              transform: `translateX(-50%) translate(${helpPanelOffset?.x || 0}px, ${helpPanelOffset?.y || 0}px)`,
               touchAction: 'none'
           }}
         >
