@@ -51,7 +51,8 @@ import {
   FileUp,
   Code,
   BookOpen,
-  Grid
+  Grid,
+  X
 } from "lucide-react";
 
 const ParallelIcon = ({ size = 16 }: { size?: number }) => (
@@ -141,6 +142,12 @@ export default function App() {
     lineWidth: 1,
     dashed: false,
     mode: "pencil" as "ink" | "pencil",
+  });
+  const [defaultHatchStyle, setDefaultHatchStyle] = useState({
+    pattern: 'ANSI31',
+    scale: 30,
+    angle: 0,
+    color: '#000000',
   });
   const [defaultTextStyle, setDefaultTextStyle] = useState({
     fontFamily: 'sans-serif',
@@ -431,11 +438,52 @@ export default function App() {
     }
 
     // If not in a drawing tool, switch to Line
-    if (!["Line", "Circle", "Arc", "Hatch", "Dimension"].includes(selectedTool)) {
+    if (!["Line", "Circle", "Arc", "Hatch", "Dimension"].includes(selectedTool || '')) {
       setSelectedCategory("Disegno");
       setSelectedTool("Line");
       setShortcutToast("Strumento: Linea");
       setTimeout(() => setShortcutToast(null), 1500);
+    }
+  };
+
+  const handleToolClick = (tool: string) => {
+    const guide = GUIDE_DATABASE[tool];
+    // Only show the floating help if the manual sidebar tab is ACTIVE or was already showing
+    // "quando la spuntatura su manuale non ce ... non deve aprire gli help"
+    if (guide && (activeSidebarTab === 'manuale' || showFloatingManual)) {
+      setHoveredGuide(guide);
+      setGuideLockedBy(tool);
+      setShowFloatingManual(true);
+    }
+
+    if (tool === "Raccordo") {
+      setIsRaccordoDialogOpen(true);
+    } else if (tool === "Penne") {
+      setActiveSidebarTab('penne');
+      setShowProperties(true);
+      // Reset tool to avoid showing tool-specific help instead of pen settings
+      if (selectedTool === 'Hatch' || selectedTool === 'Specchio' || selectedTool === 'Dimension') {
+        setSelectedTool('Select');
+      }
+    } else if (tool === "Maschere") {
+      setActiveSidebarTab('maschere');
+      setShowProperties(true);
+      if (selectedTool === 'Template') {
+        setSelectedTool('Select');
+      }
+    } else {
+      setSelectedTool(tool);
+      // Ensure the correct sidebar tab opens for specific tools as requested
+      if (tool === 'Hatch') {
+        setActiveSidebarTab('penne');
+        setShowProperties(true);
+      } else if (tool === 'Testo') {
+        setActiveSidebarTab('testo');
+        setShowProperties(true);
+      } else if (tool === 'Dimension' || tool === 'Specchio') {
+        setActiveSidebarTab('penne');
+        setShowProperties(true);
+      }
     }
   };
 
@@ -486,6 +534,8 @@ export default function App() {
         { name: "Move", icon: Move },
         { name: "Copy", icon: Copy },
         { name: "Dimension", icon: Ruler },
+        { name: "Penne", icon: Pen },
+        { name: "Maschere", icon: Square },
         { name: "Cancella", icon: Trash2 },
       ],
     },
@@ -625,10 +675,21 @@ export default function App() {
           onClick={() => {
             handleGuideClick('Penne');
             if (activeSidebarTab === 'penne' && showProperties) {
-              setShowProperties(false);
+              // If we are already in the penne tab, but a specific tool help OR entity is selected,
+              // we reset the state to show the default pen settings instead of closing the menu.
+              if (selectedTool === 'Hatch' || selectedTool === 'Specchio' || selectedTool === 'Dimension' || selectedId) {
+                setSelectedTool('Select');
+                setSelectedId(null);
+              } else {
+                setShowProperties(false);
+              }
             } else {
               setActiveSidebarTab('penne');
               setShowProperties(true);
+              // Ensure we don't carry over a tool that might hide the pen settings
+              if (selectedTool === 'Hatch' || selectedTool === 'Specchio' || selectedTool === 'Dimension') {
+                setSelectedTool('Select');
+              }
             }
           }}
           onMouseEnter={() => handleGuideHover('Penne')}
@@ -690,9 +751,11 @@ export default function App() {
           onClick={() => {
             if (activeSidebarTab === 'manuale' && showProperties) {
               setShowProperties(false);
+              setShowFloatingManual(false);
             } else {
               setActiveSidebarTab('manuale');
               setShowProperties(true);
+              setShowFloatingManual(true);
             }
           }}
           className={`px-5 py-1.5 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 relative select-none h-full min-w-[76px] ${showProperties && activeSidebarTab === 'manuale' ? "bg-emerald-50 text-emerald-950 font-bold border-x border-emerald-200" : "hover:bg-neutral-200 text-neutral-600"}`}
@@ -767,31 +830,15 @@ export default function App() {
       </header>
       <div className="h-8 bg-white border-b border-neutral-300 flex items-center px-4 gap-2">
         {selectedCategoryTools.map((tool) => (
-          <button
-            key={tool.name}
-            onMouseEnter={() => handleGuideHover(tool.name)}
-            onClick={() => {
-              const guide = GUIDE_DATABASE[tool.name];
-              if (guide) {
-                setHoveredGuide(guide);
-                setGuideLockedBy(tool.name);
-                setShowFloatingManual(true);
-              }
-              if (tool.name === "Raccordo") {
-                setIsRaccordoDialogOpen(true);
-              } else {
-                setSelectedTool(tool.name);
-                if (tool.name === 'Hatch') {
-                  setActiveSidebarTab('maschere');
-                  setShowProperties(true);
-                }
-              }
-            }}
-            className={`px-2 py-0.5 rounded flex items-center gap-1 text-xs ${selectedTool === tool.name ? "bg-indigo-100 text-indigo-900 border border-indigo-300" : "hover:bg-neutral-200"}`}
-          >
-            <tool.icon size={12} />
-            {tool.name}
-          </button>
+            <button
+              key={tool.name}
+              onMouseEnter={() => handleGuideHover(tool.name)}
+              onClick={() => handleToolClick(tool.name)}
+              className={`px-2 py-0.5 rounded flex items-center gap-1 text-xs ${selectedTool === tool.name ? "bg-indigo-100 text-indigo-900 border border-indigo-300" : "hover:bg-neutral-200"}`}
+            >
+              <tool.icon size={12} />
+              {tool.name}
+            </button>
         ))}
         {selectedCategory === "Seleziona" && (
           <>
@@ -844,20 +891,24 @@ export default function App() {
             <button
               onClick={() => {
                 handleGuideClick("Penne");
-                setDefaultLineStyle({...defaultLineStyle, mode: 'pencil'});
+                setDefaultLineStyle({...defaultLineStyle, mode: 'ink'});
+                setActiveSidebarTab('penne');
+                setShowProperties(true);
               }}
               onMouseEnter={() => handleGuideHover("Penne")}
-              className={`px-3 py-1 rounded text-[10px] font-bold ${defaultLineStyle.mode === 'pencil' ? 'bg-white shadow-sm font-extrabold text-neutral-900' : 'text-neutral-500 hover:text-neutral-700'}`}
+              className={`px-3 py-1 rounded text-[10px] font-bold ${defaultLineStyle.mode === 'ink' ? 'bg-white shadow-sm font-extrabold text-neutral-900' : 'text-neutral-500 hover:text-neutral-700'}`}
             >
               Kina (Standard)
             </button>
             <button
               onClick={() => {
                 handleGuideClick("Penne");
-                setDefaultLineStyle({...defaultLineStyle, mode: 'ink'});
+                setDefaultLineStyle({...defaultLineStyle, mode: 'pencil'});
+                setActiveSidebarTab('penne');
+                setShowProperties(true);
               }}
               onMouseEnter={() => handleGuideHover("Penne")}
-              className={`px-3 py-1 rounded text-[10px] font-bold ${defaultLineStyle.mode === 'ink' ? 'bg-white shadow-sm font-extrabold text-neutral-900' : 'text-neutral-500 hover:text-neutral-700'}`}
+              className={`px-3 py-1 rounded text-[10px] font-bold ${defaultLineStyle.mode === 'pencil' ? 'bg-white shadow-sm font-extrabold text-neutral-900' : 'text-neutral-500 hover:text-neutral-700'}`}
             >
               Schizzo (Matita)
             </button>
@@ -906,6 +957,7 @@ export default function App() {
             onDoubleClickTavola={setDoubleClickedTavolaId}
             selectedTemplateId={selectedTemplateId}
             selectedEntityId={selectedId}
+            defaultHatchStyle={defaultHatchStyle}
             onActionStart={() => {
               setHoveredGuide(null);
               setGuideLockedBy(null);
@@ -1716,14 +1768,74 @@ export default function App() {
                 ) : (
                   <div className="space-y-6">
                     {selectedTool === 'Hatch' ? (
-                      <div className="bg-emerald-950 border border-emerald-800 text-emerald-100 p-4 rounded-xl shadow-lg">
-                        <p className="text-xs leading-normal font-sans">
-                          <span className="text-emerald-400 font-extrabold block mb-2 text-[10px] font-mono tracking-widest uppercase">✨ RIEMPIMENTO (HATCH):</span>
-                          Clicca in un qualsiasi punto interno a un'area chiusa per riempirla automaticamente con un retino geometrico (Hatch).
-                        </p>
-                        <div className="mt-3 text-[10px] text-emerald-300 font-medium space-y-2 pr-1">
-                          <div>• I contorni esterni (linee, cerchi, archi) devono intersecarsi o toccarsi completamente.</div>
-                          <div>• Clicca sul retino disegnato nel foglio per sbloccarne la configurazione (scala, rotazione, pattern).</div>
+                      <div className="space-y-4">
+                        <div className="bg-emerald-950 border border-emerald-800 text-emerald-100 p-4 rounded-xl shadow-lg">
+                          <p className="text-xs leading-normal font-sans">
+                            <span className="text-emerald-400 font-extrabold block mb-2 text-[10px] font-mono tracking-widest uppercase">✨ RIEMPIMENTO (HATCH):</span>
+                            Clicca in un qualsiasi punto interno a un'area chiusa per riempirla automaticamente con un retino geometrico (Hatch).
+                          </p>
+                          <div className="mt-3 text-[10px] text-emerald-300 font-medium space-y-2 pr-1">
+                            <div>• I contorni esterni devono intersecarsi o toccarsi completamente.</div>
+                          </div>
+                        </div>
+
+                        {/* Default Hatch Settings */}
+                        <div className="space-y-4 pt-2 border-t border-neutral-100">
+                          <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Impostazioni Predefinite</p>
+                          
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block">Stile Retino (Pattern)</label>
+                            <select
+                              className="w-full bg-white border border-neutral-300 text-xs rounded p-2 font-semibold capitalize"
+                              value={defaultHatchStyle.pattern}
+                              onChange={(e) => setDefaultHatchStyle(prev => ({ ...prev, pattern: e.target.value }))}
+                            >
+                              <option value="Solid">Pieno (Solid)</option>
+                              <option value="ANSI31">ANSI31 (Obliquo Semplice)</option>
+                              <option value="ANSI32">ANSI32 (Obliquo Doppio)</option>
+                              <option value="ANSI33">ANSI33 (Dashed/Solid Obliquo)</option>
+                              <option value="ANSI34">ANSI34 (Obliquo Tratteggiato)</option>
+                              <option value="Grid">Griglia (Quadrettato)</option>
+                              <option value="Cross">Incrocio (Griglia 45°)</option>
+                              <option value="Stripe">Strisce Verticali</option>
+                              <option value="Horizontal">Strisce Orizzontali</option>
+                              <option value="Zigzag">Zig-Zag</option>
+                              <option value="Brick">Mattoni CAD</option>
+                              <option value="Checker">Scacchiera (Checker)</option>
+                            </select>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between items-center">
+                              <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block">Scala Retino</label>
+                              <span className="text-[10px] font-mono font-bold text-neutral-600">{defaultHatchStyle.scale}</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="4"
+                              max="180"
+                              step="1"
+                              className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                              value={defaultHatchStyle.scale}
+                              onChange={(e) => setDefaultHatchStyle(prev => ({ ...prev, scale: Number(e.target.value) }))}
+                            />
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between items-center">
+                              <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block">Inclinazione (°)</label>
+                              <span className="text-[10px] font-mono font-bold text-neutral-600">{defaultHatchStyle.angle}°</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max="360"
+                              step="1"
+                              className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                              value={defaultHatchStyle.angle}
+                              onChange={(e) => setDefaultHatchStyle(prev => ({ ...prev, angle: Number(e.target.value) }))}
+                            />
+                          </div>
                         </div>
                       </div>
                     ) : selectedTool === 'Specchio' ? (
@@ -1754,20 +1866,20 @@ export default function App() {
                         <div className="grid grid-cols-2 gap-2">
                           <button
                             onClick={() =>
-                              setDefaultLineStyle(prev => ({ ...prev, mode: "ink" }))
+                              setDefaultLineStyle(prev => ({ ...prev, mode: "pencil" }))
                             }
-                            className={`p-3 rounded-lg border text-left transition-all ${defaultLineStyle.mode === "ink" ? "bg-amber-50 border-amber-300 ring-4 ring-amber-100" : "bg-neutral-50 border-neutral-200 hover:border-neutral-300"}`}
+                            className={`p-3 rounded-lg border text-left transition-all ${defaultLineStyle.mode === "pencil" ? "bg-amber-50 border-amber-300 ring-4 ring-amber-100" : "bg-neutral-50 border-neutral-200 hover:border-neutral-300"}`}
                           >
-                            <span className={`block text-xs font-black ${defaultLineStyle.mode === "ink" ? "text-amber-800" : "text-neutral-500"}`}>Schizzo</span>
+                            <span className={`block text-xs font-black ${defaultLineStyle.mode === "pencil" ? "text-amber-800" : "text-neutral-500"}`}>Schizzo</span>
                             <span className="text-[9px] text-neutral-400 font-medium">Matita morbida</span>
                           </button>
                           <button
                             onClick={() =>
-                              setDefaultLineStyle(prev => ({ ...prev, mode: "pencil" }))
+                              setDefaultLineStyle(prev => ({ ...prev, mode: "ink" }))
                             }
-                            className={`p-3 rounded-lg border text-left transition-all ${defaultLineStyle.mode === "pencil" ? "bg-neutral-900 border-neutral-700 ring-4 ring-neutral-200" : "bg-neutral-50 border-neutral-200 hover:border-neutral-300"}`}
+                            className={`p-3 rounded-lg border text-left transition-all ${defaultLineStyle.mode === "ink" ? "bg-indigo-900 border-neutral-700 ring-4 ring-neutral-200" : "bg-neutral-50 border-neutral-200 hover:border-neutral-300"}`}
                           >
-                            <span className={`block text-xs font-black ${defaultLineStyle.mode === "pencil" ? "text-white" : "text-neutral-500"}`}>Kina</span>
+                            <span className={`block text-xs font-black ${defaultLineStyle.mode === "ink" ? "text-white" : "text-neutral-500"}`}>Kina</span>
                             <span className="text-[9px] text-neutral-400 font-medium">Tratto tecnico</span>
                           </button>
                         </div>
@@ -2308,7 +2420,7 @@ export default function App() {
 
       {/* Floating Interactive Manual Companion */}
       {showFloatingManual && hoveredGuide && (
-        <div className="fixed bottom-6 right-6 z-50 w-80 bg-neutral-900/40 backdrop-blur-lg text-neutral-100 rounded-lg shadow-xl border border-neutral-700/30 p-4 transition-all duration-300 transform scale-100 ease-out flex flex-col gap-2">
+        <div className="fixed bottom-6 left-6 z-50 w-80 bg-neutral-900/40 backdrop-blur-lg text-neutral-100 rounded-lg shadow-xl border border-neutral-700/30 p-4 transition-all duration-300 transform scale-100 ease-out flex flex-col gap-2">
           <div className="flex items-center justify-between border-b border-neutral-800 pb-1.5 flex-nowrap">
             <div className="flex items-center gap-1.5 text-emerald-400 font-sans font-bold text-xs uppercase tracking-wider">
               <BookOpen size={14} className="animate-pulse" />
@@ -2318,11 +2430,12 @@ export default function App() {
               onClick={() => {
                 setHoveredGuide(null);
                 setGuideLockedBy(null);
+                setShowFloatingManual(false);
               }}
               className="text-neutral-400 hover:text-white hover:bg-neutral-800 rounded p-1 transition-colors"
-              title="Cancella/Nascondi"
+              title="Chiudi Manuale"
             >
-              <Trash2 size={12} />
+              <X size={14} />
             </button>
           </div>
           <div>

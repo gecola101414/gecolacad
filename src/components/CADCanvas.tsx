@@ -1153,9 +1153,15 @@ interface CADCanvasProps {
   raccordoConfig?: { type: 'curvo' | 'rettilineo'; value: number };
   onEditRaccordo?: (raccordoEntity: Entity) => void;
   onActionStart?: () => void;
+  defaultHatchStyle?: {
+    pattern: string;
+    scale: number;
+    angle: number;
+    color: string;
+  };
 }
 
-export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, setOrthoMode, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, raccordoConfig, onEditRaccordo, onActionStart }, ref) => {
+export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultHatchStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, setOrthoMode, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, raccordoConfig, onEditRaccordo, onActionStart }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [view, setView] = useState({ zoom: 0.15, pan: { x: window.innerWidth > 0 ? (window.innerWidth / 2) - 150 : 250, y: window.innerHeight > 0 ? (window.innerHeight / 2) - 220 : 80 } });
   const [dragTavolaId, setDragTavolaId] = useState<string | null>(null);
@@ -5662,10 +5668,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 const newHatch: Entity = {
                     id: Date.now().toString(),
                     type: 'hatch',
-                    pattern: 'ANSI31',
-                    scale: 30,
-                    angle: 0,
-                    color: defaultLineStyle.color || '#3b82f6',
+                    pattern: defaultHatchStyle?.pattern || 'ANSI31',
+                    scale: defaultHatchStyle?.scale || 30,
+                    angle: defaultHatchStyle?.angle || 0,
+                    color: defaultHatchStyle?.color || defaultLineStyle.color || '#3b82f6',
                     mode: defaultLineStyle.mode,
                     points: poly,
                     layer: hatchLayerExists ? 'Hatch' : activeLayerId
@@ -7114,6 +7120,18 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
 
+    // --- TECNIGRAFO SPECIAL TOGGLE ---
+    // If tecnigrafo is active, right click toggles between pencil and ink
+    if (tecnigrafoOrigin) {
+        setDefaultLineStyle(prev => ({ 
+            ...prev, 
+            mode: prev.mode === 'pencil' ? 'ink' : 'pencil' 
+        }));
+        setShortcutToast(`Stile Penna: ${defaultLineStyle.mode === 'pencil' ? 'KINA (Tecnica)' : 'MATITA (Schizzo)'}`);
+        setTimeout(() => setShortcutToast(null), 1000);
+        return;
+    }
+
     if (activeTool === 'Join') {
         if (confirmJoin()) return;
     }
@@ -7486,7 +7504,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     }
   };
 
-  const tecnigrafoSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg"><rect x="38" y="108" width="90" height="16" fill="rgba(212,163,115,0.7)" stroke="#8b5a2b" stroke-width="1"/><rect x="38" y="108" width="90" height="6" fill="rgba(255,255,255,0.7)" stroke="#8b5a2b" stroke-width="0.5"/><line x1="40" y1="108" x2="40" y2="112" stroke="black" stroke-width="1"/><line x1="50" y1="108" x2="50" y2="114" stroke="black" stroke-width="1.5"/><line x1="60" y1="108" x2="60" y2="112" stroke="black" stroke-width="1"/><line x1="70" y1="108" x2="70" y2="112" stroke="black" stroke-width="1"/><line x1="80" y1="108" x2="80" y2="114" stroke="black" stroke-width="1.5"/><line x1="90" y1="108" x2="90" y2="112" stroke="black" stroke-width="1"/><line x1="100" y1="108" x2="100" y2="112" stroke="black" stroke-width="1"/><line x1="110" y1="108" x2="110" y2="114" stroke="black" stroke-width="1.5"/><line x1="120" y1="108" x2="120" y2="112" stroke="black" stroke-width="1"/><rect x="4" y="0" width="16" height="90" fill="rgba(212,163,115,0.7)" stroke="#8b5a2b" stroke-width="1"/><rect x="14" y="0" width="6" height="90" fill="rgba(255,255,255,0.7)" stroke="#8b5a2b" stroke-width="0.5"/><line x1="20" y1="88" x2="16" y2="88" stroke="black" stroke-width="1"/><line x1="20" y1="78" x2="14" y2="78" stroke="black" stroke-width="1.5"/><line x1="20" y1="68" x2="16" y2="68" stroke="black" stroke-width="1"/><line x1="20" y1="58" x2="16" y2="58" stroke="black" stroke-width="1"/><line x1="20" y1="48" x2="14" y2="48" stroke="black" stroke-width="1.5"/><line x1="20" y1="38" x2="16" y2="38" stroke="black" stroke-width="1"/><line x1="20" y1="28" x2="16" y2="28" stroke="black" stroke-width="1"/><line x1="20" y1="18" x2="14" y2="18" stroke="black" stroke-width="1.5"/><line x1="20" y1="8" x2="16" y2="8" stroke="black" stroke-width="1"/><circle cx="20" cy="108" r="18" fill="transparent" stroke="rgba(50,50,50,0.6)" stroke-width="1"/><line x1="8" y1="108" x2="32" y2="108" stroke="rgba(255,0,0,0.8)" stroke-width="1"/><line x1="20" y1="96" x2="20" y2="120" stroke="rgba(255,0,0,0.8)" stroke-width="1"/></svg>`);
+  const tecnigrafoSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg"><rect x="38" y="108" width="90" height="16" fill="rgba(212,163,115,0.7)" stroke="#8b5a2b" stroke-width="1"/><rect x="38" y="108" width="90" height="6" fill="rgba(255,255,255,0.7)" stroke="#8b5a2b" stroke-width="0.5"/><line x1="40" y1="108" x2="40" y2="112" stroke="black" stroke-width="1"/><line x1="50" y1="108" x2="50" y2="114" stroke="black" stroke-width="1.5"/><line x1="60" y1="108" x2="60" y2="112" stroke="black" stroke-width="1"/><line x1="70" y1="108" x2="70" y2="112" stroke="black" stroke-width="1"/><line x1="80" y1="108" x2="80" y2="114" stroke="black" stroke-width="1.5"/><line x1="90" y1="108" x2="90" y2="112" stroke="black" stroke-width="1"/><line x1="100" y1="108" x2="100" y2="112" stroke="black" stroke-width="1"/><line x1="110" y1="108" x2="110" y2="114" stroke="black" stroke-width="1.5"/><line x1="120" y1="108" x2="120" y2="112" stroke="black" stroke-width="1"/><rect x="4" y="0" width="16" height="90" fill="rgba(212,163,115,0.7)" stroke="#8b5a2b" stroke-width="1"/><rect x="14" y="0" width="6" height="90" fill="rgba(255,255,255,0.7)" stroke="#8b5a2b" stroke-width="0.5"/><line x1="20" y1="88" x2="16" y2="88" stroke="black" stroke-width="1"/><line x1="20" y1="78" x2="14" y2="78" stroke="black" stroke-width="1.5"/><line x1="20" y1="68" x2="16" y2="68" stroke="black" stroke-width="1"/><line x1="20" y1="58" x2="16" y2="58" stroke="black" stroke-width="1"/><line x1="20" y1="48" x2="14" y2="48" stroke="black" stroke-width="1.5"/><line x1="20" y1="38" x2="16" y2="38" stroke="black" stroke-width="1"/><line x1="20" y1="28" x2="16" y2="28" stroke="black" stroke-width="1"/><line x1="20" y1="18" x2="14" y2="18" stroke="black" stroke-width="1.5"/><line x1="20" y1="8" x2="16" y2="8" stroke="black" stroke-width="1"/><circle cx="20" cy="108" r="18" fill="transparent" stroke="rgba(50,50,50,0.6)" stroke-width="1"/></svg>`);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -7641,7 +7659,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const pencilSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M0,0 L3,1 L1,3 Z" fill="#1e293b"/><path d="M3,1 L7,3 L3,7 L1,3 Z" fill="#fed7aa"/><path d="M7,3 L21,17 L17,21 L3,7 Z" fill="#4f46e5"/><path d="M7,3 L21,17 L19,19 L5,5 Z" fill="#6366f1"/><path d="M21,17 L24,20 L20,24 L17,21 Z" fill="#94a3b8"/><path d="M24,20 L28,24 L24,28 L20,24 Z" fill="#fda4af"/></svg>`);
   const kinaSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M0,0 L4,2 L2,4 Z" fill="#000000"/><path d="M4,2 L8,4 L4,8 L2,4 Z" fill="#94a3b8"/><path d="M8,4 L22,18 L18,22 L4,8 Z" fill="#334155"/><path d="M22,18 L26,22 L22,26 L18,22 Z" fill="#1e293b"/><rect x="22" y="22" width="6" height="6" fill="#1e293b" transform="rotate(45 25 25)"/></svg>`);
 
-  const crosshairSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="96" height="96" viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg"><line x1="0" y1="48" x2="96" y2="48" stroke="rgba(255,40,40,0.85)" stroke-width="1.5"/><line x1="48" y1="0" x2="48" y2="96" stroke="rgba(255,40,40,0.85)" stroke-width="1.5"/><circle cx="48" cy="48" r="4" fill="transparent" stroke="rgba(0,0,0,0.6)" stroke-width="1"/></svg>`);
+  const crosshairSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="96" height="96" viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg"><circle cx="48" cy="48" r="4" fill="transparent" stroke="rgba(0,0,0,0.6)" stroke-width="1"/></svg>`);
 
   let helpContent = null;
   let helpTitle = activeTool;
@@ -7709,9 +7727,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           onPointerUp={onHelpPointerUp}
           className="absolute z-50 bg-zinc-950/95 text-white border border-neutral-700 rounded-xl shadow-2xl flex flex-col pointer-events-auto cursor-move select-none animate-fade-in"
           style={{ 
-              top: 20, 
-              left: '50%',
-              transform: `translate(calc(-50% + ${helpPanelOffset?.x || 0}px), ${helpPanelOffset?.y || 0}px)`,
+              bottom: 20, 
+              left: 20,
+              transform: `translate(${helpPanelOffset?.x || 0}px, ${helpPanelOffset?.y || 0}px)`,
               touchAction: 'none'
           }}
         >
