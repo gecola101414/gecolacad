@@ -23,12 +23,12 @@ export const RaccordoDialog: React.FC<RaccordoDialogProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
 
-  // Center horizontally on mount based on window width
+  // Move to the right side on mount based on window width to avoid central overlap
   useEffect(() => {
     if (isOpen) {
       const w = window.innerWidth;
       setPosition({
-        x: Math.max(20, Math.floor(w / 2 - 180)),
+        x: Math.max(20, Math.floor(w - 380)), // 380px from right
         y: 120
       });
     }

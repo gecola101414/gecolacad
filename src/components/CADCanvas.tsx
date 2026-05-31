@@ -18,6 +18,28 @@ export interface CADCanvasAPI {
   ) => void;
 }
 
+export type DrawingState = {
+  start: Point;
+  current?: Point;
+  arcStartPoint?: Point;
+  arcDirection?: number;
+  snapType?: 'standard' | 'smart';
+  startSnapped?: boolean;
+  refPoint?: Point;
+  refEntityId?: string;
+  constraintAxis?: 'x' | 'y';
+  refPoint2?: Point;
+  constraintAxis2?: 'x' | 'y';
+  hasDoubleSmart?: boolean;
+  activeConstraint?: { axis: 'x' | 'y'; value: number };
+  wheelLength?: number;
+  startWheelLength?: number;
+  lockedDir?: Point;
+  isVirtual?: boolean;
+  freehandPoints?: Point[];
+  isFreehand?: boolean;
+};
+
 const normalizeAngle = (a: number) => {
   let deg = a % 360;
   if (deg < 0) deg += 360;
@@ -52,7 +74,7 @@ const mirrorEntity = (entity: Entity, axisPt1: Point, axisPt2: Point): Entity =>
     color: entity.color,
     lineWidth: entity.lineWidth,
     mode: entity.mode,
-    dashed: entity.dashed,
+    dashed: !!entity.dashed,
     groupId: entity.groupId,
   };
 
@@ -158,11 +180,11 @@ const mirrorEntity = (entity: Entity, axisPt1: Point, axisPt2: Point): Entity =>
       start: newStart,
       end: newEnd,
     } as any;
-  } else if (entity.type === 'hatch') {
+  } else if ((entity as any).type === 'hatch') {
     const h = entity as any;
     const newPoints = h.points ? h.points.map((p: Point) => mirrorPoint(p, axisPt1, axisPt2)) : [];
     return {
-      ...entity,
+      ...(entity as any),
       ...common,
       points: newPoints,
     } as any;
@@ -1121,6 +1143,7 @@ interface CADCanvasProps {
   onMouseMovePosition?: (pos: Point) => void;
   rulerStyle?: 'tecnigrafo' | 'crosshair';
   orthoMode?: boolean;
+  setOrthoMode?: (val: boolean) => void;
   tavole?: Tavola[];
   onUpdateTavole?: (tavole: Tavola[]) => void;
   onDoubleClickTavola?: (id: string) => void;
@@ -1132,7 +1155,7 @@ interface CADCanvasProps {
   onActionStart?: () => void;
 }
 
-export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, raccordoConfig, onEditRaccordo, onActionStart }, ref) => {
+export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, setOrthoMode, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, raccordoConfig, onEditRaccordo, onActionStart }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [view, setView] = useState({ zoom: 0.15, pan: { x: window.innerWidth > 0 ? (window.innerWidth / 2) - 150 : 250, y: window.innerHeight > 0 ? (window.innerHeight / 2) - 220 : 80 } });
   const [dragTavolaId, setDragTavolaId] = useState<string | null>(null);
@@ -1168,6 +1191,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
+  const [isMovingTecnigrafo, setIsMovingTecnigrafo] = useState(false);
+  const [hoverMoveTecnigrafo, setHoverMoveTecnigrafo] = useState(false);
+  const movingTecnigrafoStartRef = useRef<{ mouse: Point, origin: Point } | null>(null);
+
   const [copySourceEntityIds, setCopySourceEntityIds] = useState<string[]>([]);
   const [clonedEntityIds, setClonedEntityIds] = useState<Set<string>>(new Set());
   const [selectedRaccordoLineIds, setSelectedRaccordoLineIds] = useState<string[]>([]);
@@ -1196,27 +1223,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const skipToolResetRef = useRef<boolean>(false);
   const isStickyCopyRef = useRef<boolean>(false);
   const dragHasMovedRef = useRef<boolean>(false);
-  const [drawing, setDrawing] = useState<{
-    start: Point;
-    current: Point;
-    arcStartPoint?: Point;
-    arcDirection?: number;
-    snapType?: 'standard' | 'smart';
-    startSnapped?: boolean;
-    refPoint?: Point;
-    refEntityId?: string;
-    constraintAxis?: 'x' | 'y';
-    refPoint2?: Point;
-    constraintAxis2?: 'x' | 'y';
-    hasDoubleSmart?: boolean;
-    activeConstraint?: { axis: 'x' | 'y'; value: number };
-    wheelLength?: number;
-    startWheelLength?: number;
-    lockedDir?: Point;
-    isVirtual?: boolean;
-    freehandPoints?: Point[];
-    isFreehand?: boolean;
-  } | null>(null);
+  const [drawing, setDrawing] = useState<DrawingState | null>(null);
   const drawingProgressRef = useRef(1);
   useEffect(() => {
       if (drawing) {
@@ -1255,6 +1262,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const dragEntityIdRef = useRef<string | null>(null);
   useEffect(() => { dragEntityIdRef.current = dragEntityId; }, [dragEntityId]);
   const [dragEntityIds, setDragEntityIds] = useState<string[]>([]);
+  const [lockedFocalPoint, setLockedFocalPoint] = useState<Point | null>(null);
+  const [tecnigrafoLock, setTecnigrafoLock] = useState<'x' | 'y' | null>(null);
+  const [tecnigrafoOrigin, setTecnigrafoOrigin] = useState<Point | null>(null);
   const [activeMoveSnapPoint, setActiveMoveSnapPoint] = useState<Point | null>(null);
   const [selectionWindow, setSelectionWindow] = useState<{ start: Point; current: Point } | null>(null);
   const [dragOffset, setDragOffset] = useState<Point>({x: 0, y: 0});
@@ -2199,6 +2209,50 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         return ent;
       }).concat(newConnector);
     });
+
+    // Smooth cinematic camera transition to the focal point of the raccordo
+    const canvas = canvasRef.current;
+    if (canvas) {
+      // Calculate a target zoom that puts the intersection point comfortably in view
+      // We aim for a zoom level that feels like a "macro" shot of the detail
+      const targetZoom = Math.min(2.5, 1.2); 
+      const targetPan = {
+          x: (canvas.width / 2) - I.x * targetZoom,
+          y: (canvas.height / 2) - I.y * targetZoom
+      };
+      
+      const startZoom = view.zoom;
+      const startPan = { ...view.pan };
+      const duration = 850; // Elegant, deliberate transition
+      const startTime = performance.now();
+      
+      const animate = (time: number) => {
+        const elapsed = time - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Cinematic Ease Out Quint for smooth landing
+        const ease = 1 - Math.pow(1 - progress, 5);
+        
+        const currentZoom = startZoom + (targetZoom - startZoom) * ease;
+        const currentPan = {
+          x: startPan.x + (targetPan.x - startPan.x) * ease,
+          y: startPan.y + (targetPan.y - startPan.y) * ease
+        };
+        
+        setView({ zoom: currentZoom, pan: currentPan });
+        
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        }
+      };
+      
+      requestAnimationFrame(animate);
+    }
+
+    // Automatically trigger edit if it's a new raccordo or has onEditRaccordo
+    if (onEditRaccordo) {
+        onEditRaccordo(newConnector);
+    }
   };
   const renderRef = useRef<(() => void) | null>(null);
 
@@ -2229,6 +2283,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       ctx.imageSmoothingEnabled = false;
+
+      // Always reset global state to prevent carry-over from previous frame (like semi-transparency)
+      ctx.globalAlpha = 1.0;
+      ctx.setLineDash([]);
+      ctx.shadowBlur = 0;
 
       // Clear and draw based on view state
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -2329,15 +2388,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                   let lastY = entity.start.y;
                   for(let i=0; i<entity.inkPoints.length; i++) {
                       const pt = entity.inkPoints[i];
-                      const t = i / (entity.inkPoints.length - 1);
-                      const bx = entity.start.x + (entity.end.x - entity.start.x) * t;
-                      const by = entity.start.y + (entity.end.y - entity.start.y) * t;
-                      
-                      const px = entity.isFreehand ? pt.x : bx + pt.x * (1.0 / view.zoom);
-                      const py = entity.isFreehand ? pt.y : by + pt.y * (1.0 / view.zoom);
+                      const px = pt.x;
+                      const py = pt.y;
      
                       ctx.beginPath();
-                      ctx.lineWidth = Math.max(0.2, pt.width * (entity.lineWidth / view.zoom));
+                      ctx.lineWidth = Math.max(0.1, pt.width * (entity.lineWidth / view.zoom));
                       ctx.strokeStyle = isHighlighted ? highlightColor : getAlphaColor(entity.color, pt.alpha);
                       ctx.moveTo(lastX, lastY);
                       ctx.lineTo(px, py);
@@ -2374,6 +2429,33 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                       lastX = px;
                       lastY = py;
                   }
+              }
+          } else if (entity.mode === 'pencil') {
+              // Realistic pencil rendering
+              const dx = entity.end.x - entity.start.x;
+              const dy = entity.end.y - entity.start.y;
+              const len = Math.sqrt(dx * dx + dy * dy);
+              if (len > 0.1) {
+                  const steps = Math.max(10, Math.floor(len * 2));
+                  let lastX = entity.start.x;
+                  let lastY = entity.start.y;
+                  ctx.strokeStyle = isHighlighted ? highlightColor : getAlphaColor(entity.color, 0.4);
+                  ctx.lineWidth = Math.max(0.1, 0.4 * (entity.lineWidth / view.zoom));
+                  for(let i=1; i<=steps; i++) {
+                      const t = i/steps;
+                      const px = entity.start.x + dx * t + (Math.random() - 0.5) * (0.1 / view.zoom);
+                      const py = entity.start.y + dy * t + (Math.random() - 0.5) * (0.1 / view.zoom);
+                      ctx.beginPath();
+                      ctx.moveTo(lastX, lastY);
+                      ctx.lineTo(px, py);
+                      ctx.stroke();
+                      lastX = px;
+                      lastY = py;
+                  }
+              } else {
+                  ctx.moveTo(entity.start.x, entity.start.y);
+                  ctx.lineTo(entity.end.x, entity.end.y);
+                  ctx.stroke();
               }
           } else {
               ctx.moveTo(entity.start.x, entity.start.y);
@@ -2660,6 +2742,125 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           }
 
           ctx.restore();
+      }
+
+      // Draw Tecnigrafo "Squadretta" (Drafting Machine Effect)
+      // We draw this before the drawing preview so the "pen" appears to write on top of it.
+      if (tecnigrafoOrigin) {
+        ctx.save();
+        
+        const isX = tecnigrafoLock === 'x' || !tecnigrafoLock;
+        const isY = tecnigrafoLock === 'y' || !tecnigrafoLock;
+
+        // Visual constants (in model space)
+        const rulerLength = 5000 / view.zoom; 
+        const bodyWidth = 32 / view.zoom; 
+        const edgeWidth = 6 / view.zoom;
+
+        // 1. HORIZONTAL RULER (Drafting edge at Origin Y, extends to the right)
+        if (isX) {
+            ctx.save();
+            ctx.shadowBlur = 8 / view.zoom;
+            ctx.shadowColor = 'rgba(0,0,0,0.3)';
+            
+            // Brown Body (below the drawing edge)
+            ctx.fillStyle = '#78350f'; 
+            ctx.globalAlpha = 0.8;
+            ctx.fillRect(tecnigrafoOrigin.x - 10/view.zoom, tecnigrafoOrigin.y + edgeWidth, rulerLength, bodyWidth - edgeWidth);
+            
+            // White Drafting Edge (top edge of the ruler)
+            ctx.fillStyle = '#ffffff';
+            ctx.globalAlpha = 1.0;
+            ctx.fillRect(tecnigrafoOrigin.x - 10/view.zoom, tecnigrafoOrigin.y, rulerLength, edgeWidth);
+            
+            // Thin black line for the sharp edge
+            ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+            ctx.lineWidth = 0.5 / view.zoom;
+            ctx.beginPath();
+            ctx.moveTo(tecnigrafoOrigin.x - 10/view.zoom, tecnigrafoOrigin.y);
+            ctx.lineTo(tecnigrafoOrigin.x + rulerLength, tecnigrafoOrigin.y);
+            ctx.stroke();
+
+            // Millimeter markings
+            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+            const step = 10 / view.zoom; // Assume 10 units = 1cm for visual effect
+            for (let d = 0; d < rulerLength; d += step) {
+                const x = tecnigrafoOrigin.x + d;
+                const h = (d % (step * 10) === 0) ? edgeWidth : (d % (step * 5) === 0 ? edgeWidth * 0.7 : edgeWidth * 0.4);
+                ctx.fillRect(x, tecnigrafoOrigin.y, 1 / view.zoom, h);
+            }
+            ctx.restore();
+        }
+
+        // 2. VERTICAL RULER (Drafting edge at Origin X, brown left, white right)
+        if (isY) {
+            ctx.save();
+            ctx.shadowBlur = 8 / view.zoom;
+            ctx.shadowColor = 'rgba(0,0,0,0.3)';
+
+            // Brown Body (to the left of the drawing edge)
+            ctx.fillStyle = '#78350f';
+            ctx.globalAlpha = 0.8;
+            ctx.fillRect(tecnigrafoOrigin.x - bodyWidth, tecnigrafoOrigin.y - 10/view.zoom, bodyWidth - edgeWidth, rulerLength);
+
+            // White Drafting Edge (right side of the ruler)
+            ctx.fillStyle = '#ffffff';
+            ctx.globalAlpha = 1.0;
+            ctx.fillRect(tecnigrafoOrigin.x - edgeWidth, tecnigrafoOrigin.y - 10/view.zoom, edgeWidth, rulerLength);
+
+            // Thin black line
+            ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+            ctx.lineWidth = 0.5 / view.zoom;
+            ctx.beginPath();
+            ctx.moveTo(tecnigrafoOrigin.x, tecnigrafoOrigin.y - 10/view.zoom);
+            ctx.lineTo(tecnigrafoOrigin.x, tecnigrafoOrigin.y + rulerLength);
+            ctx.stroke();
+
+            // Millimeter markings
+            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+            const step = 10 / view.zoom;
+            for (let d = 0; d < rulerLength; d += step) {
+                const y = tecnigrafoOrigin.y + d;
+                const w = (d % (step * 10) === 0) ? edgeWidth : (d % (step * 5) === 0 ? edgeWidth * 0.7 : edgeWidth * 0.4);
+                ctx.fillRect(tecnigrafoOrigin.x - w, y, w, 1 / view.zoom);
+            }
+            ctx.restore();
+        }
+
+        // Pivot point indicator
+        ctx.beginPath();
+        ctx.arc(tecnigrafoOrigin.x, tecnigrafoOrigin.y, 10 / view.zoom, 0, Math.PI * 2);
+        ctx.fillStyle = '#64748b';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2 / view.zoom;
+        ctx.stroke();
+        
+        ctx.restore();
+      }
+
+      // Draw Tecnigrafo measurement label while drawing
+      if (drawing && tecnigrafoOrigin && (activeTool === 'Line' || activeTool === 'Mano Libera' || activeTool === 'Pencil')) {
+          const dist = Math.sqrt(Math.pow(actualMousePosRef.current.x - drawing.start.x, 2) + Math.pow(actualMousePosRef.current.y - drawing.start.y, 2));
+          if (dist > 0.1) {
+              ctx.save();
+              const labelX = actualMousePosRef.current.x + 15 / view.zoom;
+              const labelY = actualMousePosRef.current.y - 15 / view.zoom;
+              
+              const text = dist.toFixed(1);
+              ctx.font = `${12 / view.zoom}px Inter, sans-serif`;
+              const metrics = ctx.measureText(text);
+              const padding = 4 / view.zoom;
+              
+              ctx.fillStyle = 'rgba(15, 23, 42, 0.85)'; 
+              ctx.beginPath();
+              ctx.roundRect(labelX - padding, labelY - 12/view.zoom - padding, metrics.width + padding*2, 14/view.zoom + padding*2, 4/view.zoom);
+              ctx.fill();
+              
+              ctx.fillStyle = '#ffffff';
+              ctx.fillText(text + (defaultLineStyle.mode === 'ink' ? ' (KINA)' : ''), labelX, labelY);
+              ctx.restore();
+          }
       }
 
       // Draw current drawing preview
@@ -3349,6 +3550,31 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           ctx.setLineDash([]);
       }
 
+      // Draw locked focal point indicator
+      if (lockedFocalPoint) {
+        const screenPos = canvasToScreen(lockedFocalPoint.x, lockedFocalPoint.y);
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0); // Absolute screen pixels
+        ctx.strokeStyle = '#f87171'; // Red-400
+        ctx.lineWidth = 1.5;
+        
+        const size = 12;
+        ctx.beginPath();
+        // Crosshair
+        ctx.moveTo(screenPos.x - size, screenPos.y);
+        ctx.lineTo(screenPos.x + size, screenPos.y);
+        ctx.moveTo(screenPos.x, screenPos.y - size);
+        ctx.lineTo(screenPos.x, screenPos.y + size);
+        ctx.stroke();
+
+        // Circle
+        ctx.beginPath();
+        ctx.arc(screenPos.x, screenPos.y, 6, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.restore();
+      }
+
       // Draw Specchio preview in real-time
       if (activeTool === 'Specchio') {
           ctx.save();
@@ -3370,7 +3596,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
               ctx.stroke();
               ctx.restore();
           } else if (specchioState === 'axis_end' && specchioAxisPt1) {
-              const snappedPoint = getSnappedPoint(rawPoint, entities, activeTool, { type: 'line', start: specchioAxisPt1 } as DrawingState).snapped ? getSnappedPoint(rawPoint, entities, activeTool, { type: 'line', start: specchioAxisPt1 } as DrawingState).point : rawPoint;
+              const snappedPoint = getSnappedPoint(rawPoint, entities, activeTool, { type: 'line', start: specchioAxisPt1, current: rawPoint } as any).snapped ? getSnappedPoint(rawPoint, entities, activeTool, { type: 'line', start: specchioAxisPt1, current: rawPoint } as any).point : rawPoint;
               let finalPt2 = snappedPoint;
               if (orthoMode) {
                   const dx = Math.abs(finalPt2.x - specchioAxisPt1.x);
@@ -3655,11 +3881,76 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     e.preventDefault();
     if (isPanningRef.current) return;
 
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    // Calculate the ideal center based on existing entities
+    const getIdealCenter = () => {
+        if (entities.length === 0) return { x: 0, y: 0 };
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        
+        entities.forEach(ent => {
+             if (ent.type === 'line') {
+                 minX = Math.min(minX, ent.start.x, ent.end.x);
+                 maxX = Math.max(maxX, ent.start.x, ent.end.x);
+                 minY = Math.min(minY, ent.start.y, ent.end.y);
+                 maxY = Math.max(maxY, ent.start.y, ent.end.y);
+             } else if (ent.type === 'circle' && (ent as CircleEntity).radius) {
+                 const radius = (ent as CircleEntity).radius || 0;
+                 minX = Math.min(minX, ent.center.x - radius);
+                 maxX = Math.max(maxX, ent.center.x + radius);
+                 minY = Math.min(minY, ent.center.y - radius);
+                 maxY = Math.max(maxY, ent.center.y + radius);
+             } else if (ent.type === 'rectangle') {
+                 minX = Math.min(minX, ent.start.x, ent.end.x);
+                 maxX = Math.max(maxX, ent.start.x, ent.end.x);
+                 minY = Math.min(minY, ent.start.y, ent.end.y);
+                 maxY = Math.max(maxY, ent.start.y, ent.end.y);
+             }
+        });
+
+        if (minX === Infinity) return { x: 0, y: 0 };
+        return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+    };
+
+    const rect = canvas.getBoundingClientRect();
     const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-    setView(prev => ({
-        ...prev,
-        zoom: Math.max(0.1, prev.zoom * zoomFactor)
-    }));
+
+    setView(prev => {
+        const newZoom = Math.max(0.01, prev.zoom * zoomFactor);
+        
+        // World coordinates of the mouse based on the view BEFORE zooming
+        const mouseW = {
+            x: (e.clientX - rect.left - prev.pan.x) / prev.zoom,
+            y: (e.clientY - rect.top - prev.pan.y) / prev.zoom
+        };
+
+        // DRONE EFFECT: Prioritize active Snaps (yellow ones) for the zoom center.
+        // If a point is being actively placed or moved, focus the zoom on that point.
+        // Or use the LOCKED focal point (Magic Key 'F').
+        // If no snap or lock is active, the mouse cursor guides the drone.
+        const activeSnap = drawing?.snapType 
+            ? drawing.current 
+            : (activeMoveSnapPoint || hoverSnap?.point);
+
+        const focalPoint = lockedFocalPoint || activeSnap || mouseW;
+        
+        const targetPan = {
+            x: canvas.width / 2 - focalPoint.x * newZoom,
+            y: canvas.height / 2 - focalPoint.y * newZoom
+        };
+
+        // Cinematic smoothing (Drone effect) - Firm but fluid
+        const smoothing = 0.7; 
+
+        return {
+            zoom: newZoom,
+            pan: {
+                x: prev.pan.x + (targetPan.x - prev.pan.x) * smoothing,
+                y: prev.pan.y + (targetPan.y - prev.pan.y) * smoothing
+            }
+        };
+    });
   };
 
   const handlePrecisionAdjust = (dir: -1 | 1) => {
@@ -3784,8 +4075,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
         for (const ent of entities) {
             if (ent.type === 'line') {
-                if (ent.isFreehand && ent.inkPoints) {
-                    // Freehand sketch lines - fade individual points inside the eraser circle!
+                if (ent.inkPoints) {
+                    // ANY line with inkPoints (freehand or straight with wave effect)
+                    // fade individual points inside the eraser circle!
                     let pointHit = false;
                     const updatedPoints = ent.inkPoints.map((pt, i) => {
                         const dist = Math.sqrt((rawPoint.x - pt.x)**2 + (rawPoint.y - pt.y)**2);
@@ -4803,7 +5095,57 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (onActionStart) onActionStart();
-    if (e.button === 2) return; // Let onContextMenu handle right clicks
+    
+    if (e.button === 0) { 
+        // LEFT CLICK: Reposition Tecnigrafo if clicked on BROWN body
+        if (tecnigrafoOrigin) {
+            const canvas = canvasRef.current;
+            if (canvas) {
+                const rect = canvas.getBoundingClientRect();
+                const rawPoint = getDampenedCoordinate(screenToCanvas(e.clientX - rect.left, e.clientY - rect.top), e);
+                
+                const rulerLength = 5000 / view.zoom;
+                const edgeWidth = 6 / view.zoom;
+                const bodyWidth = 32 / view.zoom;
+                const hOffset = 10 / view.zoom;
+
+                // Check Horizontal Ruler BROWN BODY box
+                const hHit = rawPoint.x >= tecnigrafoOrigin.x - hOffset && rawPoint.x <= tecnigrafoOrigin.x + rulerLength &&
+                             rawPoint.y >= tecnigrafoOrigin.y + edgeWidth && rawPoint.y <= tecnigrafoOrigin.y + bodyWidth;
+                
+                // Check Vertical Ruler BROWN BODY box
+                const vHit = rawPoint.x >= tecnigrafoOrigin.x - bodyWidth && rawPoint.x <= tecnigrafoOrigin.x - edgeWidth &&
+                             rawPoint.y >= tecnigrafoOrigin.y - hOffset && rawPoint.y <= tecnigrafoOrigin.y + rulerLength;
+
+                if (hHit || vHit) {
+                    setIsMovingTecnigrafo(true);
+                    movingTecnigrafoStartRef.current = { mouse: { ...rawPoint }, origin: { ...tecnigrafoOrigin } };
+                    
+                    // Force the tecnigrafo style (Line + Ink + No Ortho)
+                    setActiveTool?.('Line');
+                    setDefaultLineStyle(prev => ({ ...prev, mode: 'ink' }));
+                    setOrthoMode?.(false);
+                    return; 
+                }
+            }
+        }
+    }
+
+    if (e.button === 2) {
+        // RIGHT CLICK: Toggle between Pencil and Ink mode when tecnigrafo is active
+        if (tecnigrafoOrigin && !drawing) {
+            e.preventDefault();
+            setDefaultLineStyle(prev => ({
+                ...prev,
+                mode: prev.mode === 'ink' ? 'pencil' : 'ink'
+            }));
+            renderRef.current?.();
+            return;
+        }
+        // Let handleContextMenu take care of toggling if NOT in tecnigrafo mode OR if drawing
+        return; 
+    }
+
     if (e.button === 1) {
       e.preventDefault();
       isPanningRef.current = true;
@@ -5078,8 +5420,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 setSpecchioState('axis_end');
             }
         } else if (specchioState === 'axis_end' && specchioAxisPt1) {
-            const snappedPoint = getSnappedPoint(rawPoint, entities, activeTool, { type: 'line', start: specchioAxisPt1 } as DrawingState).snapped 
-                ? getSnappedPoint(rawPoint, entities, activeTool, { type: 'line', start: specchioAxisPt1 } as DrawingState).point 
+            const snappedPoint = getSnappedPoint(rawPoint, entities, activeTool, { type: 'line', start: specchioAxisPt1, current: rawPoint } as any).snapped 
+                ? getSnappedPoint(rawPoint, entities, activeTool, { type: 'line', start: specchioAxisPt1, current: rawPoint } as any).point 
                 : rawPoint;
             
             let finalPt2 = snappedPoint;
@@ -5101,7 +5443,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 end: finalPt2,
                 color: '#10b981', 
                 lineWidth: 1.5,
-                dashed: [10, 10],
+                dashed: true,
                 mode: 'ink',
                 layer: activeLayerId,
                 isSimmetryAxis: true
@@ -5512,28 +5854,36 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 mode: defaultLineStyle.mode,
                 start: drawing.start,
                 end: snappedResult.point,
-                layer: activeLayerId,
-                inkPoints: defaultLineStyle.mode === 'ink' ? (() => {
-                  const points: InkPoint[] = [];
-                  const steps = 20;
-                  const dx = snappedResult.point.x - drawing.start.x;
-                  const dy = snappedResult.point.y - drawing.start.y;
-                  const len = Math.sqrt(dx * dx + dy * dy);
-                  const nx = len > 0 ? -dy / len : 0;
-                  const ny = len > 0 ? dx / len : 0;
-                  for (let i = 0; i <= steps; i++) {
-                    const t = i / steps;
-                    const wave = Math.sin(t * Math.PI * 4);
-                    points.push({ 
-                       x: nx * wave * 0.6, 
-                       y: ny * wave * 0.6, 
-                       width: 0.5 + Math.random() * 0.5,
-                       alpha: 0.3 + Math.random() * 0.4
-                    });
-                  }
-                  return points;
-                })() : undefined
-              };
+                 layer: activeLayerId,
+                 isFreehand: true, // Crucial for eraser and consistent drawing
+                 inkPoints: defaultLineStyle.mode === 'ink' ? (() => {
+                   const points: InkPoint[] = [];
+                   const steps = 80; // Higher density for realistic ink
+                   const dx = snappedResult.point.x - drawing.start.x;
+                   const dy = snappedResult.point.y - drawing.start.y;
+                   const len = Math.sqrt(dx * dx + dy * dy);
+                   const nx = len > 0 ? -dy / len : 0;
+                   const ny = len > 0 ? dx / len : 0;
+                   for (let i = 0; i <= steps; i++) {
+                     const t = i / steps;
+                     // More complex wave for "organic" feel
+                     const wave = Math.sin(t * Math.PI * 8) * 0.1 + Math.sin(t * Math.PI * 2) * 0.2;
+                     
+                     // Adding some "ink blobs" (sbavature)
+                     const blobFactor = Math.random() > 0.92 ? 1.5 : 1.0;
+                     const px = drawing.start.x + dx * t + nx * wave * (0.4 / view.zoom) + (Math.random() - 0.5) * (0.1 / view.zoom);
+                     const py = drawing.start.y + dy * t + ny * wave * (0.4 / view.zoom) + (Math.random() - 0.5) * (0.1 / view.zoom);
+                     
+                     points.push({ 
+                        x: px, 
+                        y: py, 
+                        width: (0.5 + Math.random() * 0.5) * blobFactor,
+                        alpha: (0.4 + Math.random() * 0.5) * (blobFactor > 1 ? 0.8 : 1.0)
+                     });
+                   }
+                   return points;
+                 })() : undefined
+               };
           } else if (activeTool === 'Circle') {
               const radius = Math.sqrt(Math.pow(snappedResult.point.x - drawing.start.x, 2) + Math.pow(snappedResult.point.y - drawing.start.y, 2));
               newEntity = {
@@ -6021,7 +6371,86 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     mouseScreenPosRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    const rawPoint = getDampenedCoordinate(screenToCanvas(e.clientX - rect.left, e.clientY - rect.top), e);
+    let rawPoint = getDampenedCoordinate(screenToCanvas(e.clientX - rect.left, e.clientY - rect.top), e);
+
+    // TECNIGRAFO HOVER DETECTION (for symbols)
+    if (tecnigrafoOrigin) {
+        const rulerLength = 5000 / view.zoom;
+        const edgeWidth = 6 / view.zoom;
+        const bodyWidth = 32 / view.zoom;
+        const hOffset = 10 / view.zoom;
+
+        const hHit = rawPoint.x >= tecnigrafoOrigin.x - hOffset && rawPoint.x <= tecnigrafoOrigin.x + rulerLength &&
+                     rawPoint.y >= tecnigrafoOrigin.y + edgeWidth && rawPoint.y <= tecnigrafoOrigin.y + bodyWidth;
+        
+        const vHit = rawPoint.x >= tecnigrafoOrigin.x - bodyWidth && rawPoint.x <= tecnigrafoOrigin.x - edgeWidth &&
+                     rawPoint.y >= tecnigrafoOrigin.y - hOffset && rawPoint.y <= tecnigrafoOrigin.y + rulerLength;
+
+        if (hHit || vHit) {
+            if (!hoverMoveTecnigrafo) {
+                setHoverMoveTecnigrafo(true);
+                renderRef.current?.();
+            }
+        } else {
+            if (hoverMoveTecnigrafo) {
+                setHoverMoveTecnigrafo(false);
+                renderRef.current?.();
+            }
+        }
+    }
+
+    if (isMovingTecnigrafo && movingTecnigrafoStartRef.current) {
+        const dx = rawPoint.x - movingTecnigrafoStartRef.current.mouse.x;
+        const dy = rawPoint.y - movingTecnigrafoStartRef.current.mouse.y;
+        setTecnigrafoOrigin({
+            x: movingTecnigrafoStartRef.current.origin.x + dx,
+            y: movingTecnigrafoStartRef.current.origin.y + dy
+        });
+        setLockedFocalPoint({
+            x: movingTecnigrafoStartRef.current.origin.x + dx,
+            y: movingTecnigrafoStartRef.current.origin.y + dy
+        });
+        renderRef.current?.();
+        return;
+    }
+
+    // TECNIGRAFO LOCK (Drafting Machine Effect)
+    let isTecnigrafoBlocked = false;
+    if (tecnigrafoOrigin) {
+        const rawCanvasPos = getDampenedCoordinate(screenToCanvas(e.clientX - rect.left, e.clientY - rect.top), e);
+        
+        if (!tecnigrafoLock) {
+            // Automatic axis detection on first significant movement
+            const dx = Math.abs(rawCanvasPos.x - tecnigrafoOrigin.x);
+            const dy = Math.abs(rawCanvasPos.y - tecnigrafoOrigin.y);
+            if (dx > 4 / view.zoom || dy > 4 / view.zoom) {
+                setTecnigrafoLock(dx > dy ? 'x' : 'y');
+            }
+        }
+
+        const bodyWidth = 32 / view.zoom;
+        const edgeTolerance = 30 / view.zoom;
+        const snapMargin = 0.5 / view.zoom; // Margin to avoid floating point blocking exactly at the edge
+
+        if (tecnigrafoLock === 'x') {
+            // Brown body is below (y > origin.y). White edge is AT origin.y.
+            const dist = Math.abs(rawCanvasPos.y - tecnigrafoOrigin.y);
+            isTecnigrafoBlocked = rawCanvasPos.y > (tecnigrafoOrigin.y + snapMargin) || dist > edgeTolerance;
+            rawPoint = { x: rawCanvasPos.x, y: tecnigrafoOrigin.y };
+        } else if (tecnigrafoLock === 'y') {
+            // Brown body is to the left (x < origin.x). White edge is AT origin.x.
+            const dist = Math.abs(rawCanvasPos.x - tecnigrafoOrigin.x);
+            isTecnigrafoBlocked = rawCanvasPos.x < (tecnigrafoOrigin.x - snapMargin) || dist > edgeTolerance;
+            rawPoint = { x: tecnigrafoOrigin.x, y: rawCanvasPos.y };
+        }
+    }
+
+    if (isTecnigrafoBlocked && activeTool !== 'Eraser') {
+        setHoverSnap(null);
+        renderRef.current?.();
+        return;
+    }
+
     onMouseMovePosition?.(rawPoint);
 
     let isNearEdge = false;
@@ -6532,6 +6961,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   };
 
   const handleMouseUp = (e: React.MouseEvent) => {
+    if (isMovingTecnigrafo) {
+        setIsMovingTecnigrafo(false);
+        movingTecnigrafoStartRef.current = null;
+        return;
+    }
     freehandOrthoAnchorRef.current = null;
     if (activeTool === 'Line' && defaultLineStyle.mode === 'ink' && !orthoMode && drawing && drawing.isFreehand && drawing.freehandPoints && drawing.freehandPoints.length > 2) {
         const pts = drawing.freehandPoints;
@@ -6754,13 +7188,71 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
         const isActive = hardwareCaps || scrollLock || numLock || e.shiftKey;
         setIsJollyActive(isActive);
+        return isActive;
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-        updateJolly(e);
+        const isJollyNow = updateJolly(e);
+        
+        // Frecce per muovere il punto
+        if (activeTool === 'Line' && drawing) {
+            const keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+            if (keys.includes(e.key)) {
+                // Avanzamento: 0.1 se Jolly (decimali), 1 se normale (unità intere)
+                const step = isJollyNow ? 0.1 : 1;
+                let change = { x: 0, y: 0 };
+                if (e.key === 'ArrowRight') change = { x: step, y: 0 };
+                else if (e.key === 'ArrowLeft') change = { x: -step, y: 0 };
+                else if (e.key === 'ArrowDown') change = { x: 0, y: step };
+                else if (e.key === 'ArrowUp') change = { x: 0, y: -step };
+                
+                if (change.x !== 0 || change.y !== 0) {
+                    e.preventDefault();
+                    setDrawing(prev => {
+                        if (!prev) return null;
+                        
+                        // Determina se siamo in modalità orto effettiva
+                        const effectiveOrtho = orthoMode ? !isShiftPressedRef.current : isShiftPressedRef.current;
+                        
+                        let nextX = prev.current.x + change.x;
+                        let nextY = prev.current.y + change.y;
+                        
+                        if (effectiveOrtho) {
+                            // Se orto è attivo, implementiamo il mantenimento della distanza quando si cambia asse
+                            const dxPrevious = prev.current.x - prev.start.x;
+                            const dyPrevious = prev.current.y - prev.start.y;
+                            const dist = Math.sqrt(dxPrevious * dxPrevious + dyPrevious * dyPrevious);
+
+                            if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                                // Se eravamo prevalentemente verticali, saltiamo sulla linea orizzontale mantenendo la distanza
+                                if (Math.abs(dyPrevious) > Math.abs(dxPrevious) && dist > 0) {
+                                    nextX = prev.start.x + (e.key === 'ArrowRight' ? dist : -dist);
+                                }
+                                nextY = prev.start.y;
+                            } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                // Se eravamo prevalentemente orizzontali, saltiamo sulla linea verticale mantenendo la distanza
+                                if (Math.abs(dxPrevious) > Math.abs(dyPrevious) && dist > 0) {
+                                    nextY = prev.start.y + (e.key === 'ArrowDown' ? dist : -dist);
+                                }
+                                nextX = prev.start.x;
+                            }
+                        }
+                        
+                        // NOTA: Abbiamo rimosso Math.round per mantenere la parte decimale esistente come richiesto
+                        
+                        return { ...prev, current: { x: nextX, y: nextY } };
+                    });
+                    return;
+                }
+            }
+        }
+
         if (e.key === 'Escape') {
             setDrawing(null);
             setIsLocked(false);
+            setLockedFocalPoint(null);
+            setTecnigrafoLock(null);
+            setTecnigrafoOrigin(null);
             setHighlightedTrimSegment(null);
             setSelectedParallelLine(null);
             setActiveMoveSnapPoint(null);
@@ -6776,8 +7268,54 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 setSpecchioMode('copy');
                 setShowSpecchioDialog(false);
             }
+        } else if (e.key.toLowerCase() === 'q') {
+            // MAGIC KEY: Activates Drafting Machine (Tecnigrafo)
+            if (!tecnigrafoOrigin) {
+                const origin = activeMoveSnapPoint || hoverSnap?.point || actualMousePosRef.current;
+                setTecnigrafoOrigin({ ...origin });
+                setLockedFocalPoint({ ...origin });
+                setTecnigrafoLock(null); 
+
+                // Automatic setup: Line tool with Ink mode and NO Ortho
+                setActiveTool?.('Line');
+                setDefaultLineStyle(prev => ({ ...prev, mode: 'ink' }));
+                setOrthoMode?.(false);
+            }
         } else if (e.key === 'Enter') {
-            if (activeTool === 'Join') confirmJoin();
+            if (activeTool === 'Join') {
+                confirmJoin();
+            } else if (activeTool === 'Line' && drawing) {
+                e.preventDefault();
+                const finalPoint = drawing.current;
+                const newEntity: Entity = {
+                    id: Date.now().toString(),
+                    type: 'line',
+                    color: defaultLineStyle.color,
+                    lineWidth: defaultLineStyle.lineWidth,
+                    dashed: defaultLineStyle.dashed,
+                    mode: defaultLineStyle.mode,
+                    start: drawing.start,
+                    end: finalPoint,
+                    layer: activeLayerId,
+                };
+                
+                setEntities(prev => {
+                    onCommitHistory?.(prev);
+                    return [...prev, newEntity];
+                });
+                
+                // Start next segment
+                const isFreehandMode = defaultLineStyle.mode === 'ink' && !orthoMode;
+                setDrawing({ 
+                    start: finalPoint, 
+                    current: finalPoint, 
+                    snapType: undefined, 
+                    startSnapped: true,
+                    isVirtual: false,
+                    isFreehand: isFreehandMode,
+                    freehandPoints: isFreehandMode ? [finalPoint] : undefined
+                });
+            }
         } else if (!showManualInput && /^[0-9\.\-]$/.test(e.key)) {
             if ((drawing && !drawing.isFreehand && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle')) ||
                 (activeTool === 'Parallel' && selectedParallelLine)) {
@@ -6788,6 +7326,13 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     
     const handleKeyUp = (e: KeyboardEvent) => {
         updateJolly(e);
+
+        if (e.key.toLowerCase() === 'q') {
+            setTecnigrafoLock(null);
+            setTecnigrafoOrigin(null);
+            setLockedFocalPoint(null);
+            // Tool settings (Tool, Mode, Ortho) are NOT restored, they persist as requested.
+        }
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -6796,7 +7341,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         window.removeEventListener('keydown', handleKeyDown);
         window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [activeTool, dragEntityIds, entities, drawing, selectedParallelLine, showManualInput]);
+  }, [activeTool, dragEntityIds, entities, drawing, selectedParallelLine, showManualInput, orthoMode, setOrthoMode, tecnigrafoOrigin, lockedFocalPoint, activeMoveSnapPoint, hoverSnap, tecnigrafoLock, specchioMode, specchioSelectedIds, defaultLineStyle, setDefaultLineStyle, setActiveTool]);
 
     const moveLineParallel = (line: LineEntity, length: number, rawPoint: Point) => {
         const dxLine = line.end.x - line.start.x;
@@ -7094,6 +7639,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const scissorsSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="5" cy="7.5" r="3" stroke="#64748b" stroke-width="1.5"/><circle cx="5" cy="16.5" r="3" stroke="#64748b" stroke-width="1.5"/><path d="M7.5 9L12 12L22 9" stroke="#64748b" stroke-width="1.5" stroke-linecap="round"/><path d="M7.5 15L12 12L22 15" stroke="#64748b" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="12" r="1.2" fill="#475569"/></svg>`);
   
   const pencilSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M0,0 L3,1 L1,3 Z" fill="#1e293b"/><path d="M3,1 L7,3 L3,7 L1,3 Z" fill="#fed7aa"/><path d="M7,3 L21,17 L17,21 L3,7 Z" fill="#4f46e5"/><path d="M7,3 L21,17 L19,19 L5,5 Z" fill="#6366f1"/><path d="M21,17 L24,20 L20,24 L17,21 Z" fill="#94a3b8"/><path d="M24,20 L28,24 L24,28 L20,24 Z" fill="#fda4af"/></svg>`);
+  const kinaSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M0,0 L4,2 L2,4 Z" fill="#000000"/><path d="M4,2 L8,4 L4,8 L2,4 Z" fill="#94a3b8"/><path d="M8,4 L22,18 L18,22 L4,8 Z" fill="#334155"/><path d="M22,18 L26,22 L22,26 L18,22 Z" fill="#1e293b"/><rect x="22" y="22" width="6" height="6" fill="#1e293b" transform="rotate(45 25 25)"/></svg>`);
 
   const crosshairSvg = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg width="96" height="96" viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg"><line x1="0" y1="48" x2="96" y2="48" stroke="rgba(255,40,40,0.85)" stroke-width="1.5"/><line x1="48" y1="0" x2="48" y2="96" stroke="rgba(255,40,40,0.85)" stroke-width="1.5"/><circle cx="48" cy="48" r="4" fill="transparent" stroke="rgba(0,0,0,0.6)" stroke-width="1"/></svg>`);
 
@@ -7145,7 +7691,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     <div 
       ref={containerRef} 
       className="w-full h-full relative" 
-      style={{ cursor: dragTavolaId ? 'grabbing' : hoverTavolaEdge ? 'grab' : activeTool === 'Testo' ? 'text' : (activeTool === 'Eraser' || (activeTool === 'Parallel' && selectedParallelLine)) ? 'none' : activeTool === 'Trim' ? `url("${scissorsSvg}") 16 16, crosshair` : defaultLineStyle.mode === 'ink' ? `url("${pencilSvg}") 0 0, crosshair` : rulerStyle === 'crosshair' ? `url("${crosshairSvg}") 48 48, crosshair` : `url("${tecnigrafoSvg}") 20 108, crosshair` }}
+      style={{ cursor: isMovingTecnigrafo ? 'grabbing' : hoverMoveTecnigrafo ? 'grab' : dragTavolaId ? 'grabbing' : hoverTavolaEdge ? 'grab' : activeTool === 'Testo' ? 'text' : (activeTool === 'Eraser' || (activeTool === 'Parallel' && selectedParallelLine)) ? 'none' : activeTool === 'Trim' ? `url("${scissorsSvg}") 16 16, crosshair` : (tecnigrafoOrigin && defaultLineStyle.mode === 'ink') ? `url("${kinaSvg}") 0 0, crosshair` : (tecnigrafoOrigin && defaultLineStyle.mode === 'pencil') ? `url("${pencilSvg}") 0 0, crosshair` : defaultLineStyle.mode === 'ink' ? `url("${kinaSvg}") 0 0, crosshair` : defaultLineStyle.mode === 'pencil' ? `url("${pencilSvg}") 0 0, crosshair` : rulerStyle === 'crosshair' ? `url("${crosshairSvg}") 48 48, crosshair` : `url("${tecnigrafoSvg}") 20 108, crosshair` }}
       onWheel={handleWheel} 
       onMouseDown={handleMouseDown} 
       onMouseMove={handleMouseMove} 
@@ -7161,7 +7707,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           onPointerDown={onHelpPointerDown}
           onPointerMove={onHelpPointerMove}
           onPointerUp={onHelpPointerUp}
-          className="absolute z-50 bg-zinc-900/90 text-white border border-neutral-700 backdrop-blur-sm rounded-xl shadow-2xl flex flex-col pointer-events-auto cursor-move select-none animate-fade-in"
+          className="absolute z-50 bg-zinc-950/95 text-white border border-neutral-700 rounded-xl shadow-2xl flex flex-col pointer-events-auto cursor-move select-none animate-fade-in"
           style={{ 
               top: 20, 
               left: '50%',
@@ -7184,7 +7730,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
       {textDialog && (
         <div 
-          className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in"
+          className="fixed inset-0 bg-black/5 flex items-center justify-center z-50 animate-fade-in"
           onClick={() => setTextDialog(null)}
         >
           <div 
@@ -7340,7 +7886,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         </div>
       )}
 
-      {/* {showManualInput && (
+            {showManualInput && (
           <ManualInputOverlay
               type={activeTool === "Parallel" ? "parallel" : (activeTool.toLowerCase() as any)}
               drawing={drawing || undefined}
@@ -7363,7 +7909,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
               }}
               position={bubblePosition}
           />
-      )} */}
+      )}
     </div>
   );
 });

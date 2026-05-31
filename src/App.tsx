@@ -900,6 +900,7 @@ export default function App() {
             setEraserRadius={setEraserRadius}
             rulerStyle={rulerStyle}
             orthoMode={orthoMode}
+            setOrthoMode={setOrthoMode}
             tavole={tavole}
             onUpdateTavole={setTavole}
             onDoubleClickTavola={setDoubleClickedTavolaId}
@@ -2164,7 +2165,7 @@ export default function App() {
 
       {/* DWG Proprietary File Instructions Modal */}
       {showDwgModal && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 select-none animate-fade-in" onClick={() => setShowDwgModal(false)}>
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 select-none animate-fade-in" onClick={() => setShowDwgModal(false)}>
           <div className="bg-slate-950 border border-slate-800 p-6 rounded-xl shadow-2xl max-w-sm w-full relative" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
               <h3 className="text-xs font-black uppercase text-red-400 tracking-wider font-mono flex items-center gap-2">

@@ -261,7 +261,7 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
         return (
             <div 
                 style={{ position: 'absolute', left: screenPos.x + 10, top: screenPos.y + 10 }}
-                className="bg-slate-500/40 backdrop-blur-md border border-slate-400/50 text-white p-2 rounded text-sm flex flex-col gap-1 pointer-events-none z-50"
+                className="bg-slate-800/90 border border-slate-400/50 text-white p-2 rounded text-sm flex flex-col gap-1 pointer-events-none z-50"
             >
                 {type === 'line' && (
                     <>
@@ -291,7 +291,7 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
             onWheel={e => e.stopPropagation()}
         >
             <form 
-                className="bg-slate-900/60 backdrop-blur-xl text-white p-3 rounded-lg shadow-[0_10px_40px_rgba(0,0,0,0.6)] flex flex-col gap-3 min-w-[200px] border border-emerald-500/40 pointer-events-auto text-xs"
+                className="bg-slate-900/95 text-white p-3 rounded-lg shadow-[0_10px_40px_rgba(0,0,0,0.6)] flex flex-col gap-3 min-w-[200px] border border-emerald-500/40 pointer-events-auto text-xs"
                 onSubmit={handleSubmit}
                 onKeyDown={handleKeyDown}
             >
