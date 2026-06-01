@@ -1557,6 +1557,7 @@ export default function App() {
                   onCommitHistory={commitToHistory}
                   selectedId={selectedId}
                   onSelect={setSelectedId}
+                  cadCanvasRef={cadCanvasRef}
                 />
               ) : activeSidebarTab === "maschere" ? (
                 <div className="space-y-6">

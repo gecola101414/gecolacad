@@ -23,6 +23,7 @@ interface BIMWorkspacePanelProps {
   onCommitHistory?: (entities: Entity[]) => void;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  cadCanvasRef?: React.RefObject<any>;
 }
 
 // Shoelace formula helper
@@ -58,7 +59,8 @@ export function BIMWorkspacePanel({
   setEntities,
   onCommitHistory,
   selectedId,
-  onSelect
+  onSelect,
+  cadCanvasRef
 }: BIMWorkspacePanelProps) {
   const [customRoomName, setCustomRoomName] = useState<string>("");
 
@@ -213,6 +215,25 @@ export function BIMWorkspacePanel({
         <p className="text-[11px] leading-relaxed text-slate-300">
           Proietta il disegno CAD verso il Building Information Modeling. Rileva aree, calcola battiscopa intelligenti, infissi e genera esportazioni metriche automatiche.
         </p>
+      </div>
+
+      {/* Scansione Automatica Solver */}
+      <div className="bg-cyan-50 border border-cyan-200 p-4 rounded-xl shadow-sm space-y-2.5">
+        <span className="text-[10px] font-black uppercase tracking-wider text-cyan-800 block font-mono">
+          Scansione Automatica ⚡
+        </span>
+        <p className="text-[10.5px] leading-relaxed text-slate-600">
+          Rileva all-in-one l'intera planimetria per identificare automaticamente <strong>tutte le stanze</strong>, le <strong>porte</strong> e le <strong>finestre</strong> basandosi esclusivamente sul disegno geometrico!
+        </p>
+        <button
+          onClick={() => {
+            cadCanvasRef?.current?.autoScanBIM();
+          }}
+          className="w-full bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-700 hover:to-cyan-600 text-white font-bold py-2.5 px-4 rounded-lg text-xs flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all active:scale-[0.98]"
+        >
+          <Sparkles size={14} className="animate-pulse" />
+          Avvia Scansione Geometrica 🤖
+        </button>
       </div>
 
       {/* 1. BIM DRAFTING TOOLS */}
