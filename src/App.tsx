@@ -1479,11 +1479,16 @@ export default function App() {
           });
         })()}
 
-          {/* Subtle watermark overlay for licensing & authenticity */}
-          <div className="absolute bottom-4 left-4 bg-white/70 backdrop-blur-sm border border-neutral-300/60 px-3 py-1.5 rounded shadow-sm text-[10px] text-neutral-600 font-mono pointer-events-none select-none flex flex-col z-10">
-            <span className="font-sans font-black text-neutral-800 tracking-wider">GECOLA CAD v1.4</span>
-            <span className="text-[9px]">Diritti riservati a Gimondo Ing. Domenico -</span>
-            <span className="text-[9px]">AETERNA@2026</span>
+
+
+          {/* Minimalist centered transparent watermark */}
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex flex-col items-center justify-center pointer-events-none select-none text-center z-10 opacity-35 hover:opacity-75 transition-opacity duration-300">
+            <span className="text-[9.5px] font-sans tracking-wider text-neutral-600 font-medium">
+              Copyright © 2026 Domenico Gimondo
+            </span>
+            <span className="text-[8.5px] font-mono tracking-[0.3em] text-neutral-500 font-bold mt-0.5 uppercase">
+              AETERNA
+            </span>
           </div>
         </main>
 
