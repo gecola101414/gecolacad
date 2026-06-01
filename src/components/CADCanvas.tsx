@@ -16,6 +16,7 @@ export interface CADCanvasAPI {
     originalLine1: any,
     originalLine2: any
   ) => void;
+  autoScanBIM: () => void;
 }
 
 export type DrawingState = {
@@ -1281,6 +1282,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   useEffect(() => { dragTavolaIdRef.current = dragTavolaId; }, [dragTavolaId]);
 
   const [hoveredTavolaPart, setHoveredTavolaPart] = useState<{ id: string; part: 'cartiglio' | 'badge' } | null>(null);
+  const [manualRoomPoints, setManualRoomPoints] = useState<Point[]>([]);
 
   const getHoveredTavolaPart = (rawPoint: Point): { id: string; part: 'cartiglio' | 'badge' } | null => {
     if (!tavole) return null;
@@ -1727,6 +1729,261 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       originalLine2: any
     ) => {
       applyRaccordo(id1, id2, clickPt1, clickPt2, existingRaccordoId, config, { originalLine1, originalLine2 });
+    },
+    autoScanBIM: () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const width = canvas.width;
+      const height = canvas.height;
+
+      // --- 1. AUTOMATIC ROOM DETECTION ---
+      // We sample a 28x28 grid of points across the canvas.
+      const gridCols = 28;
+      const gridRows = 28;
+      const stepX = Math.max(8, Math.round(width / gridCols));
+      const stepY = Math.max(8, Math.round(height / gridRows));
+
+      const detectedPolygons: Point[][] = [];
+
+      // Helpers for centroid and area
+      const getCentroid = (pts: Point[]): Point => {
+        let cx = 0, cy = 0;
+        pts.forEach(p => { cx += p.x; cy += p.y; });
+        return { x: cx / pts.length, y: cy / pts.length };
+      };
+
+      const getArea = (pts: Point[]): number => {
+        let area = 0;
+        const len = pts.length;
+        for (let i = 0; i < len; i++) {
+          const p1 = pts[i];
+          const p2 = pts[(i + 1) % len];
+          area += p1.x * p2.y - p2.x * p1.y;
+        }
+        return Math.abs(area) / 2;
+      };
+
+      // Loop through our screen search grid
+      for (let c = 1; c < gridCols; c++) {
+        for (let r = 1; r < gridRows; r++) {
+          const x = c * stepX;
+          const y = r * stepY;
+          const screenPt = { x, y };
+
+          const poly = findBoundaryPolygon(screenPt, entities, view, width, height, screenToCanvas, layers);
+          if (poly && poly.length > 2) {
+            const centroid = getCentroid(poly);
+            const area = getArea(poly);
+            const areaMq = area / 10000;
+
+            // Rooms usually are between 1.0 mq and 150.0 mq
+            if (areaMq < 1.0 || areaMq > 150) continue;
+
+            // Check if duplicate of an existing detected polygon
+            let isDuplicate = false;
+            for (const existing of detectedPolygons) {
+              const exCentroid = getCentroid(existing);
+              const dist = Math.sqrt((centroid.x - exCentroid.x)**2 + (centroid.y - exCentroid.y)**2);
+              const exArea = getArea(existing);
+              const areaDiff = Math.abs(area - exArea) / exArea;
+
+              // If centroid is extremely close or area is almost identical, it's the exact same Room!
+              if (dist < 15 || (dist < 35 && areaDiff < 0.12)) {
+                isDuplicate = true;
+                break;
+              }
+            }
+
+            if (!isDuplicate) {
+              detectedPolygons.push(poly);
+            }
+          }
+        }
+      }
+
+      // Prepare new room entities
+      const newRoomEntities: Entity[] = [];
+      let cntCamera = 1;
+      let cntBagno = 1;
+      let cntCucina = 1;
+      let cntSoggiorno = 1;
+      let cntStudio = 1;
+      let cntDisimpegno = 1;
+
+      detectedPolygons.forEach((poly) => {
+        const areaMq = getArea(poly) / 10000;
+        
+        let label = "Locale";
+        if (areaMq >= 1.0 && areaMq < 5.0) {
+          label = `Bagno ${cntBagno++}`;
+        } else if (areaMq >= 5.0 && areaMq < 9.0) {
+          label = `Corridoio ${cntDisimpegno++}`;
+        } else if (areaMq >= 9.0 && areaMq < 12.0) {
+          label = `Cucina ${cntCucina++}`;
+        } else if (areaMq >= 12.0 && areaMq < 18.0) {
+          label = `Camera Letto ${cntCamera++}`;
+        } else if (areaMq >= 18.0) {
+          label = `Salone Soggiorno ${cntSoggiorno++}`;
+        } else {
+          label = `Studio ${cntStudio++}`;
+        }
+
+        const id = "bim-room-" + Math.random().toString(36).substring(2, 11);
+        const newRoom: Entity = {
+          id,
+          type: 'hatch',
+          isBIM: true,
+          bimType: 'room',
+          bimName: label,
+          bimHeight: 2.70,
+          color: 'rgba(52, 211, 153, 0.15)',
+          points: poly,
+          pattern: 'SOLID',
+          scale: 1,
+          angle: 0,
+          lineWidth: 1,
+          mode: 'pencil',
+          layer: activeLayerId
+        } as any;
+
+        newRoomEntities.push(newRoom);
+      });
+
+      // --- 2. AUTOMATIC DOOR DETECTION ---
+      // We search for arc entities that represent door swings
+      const newDoorEntities: Entity[] = [];
+      entities.forEach((ent) => {
+        if (ent.type === 'arc') {
+          const radius = ent.radius;
+          // Standard door leaves are between 55cm and 115cm wide
+          if (radius >= 55 && radius <= 115) {
+            // Found a candidate swing! We can define a BIM door
+            const startAngleRad = (ent.startAngle || 0) * Math.PI / 180;
+            
+            // Hinge position (arc center)
+            const hinge = ent.center;
+            
+            // Door leaf tip position
+            const tipPoint = {
+              x: ent.center.x + radius * Math.cos(startAngleRad),
+              y: ent.center.y + radius * Math.sin(startAngleRad)
+            };
+
+            const id = "bim-door-" + Math.random().toString(36).substring(2, 11);
+            const doorWidth = Math.round(radius);
+            const newDoor: Entity = {
+              id,
+              type: 'line',
+              isBIM: true,
+              bimType: 'door',
+              bimName: `Porta ${doorWidth}`,
+              bimWidth: doorWidth,
+              start: hinge,
+              end: tipPoint,
+              color: '#dc2626',
+              lineWidth: 2,
+              mode: 'pencil',
+              layer: activeLayerId
+            } as any;
+
+            newDoorEntities.push(newDoor);
+          }
+        }
+      });
+
+      // --- 3. AUTOMATIC WINDOW DETECTION ---
+      // We look for parallel, collinear line segments that are very close (representing window components)
+      const newWindowEntities: Entity[] = [];
+      const lines = entities.filter(e => e.type === 'line' && !e.isBIM) as LineEntity[];
+      
+      const matchedLineIds = new Set<string>();
+
+      for (let i = 0; i < lines.length; i++) {
+        if (matchedLineIds.has(lines[i].id)) continue;
+        const l1 = lines[i];
+        
+        const dx1 = l1.end.x - l1.start.x;
+        const dy1 = l1.end.y - l1.start.y;
+        const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+        if (len1 < 60 || len1 > 225) continue; // Typical windows size limit 60-220cm
+
+        const normX1 = dx1 / len1;
+        const normY1 = dy1 / len1;
+
+        for (let j = i + 1; j < lines.length; j++) {
+          if (matchedLineIds.has(lines[j].id)) continue;
+          const l2 = lines[j];
+
+          const dx2 = l2.end.x - l2.start.x;
+          const dy2 = l2.end.y - l2.start.y;
+          const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+
+          // Must have roughly similar lengths (within 15%)
+          if (Math.abs(len1 - len2) > len1 * 0.15) continue;
+
+          const normX2 = dx2 / len2;
+          const normY2 = dy2 / len2;
+
+          // Check parallel (dot product close to ±1)
+          const dot = Math.abs(normX1 * normX2 + normY1 * normY2);
+          if (dot < 0.98) continue;
+
+          // Compute perpendicular distance between parallel lines
+          const px = l2.start.x - l1.start.x;
+          const py = l2.start.y - l1.start.y;
+          // Projection onto perpendicular normal
+          const normalX = -normY1;
+          const normalY = normX1;
+          const perpDist = Math.abs(px * normalX + py * normalY);
+
+          // Standard wall thickness in CAD is between 5cm and 35cm
+          if (perpDist >= 5 && perpDist <= 32) {
+            matchedLineIds.add(l1.id);
+            matchedLineIds.add(l2.id);
+
+            // Compute middle segment
+            const midStart = {
+              x: (l1.start.x + l2.start.x) / 2,
+              y: (l1.start.y + l2.start.y) / 2
+            };
+            const midEnd = {
+              x: (l1.end.x + l2.end.x) / 2,
+              y: (l1.end.y + l2.end.y) / 2
+            };
+
+            const windowLen = Math.round(Math.sqrt((midEnd.x - midStart.x)**2 + (midEnd.y - midStart.y)**2));
+            const id = "bim-window-" + Math.random().toString(36).substring(2, 11);
+            const newWindow: Entity = {
+              id,
+              type: 'line',
+              isBIM: true,
+              bimType: 'window',
+              bimName: `Finestra ${windowLen}x140`,
+              bimWidth: windowLen,
+              bimWindowHeight: 140,
+              start: midStart,
+              end: midEnd,
+              color: '#2563eb',
+              lineWidth: 2,
+              mode: 'pencil',
+              layer: activeLayerId
+            } as any;
+
+            newWindowEntities.push(newWindow);
+            break; // found its parallel line counterpart
+          }
+        }
+      }
+
+      // Merge and update entities
+      setEntities(prev => {
+        // Remove old BIM entities before saving new ones so we do not pile up duplicates on consecutive scans
+        const filtered = prev.filter(e => !e.isBIM);
+        const next = [...filtered, ...newRoomEntities, ...newDoorEntities, ...newWindowEntities];
+        onCommitHistory?.(next);
+        return next;
+      });
     }
   }));
 
@@ -3054,6 +3311,96 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           }
       }
 
+      // --- BIM LIVE PREVIEWS (STARTS) ---
+      if (activeTool === 'BIM_DisegnaStanza' && manualRoomPoints.length > 0) {
+        ctx.save();
+        ctx.strokeStyle = '#10b981';
+        ctx.lineWidth = 1.5 / view.zoom;
+        ctx.fillStyle = 'rgba(16, 185, 129, 0.08)';
+        ctx.beginPath();
+        ctx.moveTo(manualRoomPoints[0].x, manualRoomPoints[0].y);
+        for (let i = 1; i < manualRoomPoints.length; i++) {
+          ctx.lineTo(manualRoomPoints[i].x, manualRoomPoints[i].y);
+        }
+        // Draw to current mouse pos
+        ctx.lineTo(actualMousePosRef.current.x, actualMousePosRef.current.y);
+        ctx.stroke();
+        ctx.fill();
+
+        // Draw circles at corners
+        manualRoomPoints.forEach(p => {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 4 / view.zoom, 0, Math.PI * 2);
+          ctx.fillStyle = '#10b981';
+          ctx.fill();
+        });
+        ctx.restore();
+      }
+
+      if (drawing && (activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra')) {
+        ctx.save();
+        const start = drawing.start;
+        const end = actualMousePosRef.current;
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const len = Math.sqrt(dx * dx + dy * dy);
+
+        if (activeTool === 'BIM_Porta' && len > 0.1) {
+          ctx.strokeStyle = '#dc2626';
+          ctx.lineWidth = 2 / view.zoom;
+          
+          const px = -dy / len;
+          const py = dx / len;
+          const leafEnd = { x: start.x + px * len, y: start.y + py * len };
+
+          // Leaf line
+          ctx.beginPath();
+          ctx.moveTo(start.x, start.y);
+          ctx.lineTo(leafEnd.x, leafEnd.y);
+          ctx.stroke();
+
+          // Swing arc
+          ctx.strokeStyle = 'rgba(220, 38, 38, 0.4)';
+          ctx.lineWidth = 1 / view.zoom;
+          ctx.beginPath();
+          const baseAngle = Math.atan2(end.y - start.y, end.x - start.x);
+          const leafAngle = Math.atan2(leafEnd.y - start.y, leafEnd.x - start.x);
+          ctx.arc(start.x, start.y, len, baseAngle, leafAngle, false);
+          ctx.stroke();
+
+          // Standard opening line
+          ctx.strokeStyle = '#9ca3af';
+          ctx.setLineDash([4/view.zoom, 4/view.zoom]);
+          ctx.beginPath();
+          ctx.moveTo(start.x, start.y);
+          ctx.lineTo(end.x, end.y);
+          ctx.stroke();
+        }
+
+        if (activeTool === 'BIM_Finestra' && len > 0.1) {
+          const nx = -dy / len;
+          const ny = dx / len;
+          const wWidth = 10;
+          ctx.strokeStyle = '#2563eb';
+          ctx.lineWidth = 1.5 / view.zoom;
+          
+          ctx.beginPath();
+          ctx.moveTo(start.x, start.y);
+          ctx.lineTo(end.x, end.y);
+          ctx.moveTo(start.x + nx * wWidth / 2, start.y + ny * wWidth / 2);
+          ctx.lineTo(end.x + nx * wWidth / 2, end.y + ny * wWidth / 2);
+          ctx.moveTo(start.x - nx * wWidth / 2, start.y - ny * wWidth / 2);
+          ctx.lineTo(end.x - nx * wWidth / 2, end.y - ny * wWidth / 2);
+          ctx.moveTo(start.x - nx * wWidth / 2, start.y - ny * wWidth / 2);
+          ctx.lineTo(start.x + nx * wWidth / 2, start.y + ny * wWidth / 2);
+          ctx.moveTo(end.x - nx * wWidth / 2, end.y - ny * wWidth / 2);
+          ctx.lineTo(end.x + nx * wWidth / 2, end.y + ny * wWidth / 2);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      // --- BIM LIVE PREVIEWS (ENDS) ---
+
       // Draw current drawing preview
       if (drawing && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle' || activeTool === 'Arc')) {
         let isKnownAngle = false;
@@ -3622,6 +3969,189 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           ctx.restore();
         });
       }
+
+      // --- BIM OVERLAY RENDERING PASS (STARTS) ---
+      entities.forEach(entity => {
+        if (!entity.isBIM) return;
+
+        // Draw Room
+        if (entity.bimType === 'room') {
+          const roomPoints = (entity as any).bimPoints || (entity as any).points;
+          if (roomPoints && roomPoints.length > 2) {
+            ctx.save();
+            // Solid transparent fill
+            ctx.fillStyle = entity.color || 'rgba(16, 185, 129, 0.12)';
+            ctx.beginPath();
+            ctx.moveTo(roomPoints[0].x, roomPoints[0].y);
+            for (let i = 1; i < roomPoints.length; i++) {
+              ctx.lineTo(roomPoints[i].x, roomPoints[i].y);
+            }
+            ctx.closePath();
+            ctx.fill();
+
+            // Outline
+            ctx.strokeStyle = 'rgba(16, 185, 129, 0.6)';
+            ctx.lineWidth = 1.5 / view.zoom;
+            ctx.stroke();
+
+            // Calculate Centroid (average points)
+            let cx = 0, cy = 0;
+            roomPoints.forEach((p: Point) => {
+              cx += p.x;
+              cy += p.y;
+            });
+            cx /= roomPoints.length;
+            cy /= roomPoints.length;
+
+            // Compute Area using shoelace formula
+            let area = 0;
+            const len = roomPoints.length;
+            for (let i = 0; i < len; i++) {
+              const p1 = roomPoints[i];
+              const p2 = roomPoints[(i + 1) % len];
+              area += p1.x * p2.y - p2.x * p1.y;
+            }
+            area = Math.abs(area) / 2;
+
+            const areaMq = area / 10000;
+            const perimeterM = roomPoints.reduce((acc: number, p: Point, idx: number) => {
+              const nextP = roomPoints[(idx + 1) % len];
+              const dist = Math.sqrt((nextP.x - p.x)**2 + (nextP.y - p.y)**2);
+              return acc + dist;
+            }, 0) / 100; // Assuming 1 unit = 1 cm
+
+            const textSz = Math.max(8, Math.min(13, 11 / view.zoom));
+            const padding = 6 / view.zoom;
+
+            ctx.font = `bold ${textSz}px sans-serif`;
+            const nameLabel = `${entity.bimName || 'Stanza'}`;
+            const areaLabel = `${areaMq.toFixed(2)} mq`;
+            const perimeterLabel = `P: ${perimeterM.toFixed(2)} m`;
+            const volLabel = entity.bimHeight ? `V: ${(areaMq * entity.bimHeight).toFixed(1)} mc` : '';
+
+            const nameW = ctx.measureText(nameLabel).width;
+            const areaW = ctx.measureText(areaLabel).width;
+            const perW = ctx.measureText(perimeterLabel).width;
+            const maxW = Math.max(nameW, areaW, perW);
+            
+            const lineCount = entity.bimHeight ? 4 : 3;
+            const boxH = lineCount * textSz + 2 * padding;
+            const boxW = maxW + 2 * padding;
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.strokeStyle = '#10b981';
+            ctx.lineWidth = 1 / view.zoom;
+            
+            ctx.fillRect(cx - boxW/2, cy - boxH/2, boxW, boxH);
+            ctx.strokeRect(cx - boxW/2, cy - boxH/2, boxW, boxH);
+
+            ctx.fillStyle = '#065f46';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            
+            ctx.fillText(nameLabel, cx, cy - boxH/2 + padding);
+            ctx.fillStyle = '#111827';
+            ctx.font = `${textSz * 0.9}px sans-serif`;
+            ctx.fillText(areaLabel, cx, cy - boxH/2 + padding + textSz * 1.1);
+            ctx.fillStyle = '#4b5563';
+            ctx.fillText(perimeterLabel, cx, cy - boxH/2 + padding + textSz * 2.1);
+            if (entity.bimHeight) {
+              ctx.fillText(volLabel, cx, cy - boxH/2 + padding + textSz * 3.1);
+            }
+            ctx.restore();
+          }
+        }
+
+        // Draw Door
+        if (entity.bimType === 'door') {
+          const start = (entity as any).start;
+          const end = (entity as any).end;
+          if (start && end) {
+            ctx.save();
+            ctx.strokeStyle = '#9ca3af';
+            ctx.lineWidth = 1 / view.zoom;
+            ctx.setLineDash([4 / view.zoom, 4 / view.zoom]);
+            ctx.beginPath();
+            ctx.moveTo(start.x, start.y);
+            ctx.lineTo(end.x, end.y);
+            ctx.stroke();
+
+            const dx = end.x - start.x;
+            const dy = end.y - start.y;
+            const len = Math.sqrt(dx * dx + dy * dy);
+            const px = -dy / len;
+            const py = dx / len;
+
+            const doorWidth = len;
+            const leafEnd = {
+              x: start.x + px * doorWidth,
+              y: start.y + py * doorWidth
+            };
+
+            ctx.setLineDash([]);
+            ctx.strokeStyle = '#dc2626';
+            ctx.lineWidth = 2 / view.zoom;
+            ctx.beginPath();
+            ctx.moveTo(start.x, start.y);
+            ctx.lineTo(leafEnd.x, leafEnd.y);
+            ctx.stroke();
+
+            ctx.strokeStyle = 'rgba(220, 38, 38, 0.4)';
+            ctx.lineWidth = 1 / view.zoom;
+            ctx.beginPath();
+            const baseAngle = Math.atan2(end.y - start.y, end.x - start.x);
+            const leafAngle = Math.atan2(leafEnd.y - start.y, leafEnd.x - start.x);
+            ctx.arc(start.x, start.y, doorWidth, baseAngle, leafAngle, false);
+            ctx.stroke();
+
+            ctx.fillStyle = '#dc2626';
+            ctx.font = `bold ${9 / view.zoom}px sans-serif`;
+            ctx.textBaseline = 'middle';
+            ctx.textAlign = 'center';
+            ctx.fillText(`P. ${entity.bimWidth || Math.round(len)}`, (start.x + end.x)/2 + px * 10 / view.zoom, (start.y + end.y)/2 + py * 10 / view.zoom);
+            ctx.restore();
+          }
+        }
+
+        // Draw Window
+        if (entity.bimType === 'window') {
+          const start = (entity as any).start;
+          const end = (entity as any).end;
+          if (start && end) {
+            ctx.save();
+            const dx = end.x - start.x;
+            const dy = end.y - start.y;
+            const len = Math.sqrt(dx * dx + dy * dy);
+            const nx = len > 0 ? -dy / len : 0;
+            const ny = len > 0 ? dx / len : 0;
+            const wWidth = 10;
+
+            ctx.strokeStyle = '#2563eb';
+            ctx.lineWidth = 1.5 / view.zoom;
+            ctx.beginPath();
+            ctx.moveTo(start.x, start.y);
+            ctx.lineTo(end.x, end.y);
+            ctx.moveTo(start.x + nx * wWidth/2, start.y + ny * wWidth/2);
+            ctx.lineTo(end.x + nx * wWidth/2, end.y + ny * wWidth/2);
+            ctx.moveTo(start.x - nx * wWidth/2, start.y - ny * wWidth/2);
+            ctx.lineTo(end.x - nx * wWidth/2, end.y - ny * wWidth/2);
+            ctx.moveTo(start.x - nx * wWidth/2, start.y - ny * wWidth/2);
+            ctx.lineTo(start.x + nx * wWidth/2, start.y + ny * wWidth/2);
+            ctx.moveTo(end.x - nx * wWidth/2, end.y - ny * wWidth/2);
+            ctx.lineTo(end.x + nx * wWidth/2, end.y + ny * wWidth/2);
+            ctx.stroke();
+
+            ctx.fillStyle = '#2563eb';
+            ctx.font = `bold ${9 / view.zoom}px sans-serif`;
+            ctx.textBaseline = 'middle';
+            ctx.textAlign = 'center';
+            const hText = entity.bimWindowHeight ? `x${entity.bimWindowHeight}` : '';
+            ctx.fillText(`F. ${entity.bimWidth || Math.round(len)}${hText}`, (start.x + end.x)/2 + nx * 12 / view.zoom, (start.y + end.y)/2 + ny * 12 / view.zoom);
+            ctx.restore();
+          }
+        }
+      });
+      // --- BIM OVERLAY RENDERING PASS (ENDS) ---
 
       ctx.restore();
       
@@ -5960,6 +6490,95 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 onSelect(newHatch.id);
             }
         }
+    } else if (activeTool === 'BIM_RilevaStanza') {
+        const poly = findBoundaryPolygon(screenPos, entities, view, rect.width, rect.height, screenToCanvas, layers);
+        if (poly && poly.length > 2) {
+            const nextIdx = entities.filter(e => e.isBIM && e.bimType === 'room').length + 1;
+            const newRoom: Entity = {
+                id: Date.now().toString(),
+                type: 'hatch',
+                isBIM: true,
+                bimType: 'room',
+                bimName: 'Stanza ' + nextIdx,
+                bimHeight: 2.70,
+                color: 'rgba(52, 211, 153, 0.15)',
+                points: poly,
+                pattern: 'SOLID',
+                scale: 1,
+                angle: 0,
+                lineWidth: 1,
+                mode: 'pencil',
+                layer: activeLayerId
+            } as any;
+            setEntities(prev => {
+                const next = [...prev, newRoom];
+                onCommitHistory?.(next);
+                return next;
+            });
+            onSelect(newRoom.id);
+        }
+    } else if (activeTool === 'BIM_DisegnaStanza') {
+        const clickedPoint = snapped.point;
+        if (manualRoomPoints.length > 2) {
+            const firstPt = manualRoomPoints[0];
+            const distToStart = Math.sqrt((clickedPoint.x - firstPt.x)**2 + (clickedPoint.y - firstPt.y)**2);
+            if (distToStart < 15 / view.zoom) {
+                const nextIdx = entities.filter(e => e.isBIM && e.bimType === 'room').length + 1;
+                const newRoom: Entity = {
+                    id: Date.now().toString(),
+                    type: 'hatch',
+                    isBIM: true,
+                    bimType: 'room',
+                    bimName: 'Stanza ' + nextIdx,
+                    bimHeight: 2.70,
+                    color: 'rgba(52, 211, 153, 0.15)',
+                    points: [...manualRoomPoints],
+                    pattern: 'SOLID',
+                    scale: 1,
+                    angle: 0,
+                    lineWidth: 1,
+                    mode: 'pencil',
+                    layer: activeLayerId
+                } as any;
+                setEntities(prev => {
+                    const next = [...prev, newRoom];
+                    onCommitHistory?.(next);
+                    return next;
+                });
+                onSelect(newRoom.id);
+                setManualRoomPoints([]);
+                return;
+            }
+        }
+        setManualRoomPoints(prev => [...prev, clickedPoint]);
+    } else if (activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra') {
+        if (!drawing) {
+            setDrawing({ start: snapped.point, current: snapped.point });
+        } else {
+            const doorWidth = Math.round(Math.sqrt((snapped.point.x - drawing.start.x)**2 + (snapped.point.y - drawing.start.y)**2));
+            const isDoor = activeTool === 'BIM_Porta';
+            const newElem: Entity = {
+                id: Date.now().toString(),
+                type: 'line',
+                isBIM: true,
+                bimType: isDoor ? 'door' : 'window',
+                bimName: isDoor ? `Porta ${doorWidth}` : `Finestra ${doorWidth}x140`,
+                bimWidth: doorWidth,
+                bimWindowHeight: isDoor ? undefined : 140,
+                start: drawing.start,
+                end: snapped.point,
+                color: isDoor ? '#dc2626' : '#2563eb',
+                lineWidth: 2,
+                mode: 'pencil',
+                layer: activeLayerId
+            } as any;
+            setEntities(prev => {
+                const next = [...prev, newElem];
+                onCommitHistory?.(next);
+                return next;
+            });
+            setDrawing(null);
+        }
     } else if (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle' || activeTool === 'Point' || activeTool === 'Arc' || activeTool === 'Testo') {
       const wasLocked = isLocked;
       setIsLocked(false);
@@ -7585,6 +8204,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
         if (e.key === 'Escape') {
             setDrawing(null);
+            setManualRoomPoints([]);
             setIsLocked(false);
             setLockedFocalPoint(null);
             setTecnigrafoLock(null);

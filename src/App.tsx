@@ -13,6 +13,7 @@ import { DimensionStyleDialog } from "./components/DimensionStyleDialog";
 import { RaccordoDialog } from "./components/RaccordoDialog";
 import { DXFTextReaderDialog } from "./components/DXFTextReaderDialog";
 import { TemplatePreview } from "./components/TemplatePreview";
+import { BIMWorkspacePanel } from "./components/BIMWorkspacePanel";
 import { TEMPLATES } from './data/templates';
 import { GUIDE_DATABASE, GuideItem } from './data/guides';
 import { Entity, Point, Layer, Measurement, Tavola } from "./types";
@@ -54,7 +55,8 @@ import {
   BookOpen,
   Grid,
   ExternalLink,
-  X
+  X,
+  Building
 } from "lucide-react";
 
 const ParallelIcon = ({ size = 16 }: { size?: number }) => (
@@ -187,7 +189,7 @@ export default function App() {
     { id: "tav4", name: "Tavola n. 4", format: "A1", scale: 500, unit: "cm", position: { x: 40, y: 30 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 4", autore: "Ing. Domenico Gimondo", data: "2026" } },
     { id: "tav5", name: "Tavola n. 5", format: "A0", scale: 1000, unit: "cm", position: { x: 0, y: 0 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 5", autore: "Ing. Domenico Gimondo", data: "2026" } },
   ]);
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere' | 'testo' | 'gemini' | 'manuale'>('penne');
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere' | 'testo' | 'gemini' | 'manuale' | 'bim'>('penne');
   const [hoveredGuide, setHoveredGuide] = useState<GuideItem | null>(null);
   const [guideLockedBy, setGuideLockedBy] = useState<string | null>(null);
   const [showFloatingManual, setShowFloatingManual] = useState(false);
@@ -841,6 +843,22 @@ export default function App() {
         >
           <Sparkles size={16} className={showProperties && activeSidebarTab === 'gemini' ? "text-amber-500 animate-pulse" : "text-amber-500"} />
           <span className="text-[10px]">Gemini AI</span>
+        </button>
+        <button
+          onClick={() => {
+            handleGuideClick('BIM');
+            if (activeSidebarTab === 'bim' && showProperties) {
+              setShowProperties(false);
+            } else {
+              setActiveSidebarTab('bim');
+              setShowProperties(true);
+            }
+          }}
+          onMouseEnter={() => handleGuideHover('BIM')}
+          className={`px-4 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 ${showProperties && activeSidebarTab === 'bim' ? "bg-cyan-50 text-cyan-800 font-bold border-x border-cyan-200" : "hover:bg-neutral-200 text-neutral-600"}`}
+        >
+          <Building size={16} className={showProperties && activeSidebarTab === 'bim' ? "text-cyan-600 animate-pulse" : "text-cyan-600"} />
+          <span className="text-[10px] font-bold">BIM</span>
         </button>
         <div className="flex-1"></div>
         <button
@@ -1518,6 +1536,7 @@ export default function App() {
                   : activeSidebarTab === "maschere" ? "Archivio Maschere" 
                   : activeSidebarTab === "testo" ? "Impostazioni Testo"
                   : activeSidebarTab === "gemini" ? "Disegno Gemini AI"
+                  : activeSidebarTab === "bim" ? "Tecnologia BIM / I.A."
                   : "Mazzo Penne & Stili"}
               </span>
               <button 
@@ -1529,7 +1548,17 @@ export default function App() {
             </h3>
 
             <div className="space-y-4 flex-1">
-              {activeSidebarTab === "maschere" ? (
+              {activeSidebarTab === "bim" ? (
+                <BIMWorkspacePanel
+                  entities={entities}
+                  selectedTool={selectedTool}
+                  setSelectedTool={setSelectedTool}
+                  setEntities={setEntities}
+                  onCommitHistory={commitToHistory}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                />
+              ) : activeSidebarTab === "maschere" ? (
                 <div className="space-y-6">
                   <div className="bg-amber-100/50 border border-amber-200 p-3 rounded-lg shadow-sm">
                     <p className="text-[10px] text-amber-800 leading-relaxed font-serif italic">
