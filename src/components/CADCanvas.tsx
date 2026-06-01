@@ -1280,6 +1280,42 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const dragTavolaIdRef = useRef<string | null>(null);
   useEffect(() => { dragTavolaIdRef.current = dragTavolaId; }, [dragTavolaId]);
 
+  const [hoveredTavolaPart, setHoveredTavolaPart] = useState<{ id: string; part: 'cartiglio' | 'badge' } | null>(null);
+
+  const getHoveredTavolaPart = (rawPoint: Point): { id: string; part: 'cartiglio' | 'badge' } | null => {
+    if (!tavole) return null;
+    for (const tav of tavole) {
+      if (!tav.visible) continue;
+      const { w, h } = getTavolaDimensions(tav);
+
+      // Cartiglio check
+      let mFactor = 5;
+      let scaleFactor = 1000;
+      if (tav.unit === 'cm') scaleFactor = 10;
+      if (tav.unit === 'mm') scaleFactor = 1;
+      const marginOffset = mFactor * (tav.scale / scaleFactor);
+
+      const cartiglioW = 120 * (tav.scale / scaleFactor);
+      const cartiglioH = 40 * (tav.scale / scaleFactor);
+      const cartX = tav.position.x + w - marginOffset - cartiglioW;
+      const cartY = tav.position.y + h - marginOffset - cartiglioH;
+
+      if (rawPoint.x >= cartX && rawPoint.x <= cartX + cartiglioW &&
+          rawPoint.y >= cartY && rawPoint.y <= cartY + cartiglioH) {
+        return { id: tav.id, part: 'cartiglio' };
+      }
+
+      // Badge check
+      const badgeH = 18 / view.zoom;
+      const badgeW = 120 / view.zoom;
+      if (rawPoint.x >= tav.position.x && rawPoint.x <= tav.position.x + badgeW &&
+          rawPoint.y >= tav.position.y - badgeH && rawPoint.y <= tav.position.y) {
+        return { id: tav.id, part: 'badge' };
+      }
+    }
+    return null;
+  };
+
   const [helpPanelOffset, setHelpPanelOffset] = useState<{x: number, y: number} | null>(null);
   const helpDragRef = useRef<{startX: number, startY: number, initialOffset: {x: number, y: number}}>({startX: 0, startY: 0, initialOffset: {x: 0, y: 0}});
   const [isHelpDragging, setIsHelpDragging] = useState(false);
@@ -5273,6 +5309,13 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             return;
         }
     }
+
+    if (e.button === 0 && hoveredTavolaPart && onDoubleClickTavola) {
+        onDoubleClickTavola(hoveredTavolaPart.id);
+        setDrawing(null);
+        return;
+    }
+
     if (onActionStart) onActionStart();
     
     if (e.button === 0) { 
@@ -6580,6 +6623,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     }
     mouseScreenPosRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
     let rawPoint = getDampenedCoordinate(screenToCanvas(e.clientX - rect.left, e.clientY - rect.top), e);
+
+    const currentHoverPart = getHoveredTavolaPart(rawPoint);
+    if (currentHoverPart?.id !== hoveredTavolaPart?.id || currentHoverPart?.part !== hoveredTavolaPart?.part) {
+      setHoveredTavolaPart(currentHoverPart);
+    }
 
     // TECNIGRAFO HOVER DETECTION (for symbols)
     if (tecnigrafoOrigin) {
@@ -7921,7 +7969,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     <div 
       ref={containerRef} 
       className="w-full h-full relative" 
-      style={{ cursor: isMovingTecnigrafo ? 'grabbing' : hoverMoveTecnigrafo ? 'grab' : dragTavolaId ? 'grabbing' : hoverTavolaEdge ? 'grab' : activeTool === 'Testo' ? 'text' : (activeTool === 'Eraser' || (activeTool === 'Parallel' && selectedParallelLine)) ? 'none' : activeTool === 'Trim' ? `url("${scissorsSvg}") 16 16, crosshair` : (tecnigrafoOrigin && defaultLineStyle.mode === 'ink') ? `url("${kinaSvg}") 0 0, crosshair` : (tecnigrafoOrigin && defaultLineStyle.mode === 'pencil') ? `url("${pencilSvg}") 0 0, crosshair` : defaultLineStyle.mode === 'ink' ? `url("${kinaSvg}") 0 0, crosshair` : defaultLineStyle.mode === 'pencil' ? `url("${pencilSvg}") 0 0, crosshair` : rulerStyle === 'crosshair' ? `url("${crosshairSvg}") 48 48, crosshair` : `url("${tecnigrafoSvg}") 20 108, crosshair` }}
+      style={{ cursor: hoveredTavolaPart ? 'pointer' : isMovingTecnigrafo ? 'grabbing' : hoverMoveTecnigrafo ? 'grab' : dragTavolaId ? 'grabbing' : hoverTavolaEdge ? 'grab' : activeTool === 'Testo' ? 'text' : (activeTool === 'Eraser' || (activeTool === 'Parallel' && selectedParallelLine)) ? 'none' : activeTool === 'Trim' ? `url("${scissorsSvg}") 16 16, crosshair` : (tecnigrafoOrigin && defaultLineStyle.mode === 'ink') ? `url("${kinaSvg}") 0 0, crosshair` : (tecnigrafoOrigin && defaultLineStyle.mode === 'pencil') ? `url("${pencilSvg}") 0 0, crosshair` : defaultLineStyle.mode === 'ink' ? `url("${kinaSvg}") 0 0, crosshair` : defaultLineStyle.mode === 'pencil' ? `url("${pencilSvg}") 0 0, crosshair` : rulerStyle === 'crosshair' ? `url("${crosshairSvg}") 48 48, crosshair` : `url("${tecnigrafoSvg}") 20 108, crosshair` }}
       onWheel={handleWheel} 
       onMouseDown={handleMouseDown} 
       onMouseMove={handleMouseMove} 
@@ -7929,6 +7977,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       onContextMenu={handleContextMenu}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
+      onMouseLeave={() => setHoveredTavolaPart(null)}
     >
       <canvas ref={canvasRef} />
       {isZoomActive && (
