@@ -18,6 +18,7 @@ export interface CADEntity {
   dashed?: boolean;
   mode: 'ink' | 'pencil';
   groupId?: string;
+  templateId?: string;
   opacity?: number;
   raccordoMetadata?: {
     id1: string;

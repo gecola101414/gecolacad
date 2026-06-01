@@ -12,7 +12,10 @@ import {
   Home,
   Menu,
   Check,
-  FileText
+  FileText,
+  Repeat,
+  RotateCw,
+  Copy as CopyIcon
 } from "lucide-react";
 
 interface BIMWorkspacePanelProps {
@@ -106,7 +109,26 @@ export function BIMWorkspacePanel({
     const updateFunc = (prev: Entity[]) => {
       const next = prev.map(e => {
         if (e.id === selectedId) {
-          return { ...e, [field]: value } as Entity;
+          let updated = { ...e, [field]: value } as any;
+          
+          // If width is updated for a door/window, update its line geometry too
+          if (field === 'bimWidth' && (e.bimType === 'door' || e.bimType === 'window')) {
+            const start = (e as any).start;
+            const end = (e as any).end;
+            if (start && end) {
+               const dx = end.x - start.x;
+               const dy = end.y - start.y;
+               const currentLen = Math.sqrt(dx * dx + dy * dy);
+               if (currentLen > 0.01) {
+                  const newLen = value;
+                  updated.end = {
+                    x: start.x + (dx / currentLen) * newLen,
+                    y: start.y + (dy / currentLen) * newLen
+                  };
+               }
+            }
+          }
+          return updated;
         }
         return e;
       });
@@ -397,35 +419,87 @@ export function BIMWorkspacePanel({
 
             {/* BIM WIDTH (Doors / Windows) */}
             {(selectedEntity.bimType === 'door' || selectedEntity.bimType === 'window') && (
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-0.5 font-bold">
-                    Larghezza Spatola (cm)
-                  </label>
-                  <input
-                    type="number"
-                    min="30"
-                    max="400"
-                    value={(selectedEntity as any).bimWidth || 80}
-                    onChange={(e) => updateSelectedBIMField("bimWidth", parseInt(e.target.value) || 80)}
-                    className="w-full border rounded px-1.5 py-1 text-xs bg-white"
-                  />
-                </div>
-                {selectedEntity.bimType === 'window' && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-[10px] text-slate-500 block mb-0.5 font-bold">
-                      Altezza Infisso (cm)
+                      Larghezza Spatola (cm)
                     </label>
                     <input
                       type="number"
                       min="30"
-                      max="300"
-                      value={(selectedEntity as any).bimWindowHeight || 140}
-                      onChange={(e) => updateSelectedBIMField("bimWindowHeight", parseInt(e.target.value) || 140)}
+                      max="400"
+                      value={(selectedEntity as any).bimWidth || 80}
+                      onChange={(e) => updateSelectedBIMField("bimWidth", parseInt(e.target.value) || 80)}
                       className="w-full border rounded px-1.5 py-1 text-xs bg-white"
                     />
                   </div>
-                )}
+                  {selectedEntity.bimType === 'window' && (
+                    <div>
+                      <label className="text-[10px] text-slate-500 block mb-0.5 font-bold">
+                        Altezza Infisso (cm)
+                      </label>
+                      <input
+                        type="number"
+                        min="30"
+                        max="300"
+                        value={(selectedEntity as any).bimWindowHeight || 140}
+                        onChange={(e) => updateSelectedBIMField("bimWindowHeight", parseInt(e.target.value) || 140)}
+                        className="w-full border rounded px-1.5 py-1 text-xs bg-white"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => updateSelectedBIMField("bimFlip", !(selectedEntity as any).bimFlip)}
+                    className="flex-1 flex items-center justify-center gap-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-[10px] font-bold py-1.5 rounded-lg shadow-sm transition-all active:scale-[0.98]"
+                  >
+                    <Repeat size={12} className="text-cyan-600" />
+                    Inverti Swing
+                  </button>
+                  <button
+                    onClick={() => {
+                        // Rotation 90 degrees
+                        const start = (selectedEntity as any).start;
+                        const end = (selectedEntity as any).end;
+                        if (start && end) {
+                            const dx = end.x - start.x;
+                            const dy = end.y - start.y;
+                            // Rotate 90 CW: (x, y) -> (-y, x)
+                            const newEnd = {
+                                x: start.x - dy,
+                                y: start.y + dx
+                            };
+                            updateSelectedBIMField("end", newEnd);
+                        }
+                    }}
+                    className="flex-1 flex items-center justify-center gap-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-[10px] font-bold py-1.5 rounded-lg shadow-sm transition-all active:scale-[0.98]"
+                  >
+                    <RotateCw size={12} className="text-cyan-600" />
+                    Ruota 90°
+                  </button>
+                </div>
+
+                <button
+                    onClick={() => {
+                        const width = (selectedEntity as any).bimWidth || 80;
+                        const height = (selectedEntity as any).bimWindowHeight || (selectedEntity.bimType === 'door' ? 210 : 140);
+                        cadCanvasRef?.current?.setBIMDefaults(width, height, selectedEntity.bimType);
+                        // Visual feedback
+                        const btn = (document.activeElement as HTMLElement);
+                        if (btn) {
+                            const original = btn.innerHTML;
+                            btn.innerHTML = `<span class="flex items-center gap-1 text-emerald-600">Parametri Copiati!</span>`;
+                            setTimeout(() => btn.innerHTML = original, 1500);
+                        }
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 bg-cyan-600 text-white hover:bg-cyan-700 text-[10px] font-bold py-2 rounded-lg shadow-md transition-all active:scale-[0.98]"
+                >
+                    <CopyIcon size={12} />
+                    Copia parametri come oggetto
+                </button>
               </div>
             )}
           </div>

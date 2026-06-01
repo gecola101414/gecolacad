@@ -17,6 +17,7 @@ export interface CADCanvasAPI {
     originalLine2: any
   ) => void;
   autoScanBIM: () => void;
+  setBIMDefaults: (width: number, height: number | undefined, type: 'door' | 'window') => void;
 }
 
 export type DrawingState = {
@@ -864,15 +865,31 @@ const findBoundaryPolygon = (
   oCtx.scale(view.zoom, view.zoom);
 
   oCtx.strokeStyle = '#000000';
-  oCtx.lineWidth = 1.2 / view.zoom;
+  oCtx.lineWidth = Math.max(3.0, 3.5 / view.zoom);
   oCtx.lineJoin = 'round';
   oCtx.lineCap = 'round';
 
   entities.forEach(ent => {
     const layer = layers.find(l => l.id === ent.layer);
     if (layer && (!layer.visible || layer.frozen)) return;
-    if (ent.type === 'dimension' || ent.type === 'text' || ent.type === 'point' || ent.type === 'hatch') {
+    // Exclude annotations, dimensions, hatches, and any furniture templates/BIM blocks
+    // so that rooms are scanned purely on architectural structural lines (walls)
+    if (
+      ent.type === 'dimension' ||
+      ent.type === 'text' ||
+      ent.type === 'point' ||
+      ent.type === 'hatch' ||
+      ent.groupId ||
+      ent.templateId
+    ) {
       return;
+    }
+
+    if (ent.isBIM) {
+      // Allow doors and windows to seal the boundary envelope, but exclude rooms or other annotations
+      if (ent.bimType !== 'door' && ent.bimType !== 'window') {
+        return;
+      }
     }
 
     oCtx.beginPath();
@@ -984,7 +1001,7 @@ const findBoundaryPolygon = (
   if (rawContour.length < 3) return null;
 
   const downsampled: Point[] = [];
-  const step = Math.max(1, Math.floor(rawContour.length / 600));
+  const step = Math.max(1, Math.floor(rawContour.length / 1000));
   for (let i = 0; i < rawContour.length; i += step) {
     downsampled.push(rawContour[i]);
   }
@@ -992,7 +1009,7 @@ const findBoundaryPolygon = (
     downsampled.push(downsampled[0]);
   }
 
-  const simplifiedScreen = simplifyPolygon(downsampled, 0.8);
+  const simplifiedScreen = simplifyPolygon(downsampled, 0.05);
   if (simplifiedScreen.length > 1) {
     const p1 = simplifiedScreen[0];
     const pE = simplifiedScreen[simplifiedScreen.length - 1];
@@ -1005,10 +1022,161 @@ const findBoundaryPolygon = (
   const expandedScreen = expandPolygon(simplifiedScreen, 1.2);
   const canvasPoints = expandedScreen.map(pt => screenToCanvas(pt.x, pt.y));
 
-  return canvasPoints;
+  // Snap the detected polygon vertices to the exact CAD geometry features for precise areas (e.g., 25.00 mq)
+  const snappedPoints = snapPolygonToGeometry(canvasPoints, entities, layers);
+  const cleanedPoints = cleanSnappedPolygon(snappedPoints);
+
+  return cleanedPoints;
 };
 
-const getIntersection = (a: Point, b: Point, c: Point, d: Point): Point | null => {
+function snapPolygonToGeometry(polyPoints: Point[], entities: Entity[], layers: Layer[]): Point[] {
+  if (polyPoints.length < 3) return polyPoints;
+
+  const landmarks: Point[] = [];
+  
+  // Exclude BIM elements, hatches, texts, and dimensions since they are not physical wall lines
+  const physicalEntities = entities.filter(ent => {
+    if (ent.isBIM || ent.type === 'hatch' || ent.type === 'text' || ent.type === 'dimension') return false;
+    const layer = layers.find(l => l.id === ent.layer);
+    return !(layer && (!layer.visible || layer.frozen));
+  });
+
+  physicalEntities.forEach(ent => {
+    if (ent.type === 'line') {
+      landmarks.push(ent.start);
+      landmarks.push(ent.end);
+      landmarks.push({ x: (ent.start.x + ent.end.x) / 2, y: (ent.start.y + ent.end.y) / 2 });
+    } else if (ent.type === 'rectangle') {
+      const p1 = ent.p1;
+      const p2 = ent.p2;
+      landmarks.push({ x: p1.x, y: p1.y });
+      landmarks.push({ x: p2.x, y: p1.y });
+      landmarks.push({ x: p2.x, y: p2.y });
+      landmarks.push({ x: p1.x, y: p2.y });
+    } else if (ent.type === 'circle') {
+      landmarks.push(ent.center);
+    } else if (ent.type === 'arc') {
+      landmarks.push(ent.center);
+      const startRad = (ent.startAngle || 0) * Math.PI / 180;
+      const endRad = (ent.endAngle || 0) * Math.PI / 180;
+      landmarks.push({
+        x: ent.center.x + ent.radius * Math.cos(startRad),
+        y: ent.center.y + ent.radius * Math.sin(startRad)
+      });
+      landmarks.push({
+        x: ent.center.x + ent.radius * Math.cos(endRad),
+        y: ent.center.y + ent.radius * Math.sin(endRad)
+      });
+    }
+  });
+
+  // Calculate intersections of visible architectural wall lines to snap exactly to corners
+  for (let i = 0; i < physicalEntities.length; i++) {
+    for (let j = i + 1; j < physicalEntities.length; j++) {
+      const ent1 = physicalEntities[i];
+      const ent2 = physicalEntities[j];
+      if (ent1.type === 'line' && ent2.type === 'line') {
+        const sect = getIntersection(ent1.start, ent1.end, ent2.start, ent2.end);
+        if (sect) {
+          landmarks.push(sect);
+        }
+      }
+    }
+  }
+
+  // Deduplicate landmarks
+  const uniqueLandmarks: Point[] = [];
+  const seenLandmarks = new Set<string>();
+  landmarks.forEach(p => {
+    const key = `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+    if (!seenLandmarks.has(key)) {
+      seenLandmarks.add(key);
+      uniqueLandmarks.push(p);
+    }
+  });
+
+  // Snapping tolerance (e.g., 35 cm in real units / centimeters)
+  const snapTolerance = 35;
+
+  return polyPoints.map(p => {
+    let closestPt = p;
+    let minDist = Infinity;
+
+    for (const lm of uniqueLandmarks) {
+      const dist = Math.sqrt((p.x - lm.x) ** 2 + (p.y - lm.y) ** 2);
+      if (dist < minDist) {
+        minDist = dist;
+        closestPt = lm;
+      }
+    }
+
+    if (minDist <= snapTolerance) {
+      return { x: closestPt.x, y: closestPt.y };
+    }
+
+    // Fallback: project onto nearest line segment to align with wall surfaces
+    let closestProjPt = p;
+    let minProjDist = Infinity;
+
+    physicalEntities.forEach(ent => {
+      if (ent.type === 'line') {
+        const s = ent.start;
+        const e = ent.end;
+        const l2 = (e.x - s.x) ** 2 + (e.y - s.y) ** 2;
+        if (l2 > 0) {
+          let t = ((p.x - s.x) * (e.x - s.x) + (p.y - s.y) * (e.y - s.y)) / l2;
+          t = Math.max(0, Math.min(1, t));
+          const proj = {
+            x: s.x + t * (e.x - s.x),
+            y: s.y + t * (e.y - s.y)
+          };
+          const dist = Math.sqrt((p.x - proj.x) ** 2 + (p.y - proj.y) ** 2);
+          if (dist < minProjDist) {
+            minProjDist = dist;
+            closestProjPt = proj;
+          }
+        }
+      }
+    });
+
+    if (minProjDist <= snapTolerance) {
+      return { x: closestProjPt.x, y: closestProjPt.y };
+    }
+
+    // Default to nearest 5cm if completely floating to keep clean integer dimensions!
+    return {
+      x: Math.round(p.x / 5) * 5,
+      y: Math.round(p.y / 5) * 5
+    };
+  });
+}
+
+function cleanSnappedPolygon(points: Point[]): Point[] {
+  const cleaned: Point[] = [];
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    if (cleaned.length === 0) {
+      cleaned.push(p);
+    } else {
+      const prev = cleaned[cleaned.length - 1];
+      const dist = Math.sqrt((p.x - prev.x) ** 2 + (p.y - prev.y) ** 2);
+      if (dist > 0.05) {
+        cleaned.push(p);
+      }
+    }
+  }
+  if (cleaned.length > 2) {
+    const first = cleaned[0];
+    const last = cleaned[cleaned.length - 1];
+    const dist = Math.sqrt((first.x - last.x) ** 2 + (first.y - last.y) ** 2);
+    if (dist < 0.05) {
+      cleaned.pop();
+    }
+  }
+  return cleaned;
+}
+
+function getIntersection(a: Point, b: Point, c: Point, d: Point): Point | null {
     const denom = (b.x - a.x) * (d.y - c.y) - (b.y - a.y) * (d.x - c.x);
     if (Math.abs(denom) < 1e-10) return null; // Parallel
 
@@ -1451,7 +1619,13 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const [positioningDimId, setPositioningDimId] = useState<string | null>(null);
   const [positioningGroupId, setPositioningGroupId] = useState<string | null>(null);
   const [positioningGroupStartPos, setPositioningGroupStartPos] = useState<Point | null>(null);
+  const [positioningEntityId, setPositioningEntityId] = useState<string | null>(null);
+  const [positioningEntityStartPos, setPositioningEntityStartPos] = useState<Point | null>(null);
   const [showManualInput, setShowManualInput] = useState(false);
+  const [lastDoorWidth, setLastDoorWidth] = useState(() => parseFloat(localStorage.getItem('lastDoorWidth') || '80'));
+  const [lastDoorHeight, setLastDoorHeight] = useState(() => parseFloat(localStorage.getItem('lastDoorHeight') || '210'));
+  const [lastWindowWidth, setLastWindowWidth] = useState(() => parseFloat(localStorage.getItem('lastWindowWidth') || '120'));
+  const [lastWindowHeight, setLastWindowHeight] = useState(() => parseFloat(localStorage.getItem('lastWindowHeight') || '140'));
   const [bubblePosition, setBubblePosition] = useState<Point | null>(null);
 
   interface TextDialogState {
@@ -1730,6 +1904,23 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     ) => {
       applyRaccordo(id1, id2, clickPt1, clickPt2, existingRaccordoId, config, { originalLine1, originalLine2 });
     },
+    setBIMDefaults: (width: number, height: number | undefined, type: 'door' | 'window') => {
+      if (type === 'door') {
+        setLastDoorWidth(width);
+        if (height !== undefined) {
+          setLastDoorHeight(height);
+          localStorage.setItem('lastDoorHeight', height.toString());
+        }
+        localStorage.setItem('lastDoorWidth', width.toString());
+      } else {
+        setLastWindowWidth(width);
+        if (height !== undefined) {
+          setLastWindowHeight(height);
+          localStorage.setItem('lastWindowHeight', height.toString());
+        }
+        localStorage.setItem('lastWindowWidth', width.toString());
+      }
+    },
     autoScanBIM: () => {
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -1738,9 +1929,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       const height = canvas.height;
 
       // --- 1. AUTOMATIC ROOM DETECTION ---
-      // We sample a 28x28 grid of points across the canvas.
-      const gridCols = 28;
-      const gridRows = 28;
+      // We sample a 40x40 grid of points across the canvas.
+      const gridCols = 40;
+      const gridRows = 40;
       const stepX = Math.max(8, Math.round(width / gridCols));
       const stepY = Math.max(8, Math.round(height / gridRows));
 
@@ -1802,6 +1993,54 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
       }
 
+      // Group placed template entities to locate furniture inside each room partition
+      const groupEntitiesMap = new Map<string, Entity[]>();
+      entities.forEach(ent => {
+        if (ent.groupId) {
+          if (!groupEntitiesMap.has(ent.groupId)) {
+            groupEntitiesMap.set(ent.groupId, []);
+          }
+          groupEntitiesMap.get(ent.groupId)!.push(ent);
+        }
+      });
+
+      const groupCentroids: { groupId: string; templateId: string; center: Point }[] = [];
+      groupEntitiesMap.forEach((gEnts, gId) => {
+        let templateId = "";
+        for (const ent of gEnts) {
+          if (ent.templateId) {
+            templateId = ent.templateId;
+            break;
+          }
+        }
+
+        // Estimate a centroid for this placed block/furniture group
+        let sumX = 0, sumY = 0, count = 0;
+        gEnts.forEach(ent => {
+          if (ent.type === 'line') {
+            sumX += ent.start.x + ent.end.x;
+            sumY += ent.start.y + ent.end.y;
+            count += 2;
+          } else if (ent.type === 'circle' || ent.type === 'arc') {
+            sumX += ent.center.x;
+            sumY += ent.center.y;
+            count += 1;
+          } else if (ent.type === 'rectangle') {
+            sumX += ent.p1.x + ent.p2.x;
+            sumY += ent.p1.y + ent.p2.y;
+            count += 2;
+          }
+        });
+
+        if (count > 0 && templateId) {
+          groupCentroids.push({
+            groupId: gId,
+            templateId,
+            center: { x: sumX / count, y: sumY / count }
+          });
+        }
+      });
+
       // Prepare new room entities
       const newRoomEntities: Entity[] = [];
       let cntCamera = 1;
@@ -1814,19 +2053,130 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       detectedPolygons.forEach((poly) => {
         const areaMq = getArea(poly) / 10000;
         
+        // Count templates located inside this boundary
+        const furnitureInside = groupCentroids.filter(gc => isPointInPolygon(gc.center, poly));
+
+        // Skip tiny "fictional" spaces (like window recesses, framing artifacts, door swings)
+        // that do not contain any physical furniture or fixtures
+        if (areaMq < 3.0 && furnitureInside.length === 0) {
+          return;
+        }
+
+        // Also check bounding box of the polygon to reject long, narrow sills/recesses
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        poly.forEach(pt => {
+          if (pt.x < minX) minX = pt.x;
+          if (pt.x > maxX) maxX = pt.x;
+          if (pt.y < minY) minY = pt.y;
+          if (pt.y > maxY) maxY = pt.y;
+        });
+        const widthCm = maxX - minX;
+        const heightCm = maxY - minY;
+        const minDimension = Math.min(widthCm, heightCm);
+        if (minDimension < 75 && furnitureInside.length === 0) {
+          return; // Skip window sills/recesses or corridor slivers with zero furniture
+        }
+
+        let doubleBedCount = 0;
+        let singleBedCount = 0;
+        let toiletCount = 0;
+        let bidetCount = 0;
+        let showerBathCount = 0;
+        let lavaboCount = 0;
+        let deskCount = 0;
+        let tableCount = 0;
+        let sofaCount = 0;
+        let cooktopCount = 0;
+        let sinkCount = 0;
+
+        furnitureInside.forEach(gc => {
+          const tid = gc.templateId;
+          if (tid === 'bed_double_hq') {
+            doubleBedCount++;
+          } else if (tid === 'bed_single_hq') {
+            singleBedCount++;
+          } else if (tid === 'wc_hq') {
+            toiletCount++;
+          } else if (tid === 'bidet_hq') {
+            bidetCount++;
+          } else if (tid === 'vasca_hq' || tid === 'doccia_hq') {
+            showerBathCount++;
+          } else if (tid === 'lavabo_hq') {
+            lavaboCount++;
+          } else if (tid === 'scrivania_hq') {
+            deskCount++;
+          } else if (tid === 'tavolo_4_hq' || tid === 'tavolo_tondo_4_hq' || tid === 'tavolo_6_hq' || tid === 'tavolo_8_hq') {
+            tableCount++;
+          } else if (tid === 'divano_2_hq' || tid === 'divano_3_hq' || tid === 'divano_ang_hq' || tid === 'poltrona_hq') {
+            sofaCount++;
+          } else if (tid === 'piano_cottura_hq') {
+            cooktopCount++;
+          } else if (tid === 'lavello_cucina_hq') {
+            sinkCount++;
+          }
+        });
+
         let label = "Locale";
-        if (areaMq >= 1.0 && areaMq < 5.0) {
+
+        const hasKitchen = cooktopCount > 0 || sinkCount > 0;
+        const hasLivingOrDining = sofaCount > 0 || tableCount > 0;
+        const hasBathroomFixtures = toiletCount > 0 || bidetCount > 0 || showerBathCount > 0 || (lavaboCount > 0 && furnitureInside.length <= 3);
+
+        // 1. BAGNO detection (toilet, bidet, shower, or bath)
+        if (hasBathroomFixtures) {
           label = `Bagno ${cntBagno++}`;
-        } else if (areaMq >= 5.0 && areaMq < 9.0) {
-          label = `Corridoio ${cntDisimpegno++}`;
-        } else if (areaMq >= 9.0 && areaMq < 12.0) {
+        }
+        // 2. CUCINA SOGGIORNO / CORNER KITCHEN (stove/hob AND sofa/table)
+        else if (hasKitchen && hasLivingOrDining) {
+          label = `Cucina Soggiorno ${cntCucina++}`;
+        }
+        // 3. CUCINA (cooking space only)
+        else if (hasKitchen) {
           label = `Cucina ${cntCucina++}`;
-        } else if (areaMq >= 12.0 && areaMq < 18.0) {
-          label = `Camera Letto ${cntCamera++}`;
-        } else if (areaMq >= 18.0) {
-          label = `Salone Soggiorno ${cntSoggiorno++}`;
-        } else {
+        }
+        // 4. CAMERA DA LETTO classification based on quantity and types of beds
+        else if (doubleBedCount > 0 || singleBedCount > 0) {
+          if (doubleBedCount > 0 && singleBedCount > 0) {
+            label = `Camera Matrimoniale con lettino ${cntCamera++}`;
+          } else if (doubleBedCount > 0) {
+            label = `Camera Matrimoniale ${cntCamera++}`;
+          } else if (singleBedCount === 1) {
+            label = `Camera Singola ${cntCamera++}`;
+          } else if (singleBedCount >= 2) {
+            label = `Camera Doppia ${cntCamera++}`;
+          } else {
+            label = `Camera Letto ${cntCamera++}`;
+          }
+        }
+        // 5. SOGGIORNO / SALONE (sofas, large tables)
+        else if (hasLivingOrDining) {
+          if (sofaCount > 0 && tableCount > 0) {
+            label = `Salone Soggiorno ${cntSoggiorno++}`;
+          } else if (sofaCount > 0) {
+            label = `Soggiorno ${cntSoggiorno++}`;
+          } else {
+            label = `Soggiorno / Pranzo ${cntSoggiorno++}`;
+          }
+        }
+        // 6. STUDIO (desk setups)
+        else if (deskCount > 0) {
           label = `Studio ${cntStudio++}`;
+        }
+        // 7. AREA-BASED FALLBACK (if no furniture is matched)
+        else {
+          if (areaMq >= 1.0 && areaMq < 5.0) {
+            label = `Disimpegno / Ripostiglio ${cntDisimpegno++}`;
+          } else if (areaMq >= 5.0 && areaMq < 9.0) {
+            label = `Corridoio ${cntDisimpegno++}`;
+          } else if (areaMq >= 9.0 && areaMq < 13.0) {
+            label = `Cucina ${cntCucina++}`;
+          } else if (areaMq >= 13.0 && areaMq < 18.0) {
+            label = `Camera Letto ${cntCamera++}`;
+          } else if (areaMq >= 18.0) {
+            label = `Soggiorno ${cntSoggiorno++}`;
+          } else {
+            label = `Studio ${cntStudio++}`;
+          }
         }
 
         const id = "bim-room-" + Math.random().toString(36).substring(2, 11);
@@ -1850,137 +2200,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         newRoomEntities.push(newRoom);
       });
 
-      // --- 2. AUTOMATIC DOOR DETECTION ---
-      // We search for arc entities that represent door swings
-      const newDoorEntities: Entity[] = [];
-      entities.forEach((ent) => {
-        if (ent.type === 'arc') {
-          const radius = ent.radius;
-          // Standard door leaves are between 55cm and 115cm wide
-          if (radius >= 55 && radius <= 115) {
-            // Found a candidate swing! We can define a BIM door
-            const startAngleRad = (ent.startAngle || 0) * Math.PI / 180;
-            
-            // Hinge position (arc center)
-            const hinge = ent.center;
-            
-            // Door leaf tip position
-            const tipPoint = {
-              x: ent.center.x + radius * Math.cos(startAngleRad),
-              y: ent.center.y + radius * Math.sin(startAngleRad)
-            };
-
-            const id = "bim-door-" + Math.random().toString(36).substring(2, 11);
-            const doorWidth = Math.round(radius);
-            const newDoor: Entity = {
-              id,
-              type: 'line',
-              isBIM: true,
-              bimType: 'door',
-              bimName: `Porta ${doorWidth}`,
-              bimWidth: doorWidth,
-              start: hinge,
-              end: tipPoint,
-              color: '#dc2626',
-              lineWidth: 2,
-              mode: 'pencil',
-              layer: activeLayerId
-            } as any;
-
-            newDoorEntities.push(newDoor);
-          }
-        }
-      });
-
-      // --- 3. AUTOMATIC WINDOW DETECTION ---
-      // We look for parallel, collinear line segments that are very close (representing window components)
-      const newWindowEntities: Entity[] = [];
-      const lines = entities.filter(e => e.type === 'line' && !e.isBIM) as LineEntity[];
-      
-      const matchedLineIds = new Set<string>();
-
-      for (let i = 0; i < lines.length; i++) {
-        if (matchedLineIds.has(lines[i].id)) continue;
-        const l1 = lines[i];
-        
-        const dx1 = l1.end.x - l1.start.x;
-        const dy1 = l1.end.y - l1.start.y;
-        const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
-        if (len1 < 60 || len1 > 225) continue; // Typical windows size limit 60-220cm
-
-        const normX1 = dx1 / len1;
-        const normY1 = dy1 / len1;
-
-        for (let j = i + 1; j < lines.length; j++) {
-          if (matchedLineIds.has(lines[j].id)) continue;
-          const l2 = lines[j];
-
-          const dx2 = l2.end.x - l2.start.x;
-          const dy2 = l2.end.y - l2.start.y;
-          const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
-
-          // Must have roughly similar lengths (within 15%)
-          if (Math.abs(len1 - len2) > len1 * 0.15) continue;
-
-          const normX2 = dx2 / len2;
-          const normY2 = dy2 / len2;
-
-          // Check parallel (dot product close to ±1)
-          const dot = Math.abs(normX1 * normX2 + normY1 * normY2);
-          if (dot < 0.98) continue;
-
-          // Compute perpendicular distance between parallel lines
-          const px = l2.start.x - l1.start.x;
-          const py = l2.start.y - l1.start.y;
-          // Projection onto perpendicular normal
-          const normalX = -normY1;
-          const normalY = normX1;
-          const perpDist = Math.abs(px * normalX + py * normalY);
-
-          // Standard wall thickness in CAD is between 5cm and 35cm
-          if (perpDist >= 5 && perpDist <= 32) {
-            matchedLineIds.add(l1.id);
-            matchedLineIds.add(l2.id);
-
-            // Compute middle segment
-            const midStart = {
-              x: (l1.start.x + l2.start.x) / 2,
-              y: (l1.start.y + l2.start.y) / 2
-            };
-            const midEnd = {
-              x: (l1.end.x + l2.end.x) / 2,
-              y: (l1.end.y + l2.end.y) / 2
-            };
-
-            const windowLen = Math.round(Math.sqrt((midEnd.x - midStart.x)**2 + (midEnd.y - midStart.y)**2));
-            const id = "bim-window-" + Math.random().toString(36).substring(2, 11);
-            const newWindow: Entity = {
-              id,
-              type: 'line',
-              isBIM: true,
-              bimType: 'window',
-              bimName: `Finestra ${windowLen}x140`,
-              bimWidth: windowLen,
-              bimWindowHeight: 140,
-              start: midStart,
-              end: midEnd,
-              color: '#2563eb',
-              lineWidth: 2,
-              mode: 'pencil',
-              layer: activeLayerId
-            } as any;
-
-            newWindowEntities.push(newWindow);
-            break; // found its parallel line counterpart
-          }
-        }
-      }
-
       // Merge and update entities
       setEntities(prev => {
-        // Remove old BIM entities before saving new ones so we do not pile up duplicates on consecutive scans
-        const filtered = prev.filter(e => !e.isBIM);
-        const next = [...filtered, ...newRoomEntities, ...newDoorEntities, ...newWindowEntities];
+        // Clear only auto-generated rooms, leaving original user-added BIM doors, windows, and custom BIM elements
+        const filtered = prev.filter(e => !(e.isBIM && e.bimType === 'room'));
+        const next = [...filtered, ...newRoomEntities];
         onCommitHistory?.(next);
         return next;
       });
@@ -2307,6 +2531,36 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       if (ent.type === 'line') {
         const dist = distanceToSegment(point, ent.start, ent.end);
         if (dist < 10 / view.zoom) hit = true;
+        
+        // Enhance selection for BIM doors by checking hit on the leaf line too
+        if (!hit && (ent as any).bimType === 'door') {
+            const dx = ent.end.x - ent.start.x;
+            const dy = ent.end.y - ent.start.y;
+            const len = Math.sqrt(dx * dx + dy * dy);
+            if (len > 0.01) {
+                const flipMult = (ent as any).bimFlip ? -1 : 1;
+                const px = (-dy / len) * flipMult;
+                const py = (dx / len) * flipMult;
+                const leafEnd = { x: ent.start.x + px * len, y: ent.start.y + py * len };
+                const leafDist = distanceToSegment(point, ent.start, leafEnd);
+                if (leafDist < 10 / view.zoom) hit = true;
+                
+                // Optional: check arc hit
+                if (!hit) {
+                    const distToCenter = Math.sqrt((point.x - ent.start.x) ** 2 + (point.y - ent.start.y) ** 2);
+                    if (Math.abs(distToCenter - len) < 10 / view.zoom) {
+                        const baseAngle = Math.atan2(ent.end.y - ent.start.y, ent.end.x - ent.start.x) * 180 / Math.PI;
+                        const leafAngle = Math.atan2(leafEnd.y - ent.start.y, leafEnd.x - ent.start.x) * 180 / Math.PI;
+                        const clickAngle = Math.atan2(point.y - ent.start.y, point.x - ent.start.x) * 180 / Math.PI;
+                        
+                        // We check if angle is between baseAngle and leafAngle
+                        if (isAngleInArc(clickAngle, (ent as any).bimFlip ? leafAngle : baseAngle, (ent as any).bimFlip ? baseAngle : leafAngle)) {
+                            hit = true;
+                        }
+                    }
+                }
+            }
+        }
       } else if (ent.type === 'circle') {
         const dist = Math.sqrt((point.x - ent.center.x) ** 2 + (point.y - ent.center.y) ** 2);
         if (Math.abs(dist - ent.radius) < 10 / view.zoom) hit = true;
@@ -2784,7 +3038,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             ctx.shadowBlur = 10 * flashIntensity;
         }
 
-        if ((entity.id === selectedParallelLine?.id && blink) || (selectedEntityId === entity.id) || (positioningGroupId && entity.groupId === positioningGroupId) || selectedRaccordoLineIds.includes(entity.id)) {
+        if ((entity.id === selectedParallelLine?.id && blink) || (selectedEntityId === entity.id) || (positioningGroupId && entity.groupId === positioningGroupId) || (positioningEntityId && entity.id === positioningEntityId) || selectedRaccordoLineIds.includes(entity.id)) {
           if (isFlashing) {
             // Let the flashing styles take precedence for initial attention blink
           } else if (entity.type === 'hatch') {
@@ -2808,7 +3062,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         let highlightColor = ctx.strokeStyle;
         if (isFlashing) {
              isHighlighted = true;
-        } else if ((entity.id === selectedParallelLine?.id && blink) || (selectedEntityId === entity.id) || (positioningGroupId && entity.groupId === positioningGroupId) || selectedRaccordoLineIds.includes(entity.id)) {
+        } else if ((entity.id === selectedParallelLine?.id && blink) || (selectedEntityId === entity.id) || (positioningGroupId && entity.groupId === positioningGroupId) || (positioningEntityId && entity.id === positioningEntityId) || selectedRaccordoLineIds.includes(entity.id)) {
              isHighlighted = true;
         } else if ((dragEntityIds.includes(entity.id) || entity.id === highlightedTrimLine?.id) && (activeTool === 'Move' || activeTool === 'Cancella' || activeTool === 'Join' || activeTool === 'Copy')) {
              isHighlighted = true;
@@ -3340,7 +3594,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       if (drawing && (activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra')) {
         ctx.save();
         const start = drawing.start;
-        const end = actualMousePosRef.current;
+        const end = drawing.current || actualMousePosRef.current;
         const dx = end.x - start.x;
         const dy = end.y - start.y;
         const len = Math.sqrt(dx * dx + dy * dy);
@@ -4079,8 +4333,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             const dx = end.x - start.x;
             const dy = end.y - start.y;
             const len = Math.sqrt(dx * dx + dy * dy);
-            const px = -dy / len;
-            const py = dx / len;
+            
+            // Handle flipping of the door swing
+            const flipMult = (entity as any).bimFlip ? -1 : 1;
+            const px = (-dy / len) * flipMult;
+            const py = (dx / len) * flipMult;
 
             const doorWidth = len;
             const leafEnd = {
@@ -4101,14 +4358,17 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             ctx.beginPath();
             const baseAngle = Math.atan2(end.y - start.y, end.x - start.x);
             const leafAngle = Math.atan2(leafEnd.y - start.y, leafEnd.x - start.x);
-            ctx.arc(start.x, start.y, doorWidth, baseAngle, leafAngle, false);
+            
+            // Draw arc in correct direction based on flip
+            ctx.arc(start.x, start.y, doorWidth, baseAngle, leafAngle, (entity as any).bimFlip || false);
             ctx.stroke();
 
             ctx.fillStyle = '#dc2626';
             ctx.font = `bold ${9 / view.zoom}px sans-serif`;
             ctx.textBaseline = 'middle';
             ctx.textAlign = 'center';
-            ctx.fillText(`P. ${entity.bimWidth || Math.round(len)}`, (start.x + end.x)/2 + px * 10 / view.zoom, (start.y + end.y)/2 + py * 10 / view.zoom);
+            const labelOffset = (entity as any).bimFlip ? -10 : 10;
+            ctx.fillText(`P. ${entity.bimWidth || Math.round(len)}`, (start.x + end.x)/2 + px * labelOffset / view.zoom, (start.y + end.y)/2 + py * labelOffset / view.zoom);
             ctx.restore();
           }
         }
@@ -6051,18 +6311,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             if (activeTool === 'Join') {
                 confirmJoin();
                 return;
-            } else if (tavole && onDoubleClickTavola) {
-                for (let i = tavole.length - 1; i >= 0; i--) {
-                  const tav = tavole[i];
-                  if (!tav.visible) continue;
-                  const { w, h } = getTavolaDimensions(tav);
-                  if (rawPoint.x >= tav.position.x && rawPoint.x <= tav.position.x + w &&
-                      rawPoint.y >= tav.position.y && rawPoint.y <= tav.position.y + h) {
-                    onDoubleClickTavola(tav.id);
-                    setDrawing(null);
-                    return; 
-                  }
-                }
             }
         }
     }
@@ -6193,6 +6441,14 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         return;
     }
 
+    if (positioningEntityId) {
+        setPositioningEntityId(null);
+        setPositioningEntityStartPos(null);
+        setEntities(prev => { onCommitHistory?.(prev); return prev; });
+        onSelect(null);
+        return;
+    }
+
     const isFreehandActive = activeTool === 'Line' && defaultLineStyle.mode === 'ink' && !orthoMode;
     const isTempOrtho = false;
     
@@ -6210,6 +6466,73 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 onEditRaccordo(found);
                 return;
             }
+            
+            // If clicking an already selected door, toggle its flip for quick orientation
+            if (found.id === selectedEntityId && found.isBIM && found.bimType === 'door') {
+                setEntities(prev => {
+                    const next = prev.map(e => e.id === found.id ? { ...e, bimFlip: !(e as any).bimFlip } as any : e);
+                    onCommitHistory?.(next);
+                    return next;
+                });
+                return;
+            }
+
+            // If clicking an already selected non-door entity, rotate it 90 degrees
+            if (found.id === selectedEntityId && activeTool === 'Select') {
+                // Determine center of this single entity
+                let center: Point = { x: 0, y: 0 };
+                if (found.type === 'line' || found.type === 'dimension') {
+                    center = { x: (found.start.x + found.end.x) / 2, y: (found.start.y + found.end.y) / 2 };
+                } else if (found.type === 'circle' || found.type === 'arc') {
+                    center = found.center;
+                } else if (found.type === 'rectangle') {
+                    center = { x: (found.p1.x + found.p2.x) / 2, y: (found.p1.y + found.p2.y) / 2 };
+                } else if (found.type === 'hatch') {
+                    const pts = (found as any).points || [];
+                    if (pts.length > 0) {
+                        let sumX = 0, sumY = 0;
+                        pts.forEach((p: Point) => { sumX += p.x; sumY += p.y; });
+                        center = { x: sumX / pts.length, y: sumY / pts.length };
+                    }
+                }
+
+                const rotatePoint = (p: Point): Point => ({
+                    x: center.x - (p.y - center.y),
+                    y: center.y + (p.x - center.x)
+                });
+
+                setEntities(prev => {
+                    const next = prev.map(ent => {
+                        if (ent.id === found.id) {
+                            if (ent.type === 'line' || ent.type === 'dimension') {
+                                return { ...ent, start: rotatePoint(ent.start), end: rotatePoint(ent.end) };
+                            } else if (ent.type === 'circle' || ent.type === 'arc') {
+                                const newCenter = rotatePoint(ent.center);
+                                if (ent.type === 'arc') {
+                                    return { 
+                                        ...ent, 
+                                        center: newCenter, 
+                                        startAngle: normalizeAngle((ent.startAngle || 0) + 90), 
+                                        endAngle: normalizeAngle((ent.endAngle || 0) + 90) 
+                                    };
+                                }
+                                return { ...ent, center: newCenter };
+                            } else if (ent.type === 'rectangle') {
+                                return { ...ent, p1: rotatePoint(ent.p1), p2: rotatePoint(ent.p2) };
+                            } else if (ent.type === 'hatch') {
+                                return { ...ent, points: (ent as any).points.map(rotatePoint) } as any;
+                            } else if (ent.type === 'text' || ent.type === 'point') {
+                                return { ...ent, point: rotatePoint(ent.point) };
+                            }
+                        }
+                        return ent;
+                    });
+                    onCommitHistory?.(next);
+                    return next;
+                });
+                return;
+            }
+
             onSelect(found.id);
             if (found.type === 'dimension') {
                 setPositioningDimId(found.id);
@@ -6217,6 +6540,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 // Seleziona tutto il gruppo e attiva lo spostamento "appiccicoso"
                 setPositioningGroupId(found.groupId);
                 setPositioningGroupStartPos(rawPoint);
+            } else {
+                // Seleziona la singola entità (finestra, porta, arredo, linea ecc.) e attiva lo spostamento "appiccicoso"
+                setPositioningEntityId(found.id);
+                setPositioningEntityStartPos(rawPoint);
             }
         } else {
             onSelect(null);
@@ -6427,7 +6754,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                     lineWidth: defaultLineStyle.lineWidth,
                     layer: maskLayerId,
                     mode: defaultLineStyle.mode,
-                    groupId
+                    groupId,
+                    templateId: template.id
                 };
                 
                 if (te.type === 'line') {
@@ -6552,21 +6880,43 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
         setManualRoomPoints(prev => [...prev, clickedPoint]);
     } else if (activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra') {
+        const found = getEntityAtPoint(rawPoint);
+        if (found && found.isBIM && (found.bimType === 'door' || found.bimType === 'window')) {
+            onSelect(found.id);
+            if (drawing) setDrawing(null);
+            return;
+        }
+
         if (!drawing) {
             setDrawing({ start: snapped.point, current: snapped.point });
         } else {
-            const doorWidth = Math.round(Math.sqrt((snapped.point.x - drawing.start.x)**2 + (snapped.point.y - drawing.start.y)**2));
+            const isLineLikeTool = activeTool === 'Line' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra';
+            const effectiveOrthoMode = isLineLikeTool && (orthoMode ? !isShiftPressedRef.current : isShiftPressedRef.current);
+            const isOrthoHorizontal = isLineLikeTool && effectiveOrthoMode && 
+                  Math.abs(snapped.point.x - drawing.start.x) >= Math.abs(snapped.point.y - drawing.start.y);
+
+            let endPoint = snapped.point;
+            if (effectiveOrthoMode) {
+                endPoint = isOrthoHorizontal 
+                  ? { x: endPoint.x, y: drawing.start.y } 
+                  : { x: drawing.start.x, y: endPoint.y };
+            } else if (drawing.current) {
+                endPoint = drawing.current;
+            }
+
+            const doorWidth = Math.round(Math.sqrt((endPoint.x - drawing.start.x)**2 + (endPoint.y - drawing.start.y)**2));
             const isDoor = activeTool === 'BIM_Porta';
+            const h = isDoor ? lastDoorHeight : lastWindowHeight;
             const newElem: Entity = {
                 id: Date.now().toString(),
                 type: 'line',
                 isBIM: true,
                 bimType: isDoor ? 'door' : 'window',
-                bimName: isDoor ? `Porta ${doorWidth}` : `Finestra ${doorWidth}x140`,
+                bimName: isDoor ? `Porta ${doorWidth}` : `Finestra ${doorWidth}x${h}`,
                 bimWidth: doorWidth,
-                bimWindowHeight: isDoor ? undefined : 140,
+                bimWindowHeight: isDoor ? undefined : h,
                 start: drawing.start,
-                end: snapped.point,
+                end: endPoint,
                 color: isDoor ? '#dc2626' : '#2563eb',
                 lineWidth: 2,
                 mode: 'pencil',
@@ -6607,20 +6957,21 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
               const isBothSnappedException = false;
 
-              const effectiveOrthoMode = activeTool === 'Line' && (orthoMode ? !isShiftPressedRef.current : isShiftPressedRef.current);
+              const isLineLikeTool = activeTool === 'Line' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra';
+              const effectiveOrthoMode = isLineLikeTool && (orthoMode ? !isShiftPressedRef.current : isShiftPressedRef.current);
 
-              const isOrthoHorizontal = activeTool === 'Line' && effectiveOrthoMode && 
+              const isOrthoHorizontal = isLineLikeTool && effectiveOrthoMode && 
                     Math.abs(rawPoint.x - drawing.start.x) >= Math.abs(rawPoint.y - drawing.start.y);
 
               let finalPoint = rawPoint;
-              if (activeTool === 'Line') {
+              if (isLineLikeTool) {
                   if (isBothSnappedException) {
                       finalPoint = rawPoint;
                   } else if (effectiveOrthoMode) {
                       finalPoint = isOrthoHorizontal 
                         ? { x: finalPoint.x, y: drawing.start.y } 
                         : { x: drawing.start.x, y: finalPoint.y };
-                  } else if (!e.shiftKey && !isTempOrtho) {
+                  } else if (!e.shiftKey && !isTempOrtho && activeTool === 'Line') {
                       finalPoint = applyAngleSnapping(drawing.start, rawPoint);
                   }
               }
@@ -6634,7 +6985,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                   rawSnapped = getSnappedPoint(finalPoint, entities, activeTool, drawing);
               }
               
-              if (activeTool === 'Line' && effectiveOrthoMode && !isBothSnappedException) {
+              if (isLineLikeTool && effectiveOrthoMode && !isBothSnappedException) {
                   rawSnapped.point = isOrthoHorizontal 
                     ? { x: rawSnapped.point.x, y: drawing.start.y } 
                     : { x: drawing.start.x, y: rawSnapped.point.y };
@@ -7498,6 +7849,50 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         return;
     }
 
+    if (positioningEntityId && positioningEntityStartPos) {
+        const dx = rawPoint.x - positioningEntityStartPos.x;
+        const dy = rawPoint.y - positioningEntityStartPos.y;
+        setPositioningEntityStartPos(rawPoint);
+
+        const updater = (prev: Entity[]) => prev.map(ent => {
+            if (ent.id === positioningEntityId) {
+                if (ent.type === 'line' || ent.type === 'dimension') {
+                    return {
+                        ...ent,
+                        start: { x: ent.start.x + dx, y: ent.start.y + dy },
+                        end: { x: ent.end.x + dx, y: ent.end.y + dy }
+                    };
+                } else if (ent.type === 'circle' || ent.type === 'arc') {
+                    return {
+                        ...ent,
+                        center: { x: ent.center.x + dx, y: ent.center.y + dy }
+                    };
+                } else if (ent.type === 'rectangle') {
+                    return {
+                        ...ent,
+                        p1: { x: ent.p1.x + dx, y: ent.p1.y + dy },
+                        p2: { x: ent.p2.x + dx, y: ent.p2.y + dy }
+                    };
+                } else if (ent.type === 'hatch') {
+                    const h = ent as any;
+                    return {
+                        ...ent,
+                        points: h.points ? h.points.map((p: Point) => ({ x: p.x + dx, y: p.y + dy })) : []
+                    };
+                } else if (ent.type === 'point') {
+                    return {
+                        ...ent,
+                        point: { x: ent.point.x + dx, y: ent.point.y + dy }
+                    };
+                }
+            }
+            return ent;
+        });
+        if (setEntitiesSilent) setEntitiesSilent(updater);
+        else setEntities(updater);
+        return;
+    }
+
     if (drawing) {
       if (isLocked) return;
 
@@ -7631,18 +8026,19 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 activeConstraint: undefined
             });
           } else {
-            const effectiveOrthoMode = activeTool === 'Line' && (orthoMode ? !isShiftPressedRef.current : isShiftPressedRef.current);
-            const isOrthoHorizontal = activeTool === 'Line' && effectiveOrthoMode && 
+            const isLineLikeTool = activeTool === 'Line' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra';
+            const effectiveOrthoMode = isLineLikeTool && (orthoMode ? !isShiftPressedRef.current : isShiftPressedRef.current);
+            const isOrthoHorizontal = isLineLikeTool && effectiveOrthoMode && 
                   Math.abs(rawPoint.x - drawing.start.x) >= Math.abs(rawPoint.y - drawing.start.y);
 
             let finalPoint = rawPoint;
 
-            if (activeTool === 'Line') {
+            if (isLineLikeTool) {
                 if (effectiveOrthoMode) {
                     finalPoint = isOrthoHorizontal 
                       ? { x: finalPoint.x, y: drawing.start.y } 
                       : { x: drawing.start.x, y: finalPoint.y };
-                } else if (!e.shiftKey && !isTempOrtho) {
+                } else if (!e.shiftKey && !isTempOrtho && activeTool === 'Line') {
                     finalPoint = applyAngleSnapping(drawing.start, rawPoint);
                 }
             }
@@ -7656,7 +8052,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             
             let snappedPoint = snapped.point;
 
-            if (activeTool === 'Line' && effectiveOrthoMode) {
+            if (isLineLikeTool && effectiveOrthoMode) {
                 snappedPoint = isOrthoHorizontal 
                   ? { x: snappedPoint.x, y: drawing.start.y } 
                   : { x: drawing.start.x, y: snappedPoint.y };
@@ -8059,6 +8455,82 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
 
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (rect) {
+      const rawPoint = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
+      const found = getEntityAtPoint(rawPoint);
+      if (found) {
+        // Rotate entity or its group by 90 degrees clockwise
+        if (found.groupId) {
+          rotateGroup(found.groupId, 90);
+        } else {
+          // Determine center of this single entity
+          let center: Point = { x: 0, y: 0 };
+          if (found.type === 'line' || found.type === 'dimension') {
+            center = {
+              x: (found.start.x + found.end.x) / 2,
+              y: (found.start.y + found.end.y) / 2
+            };
+          } else if (found.type === 'circle' || found.type === 'arc') {
+            center = found.center;
+          } else if (found.type === 'rectangle') {
+            center = {
+              x: (found.p1.x + found.p2.x) / 2,
+              y: (found.p1.y + found.p2.y) / 2
+            };
+          } else if (found.type === 'point') {
+            center = found.point;
+          } else if (found.type === 'hatch') {
+            const pts = (found as any).points || [];
+            if (pts.length > 0) {
+              let sumX = 0, sumY = 0;
+              pts.forEach((p: Point) => { sumX += p.x; sumY += p.y; });
+              center = { x: sumX / pts.length, y: sumY / pts.length };
+            }
+          }
+
+          const cos = 0;  // cos(90) = 0
+          const sin = 1;  // sin(90) = 1
+
+          const rotatePoint = (p: Point): Point => ({
+            x: center.x + (p.x - center.x) * cos - (p.y - center.y) * sin,
+            y: center.y + (p.x - center.x) * sin + (p.y - center.y) * cos
+          });
+
+          const updater = (prev: Entity[]) => prev.map(ent => {
+            if (ent.id === found.id) {
+              if (ent.type === 'line' || ent.type === 'dimension') {
+                return { ...ent, start: rotatePoint(ent.start), end: rotatePoint(ent.end) };
+              } else if (ent.type === 'circle' || ent.type === 'arc') {
+                const newCenter = rotatePoint(ent.center);
+                if (ent.type === 'arc') {
+                  return { 
+                      ...ent, 
+                      center: newCenter, 
+                      startAngle: normalizeAngle((ent.startAngle || 0) + 90), 
+                      endAngle: normalizeAngle((ent.endAngle || 0) + 90) 
+                  };
+                }
+                return { ...ent, center: newCenter };
+              } else if (ent.type === 'rectangle') {
+                return { ...ent, p1: rotatePoint(ent.p1), p2: rotatePoint(ent.p2) };
+              } else if (ent.type === 'point') {
+                return { ...ent, point: rotatePoint(ent.point) };
+              } else if (ent.type === 'hatch') {
+                const pts = (ent as any).points || [];
+                return { ...ent, points: pts.map((p: Point) => rotatePoint(p)) };
+              }
+            }
+            return ent;
+          });
+
+          setEntities(updater);
+          onCommitHistory?.(updater(entities));
+        }
+        return;
+      }
+    }
+
     // --- TECNIGRAFO SPECIAL TOGGLE ---
     // If tecnigrafo is active, right click toggles between pencil and ink
     if (tecnigrafoOrigin) {
@@ -8095,6 +8567,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         setSelectedRaccordoClickPoints([]);
         setSpecchioAxisPt1(null);
         setSpecchioHoverAxisLine(null);
+        setPositioningEntityId(null);
+        setPositioningEntityStartPos(null);
     };
 
     escAction();
@@ -8273,7 +8747,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 });
             }
         } else if (!showManualInput && /^[0-9\.\-]$/.test(e.key)) {
-            if ((drawing && !drawing.isFreehand && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle')) ||
+            if ((drawing && !drawing.isFreehand && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra')) ||
                 (activeTool === 'Parallel' && selectedParallelLine)) {
                 setShowManualInput(true);
             }
@@ -8405,6 +8879,58 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         };
         setEntities(prev => { onCommitHistory?.(prev); return [...prev, newEntity]; });
         setDrawing(null);
+    } else if ((tool === 'BIM_Porta' || tool === 'BIM_Finestra') && drawing) {
+        const L = data.val1;
+        const H = data.val2;
+        let finalPoint: Point;
+        
+        const dx = drawing.current.x - drawing.start.x;
+        const dy = drawing.current.y - drawing.start.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dist > 0.1) {
+            finalPoint = {
+                x: drawing.start.x + (dx / dist) * L,
+                y: drawing.start.y + (dy / dist) * L
+            };
+        } else {
+            finalPoint = {
+                x: drawing.start.x + L,
+                y: drawing.start.y
+            };
+        }
+
+        const isDoor = tool === 'BIM_Porta';
+        const newEntity: Entity = {
+            id: Date.now().toString(),
+            type: 'line',
+            isBIM: true,
+            bimType: isDoor ? 'door' : 'window',
+            bimName: isDoor ? `Porta ${L}` : `Finestra ${L}x${H}`,
+            bimWidth: L,
+            bimWindowHeight: isDoor ? undefined : H,
+            start: drawing.start,
+            end: finalPoint,
+            color: isDoor ? '#dc2626' : '#2563eb',
+            lineWidth: 2,
+            mode: 'pencil',
+            layer: activeLayerId
+        } as any;
+
+        setEntities(prev => { onCommitHistory?.(prev); return [...prev, newEntity]; });
+        setDrawing(null);
+
+        if (isDoor) {
+            setLastDoorWidth(L);
+            setLastDoorHeight(H);
+            localStorage.setItem('lastDoorWidth', L.toString());
+            localStorage.setItem('lastDoorHeight', H.toString());
+        } else {
+            setLastWindowWidth(L);
+            setLastWindowHeight(H);
+            localStorage.setItem('lastWindowWidth', L.toString());
+            localStorage.setItem('lastWindowHeight', H.toString());
+        }
     } else if (tool === 'Parallel' && selectedParallelLine && lastMouseRef.current) {
         const line = selectedParallelLine as LineEntity;
         const length = data.val1;
@@ -8473,7 +8999,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             lineWidth: defaultLineStyle.lineWidth,
             layer: maskLayerId,
             mode: defaultLineStyle.mode,
-            groupId
+            groupId,
+            templateId: template.id
         };
         
         if (te.type === 'line') {

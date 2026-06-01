@@ -3,7 +3,7 @@ import { Point } from '../types';
 import { Mic, MicOff, MoveHorizontal } from 'lucide-react';
 
 interface ManualInputOverlayProps {
-    type: 'line' | 'circle' | 'rectangle' | 'parallel';
+    type: 'line' | 'circle' | 'rectangle' | 'parallel' | 'bim_porta' | 'bim_finestra';
     drawing?: { start: Point, current: Point, lockedDir?: Point };
     parallelLine?: { start: Point, end: Point, mouse: Point, distance?: number };
     canvasToScreen: (x: number, y: number) => { x: number, y: number };
@@ -19,7 +19,7 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
     let initVal2 = 0;
     let screenPos = { x: 0, y: 0 };
 
-    if (type === 'line' || type === 'circle' || type === 'rectangle') {
+    if (type === 'line' || type === 'circle' || type === 'rectangle' || type === 'bim_porta' || type === 'bim_finestra') {
         if (!drawing) return null;
         const dx = drawing.current.x - drawing.start.x;
         const dy = drawing.current.y - drawing.start.y;
@@ -32,6 +32,12 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
         } else if (type === 'rectangle') {
             initVal1 = dx;
             initVal2 = dy;
+        } else if (type === 'bim_porta') {
+            initVal1 = parseFloat(localStorage.getItem('lastDoorWidth') || '80');
+            initVal2 = parseFloat(localStorage.getItem('lastDoorHeight') || '210');
+        } else if (type === 'bim_finestra') {
+            initVal1 = parseFloat(localStorage.getItem('lastWindowWidth') || '120');
+            initVal2 = parseFloat(localStorage.getItem('lastWindowHeight') || '140');
         }
         screenPos = canvasToScreen(drawing.current.x, drawing.current.y);
     } else if (type === 'parallel') {
@@ -69,10 +75,14 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
         if (isOpen) {
             if (type === 'line') {
                 setVal1('');
+                setVal2(initVal2.toFixed(2));
+            } else if (type === 'bim_porta' || type === 'bim_finestra') {
+                setVal1(initVal1.toString());
+                setVal2(initVal2.toString());
             } else {
                 setVal1(initVal1.toFixed(2));
+                setVal2(initVal2.toFixed(2));
             }
-            setVal2(initVal2.toFixed(2));
             setTranscriptPreview('');
         }
     }, [isOpen, initVal1, initVal2, type]);
@@ -328,8 +338,8 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
                 <div className="flex flex-col gap-3">
                     {/* Primary Input with Microphone */}
                     <div className="flex items-center gap-2">
-                        <span className="w-8 text-slate-400 font-mono text-[10px]">
-                            {type === 'line' ? 'L:' : type === 'circle' ? 'R:' : type === 'rectangle' ? 'W:' : 'Dist:'}
+                        <span className="w-8 text-slate-400 font-mono text-[10px] whitespace-nowrap">
+                            {type === 'line' ? 'L:' : type === 'circle' ? 'R:' : type === 'rectangle' ? 'W:' : (type === 'bim_porta' || type === 'bim_finestra') ? 'Larg:' : 'Dist:'}
                         </span>
                         <div className="flex-1 relative">
                             <input 
@@ -413,10 +423,10 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
                     </div>
 
                     {/* Secondary Input for Angle/Height */}
-                    {(type === 'line' && !drawing?.lockedDir) || type === 'rectangle' ? (
+                    {(type === 'line' && !drawing?.lockedDir) || type === 'rectangle' || type === 'bim_porta' || type === 'bim_finestra' ? (
                         <div className="flex items-center gap-2">
-                             <span className="w-8 text-slate-400 font-mono text-[10px]">
-                                {type === 'line' ? 'A:' : 'H:'}
+                             <span className="w-8 text-slate-400 font-mono text-[10px] whitespace-nowrap">
+                                {type === 'line' ? 'A:' : type === 'rectangle' ? 'H:' : 'Alt:'}
                             </span>
                             <div className="flex-1">
                                 <input 
