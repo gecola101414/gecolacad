@@ -1325,6 +1325,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   }
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
   const lastMouseRef = useRef<Point>({ x: 0, y: 0 });
+  const isZoomModeRef = useRef(false);
+  const zoomFocusRef = useRef<Point | null>(null);
+  const isDraggingZoomRef = useRef(false);
+  const isDraggingPanRef = useRef(false);
+  const lastScreenMouseRef = useRef<Point>({ x: 0, y: 0 });
   const previousMouseRef = useRef<Point>({ x: 0, y: 0 });
   const lastEraserExecutionTime = useRef(0);
   const lastEraseTimeByEntityId = useRef<Record<string, number>>({});
@@ -1373,6 +1378,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         setIsShiftPressed(false);
         isShiftPressedRef.current = false;
       }
+      if (e.key === 'z') {
+        isZoomModeRef.current = false;
+        zoomFocusRef.current = null;
+      }
     };
 
     const handleArrowsLine = (e: KeyboardEvent) => {
@@ -1416,6 +1425,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       if (e.key === 'Shift') {
         setIsShiftPressed(true);
         isShiftPressedRef.current = true;
+      }
+      if (e.key === 'z') {
+        isZoomModeRef.current = true;
+        zoomFocusRef.current = lastMouseRef.current;
       }
     };
     const handleBlur = () => {
@@ -3928,42 +3941,18 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     };
 
     const rect = canvas.getBoundingClientRect();
-    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+    const zoomSensitivity = 0.0015;
+    const zoomFactor = Math.pow(0.95, e.deltaY * zoomSensitivity);
+
+    const focus = screenToCanvas(rect.width / 2, rect.height / 2);
 
     setView(prev => {
         const newZoom = Math.max(0.01, prev.zoom * zoomFactor);
-        
-        // World coordinates of the mouse based on the view BEFORE zooming
-        const mouseW = {
-            x: (e.clientX - rect.left - prev.pan.x) / prev.zoom,
-            y: (e.clientY - rect.top - prev.pan.y) / prev.zoom
+        const newPan = {
+            x: prev.pan.x + (focus.x * (prev.zoom - newZoom)),
+            y: prev.pan.y + (focus.y * (prev.zoom - newZoom))
         };
-
-        // DRONE EFFECT: Prioritize active Snaps (yellow ones) for the zoom center.
-        // If a point is being actively placed or moved, focus the zoom on that point.
-        // Or use the LOCKED focal point (Magic Key 'F').
-        // If no snap or lock is active, the mouse cursor guides the drone.
-        const activeSnap = drawing?.snapType 
-            ? drawing.current 
-            : (activeMoveSnapPoint || hoverSnap?.point);
-
-        const focalPoint = lockedFocalPoint || activeSnap || mouseW;
-        
-        const targetPan = {
-            x: canvas.width / 2 - focalPoint.x * newZoom,
-            y: canvas.height / 2 - focalPoint.y * newZoom
-        };
-
-        // Cinematic smoothing (Drone effect) - Firm but fluid
-        const smoothing = 0.7; 
-
-        return {
-            zoom: newZoom,
-            pan: {
-                x: prev.pan.x + (targetPan.x - prev.pan.x) * smoothing,
-                y: prev.pan.y + (targetPan.y - prev.pan.y) * smoothing
-            }
-        };
+        return { zoom: newZoom, pan: newPan };
     });
   };
 
@@ -4691,58 +4680,60 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   };
 
   const isPointInsideBox = (p: Point, box: { minX: number; maxX: number; minY: number; maxY: number }) => {
-    return p.x >= box.minX && p.x <= box.maxX && p.y >= box.minY && p.y <= box.maxY;
+    const eps = 1e-6;
+    return p.x >= box.minX - eps && p.x <= box.maxX + eps && p.y >= box.minY - eps && p.y <= box.maxY + eps;
   };
 
   const getLineBoxIntersections = (p1: Point, p2: Point, box: { minX: number; maxX: number; minY: number; maxY: number }): Point[] => {
     const intersections: Point[] = [];
     const dx = p2.x - p1.x;
     const dy = p2.y - p1.y;
+    const eps = 1e-6;
 
     // Left border: x = minX
     if (dx !== 0) {
       const t = (box.minX - p1.x) / dx;
-      if (t >= 0 && t <= 1) {
+      if (t >= -eps && t <= 1 + eps) {
         const y = p1.y + t * dy;
-        if (y >= box.minY && y <= box.maxY) {
-          intersections.push({ x: box.minX, y });
+        if (y >= box.minY - eps && y <= box.maxY + eps) {
+          intersections.push({ x: box.minX, y: Math.max(box.minY, Math.min(box.maxY, y)) });
         }
       }
     }
     // Right border: x = maxX
     if (dx !== 0) {
       const t = (box.maxX - p1.x) / dx;
-      if (t >= 0 && t <= 1) {
+      if (t >= -eps && t <= 1 + eps) {
         const y = p1.y + t * dy;
-        if (y >= box.minY && y <= box.maxY) {
-          intersections.push({ x: box.maxX, y });
+        if (y >= box.minY - eps && y <= box.maxY + eps) {
+          intersections.push({ x: box.maxX, y: Math.max(box.minY, Math.min(box.maxY, y)) });
         }
       }
     }
     // Top border: y = minY
     if (dy !== 0) {
       const t = (box.minY - p1.y) / dy;
-      if (t >= 0 && t <= 1) {
+      if (t >= -eps && t <= 1 + eps) {
         const x = p1.x + t * dx;
-        if (x >= box.minX && x <= box.maxX) {
-          intersections.push({ x, y: box.minY });
+        if (x >= box.minX - eps && x <= box.maxX + eps) {
+          intersections.push({ x: Math.max(box.minX, Math.min(box.maxX, x)), y: box.minY });
         }
       }
     }
     // Bottom border: y = maxY
     if (dy !== 0) {
       const t = (box.maxY - p1.y) / dy;
-      if (t >= 0 && t <= 1) {
+      if (t >= -eps && t <= 1 + eps) {
         const x = p1.x + t * dx;
-        if (x >= box.minX && x <= box.maxX) {
-          intersections.push({ x, y: box.maxY });
+        if (x >= box.minX - eps && x <= box.maxX + eps) {
+          intersections.push({ x: Math.max(box.minX, Math.min(box.maxX, x)), y: box.maxY });
         }
       }
     }
 
     const uniquePts: Point[] = [];
     for (const pt of intersections) {
-      if (!uniquePts.some(u => Math.sqrt((u.x - pt.x)**2 + (u.y - pt.y)**2) < 0.001)) {
+      if (!uniquePts.some(u => Math.sqrt((u.x - pt.x)**2 + (u.y - pt.y)**2) < 1e-6)) {
         uniquePts.push(pt);
       }
     }
@@ -4754,10 +4745,30 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         const result: Entity[] = [];
         let currentSegment: any[] = [];
         
+        let inPrev = isPointInsideBox(line.inkPoints[0], box);
+
         for (let i = 0; i < line.inkPoints.length; i++) {
             const pt = line.inkPoints[i];
             const isInside = isPointInsideBox(pt, box);
             
+            if (i > 0) {
+                const prevPt = line.inkPoints[i-1];
+                if (inPrev !== isInside) {
+                    // Crossed boundary, find intersection
+                    const intersects = getLineBoxIntersections(prevPt, pt, box);
+                    if (intersects.length > 0) {
+                        const q = intersects[0];
+                        if (isInside) {
+                            // Going outside -> inside, add intersection q to current outside segment
+                            currentSegment.push(q);
+                        } else {
+                            // Going inside -> outside, start new outside segment from q
+                            currentSegment.push(q);
+                        }
+                    }
+                }
+            }
+
             if (!isInside) {
                 currentSegment.push(pt);
             } else {
@@ -4772,6 +4783,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 }
                 currentSegment = [];
             }
+            inPrev = isInside;
         }
         
         if (currentSegment.length > 1) {
@@ -4798,50 +4810,62 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
     const intersections = getLineBoxIntersections(p1, p2, box);
 
-    if (intersections.length === 0) {
-      return [{ ...line }];
-    }
-
-    if (p1In && !p2In) {
-      const q = intersections[0];
-      return [{
-        ...line,
-        start: q,
-        end: p2
-      }];
-    }
-
-    if (!p1In && p2In) {
-      const q = intersections[0];
-      return [{
-        ...line,
-        start: p1,
-        end: q
-      }];
-    }
-
-    if (intersections.length >= 2) {
-      const sorted = [...intersections].sort((a, b) => {
+    // Filter unique intersections and sort them along the line
+    const sortedIntersections = [...new Set(intersections.map(p => `${p.x.toFixed(6)},${p.y.toFixed(6)}`))]
+      .map(s => { const [x, y] = s.split(',').map(Number); return { x, y }; })
+      .sort((a, b) => {
         const distA = (a.x - p1.x) ** 2 + (a.y - p1.y) ** 2;
         const distB = (b.x - p1.x) ** 2 + (b.y - p1.y) ** 2;
         return distA - distB;
       });
-      const q1 = sorted[0];
-      const q2 = sorted[1];
 
-      return [
-        {
-          ...line,
-          start: p1,
-          end: q1
-        },
-        {
-          ...line,
-          start: q2,
-          end: p2,
-          id: line.id + "_trim_line_" + Math.random().toString(36).substr(2, 5)
+    if (sortedIntersections.length === 0) {
+      if (p1In || p2In) return []; // Should be caught by p1In && p2In, but safety
+      return [{ ...line }];
+    }
+
+    const result: Entity[] = [];
+
+    // Helper to clamp points to box
+    const clampToBox = (p: Point) => ({
+      x: Math.max(box.minX, Math.min(box.maxX, p.x)),
+      y: Math.max(box.minY, Math.min(box.maxY, p.y))
+    });
+
+    // We can have 1 or 2 intersection points
+    if (sortedIntersections.length === 1) {
+        const q = sortedIntersections[0];
+        if (p1In) {
+            // Segment [p1, q] is inside, [q, p2] starts outside
+            return [{ ...line, start: q, end: p2 }];
+        } else if (p2In) {
+            // Segment [p1, q] is outside, [q, p2] is inside
+            return [{ ...line, start: p1, end: q }];
+        } else {
+            // Both outside, passes through (e.g. corner cut) - keep whole line or remove if inside? 
+            // If sortedIntersections.length === 1, it probably didn't pass THROUGH the box.
+            return [{ ...line }];
         }
-      ];
+    } else if (sortedIntersections.length >= 2) {
+        // Line cuts through, keep [p1, q1] and [q2, p2]
+        const q1 = sortedIntersections[0];
+        const q2 = sortedIntersections[sortedIntersections.length - 1];
+        
+        const res: Entity[] = [];
+        // Keep part before box
+        if (!isPointInsideBox(p1, box) && !isPointInsideBox(q1, box)) {
+            // Check if segment is outside. Midpoint check is usually safe.
+            const mid = { x: (p1.x + q1.x) / 2, y: (p1.y + q1.y) / 2 };
+            // If mid is outside (which it must be if P1, P2 outside and Q1 is intersection), keep it.
+            res.push({ ...line, start: p1, end: q1 });
+        }
+        
+        // Keep part after box
+        if (!isPointInsideBox(q2, box) && !isPointInsideBox(p2, box)) {
+            res.push({ ...line, start: q2, end: p2, id: line.id + "_trim_line_" + Math.random().toString(36).substr(2, 5) });
+        }
+        
+        return res;
     }
 
     return [{ ...line }];
@@ -5108,6 +5132,19 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    if (isZoomModeRef.current) {
+        if (e.button === 0) {
+            isDraggingZoomRef.current = true;
+            lastScreenMouseRef.current = { x: e.clientX, y: e.clientY };
+            if (canvasRef.current) canvasRef.current.style.cursor = 'zoom-in';
+            return;
+        } else if (e.button === 2) {
+            isDraggingPanRef.current = true;
+            lastScreenMouseRef.current = { x: e.clientX, y: e.clientY };
+            if (canvasRef.current) canvasRef.current.style.cursor = 'grabbing';
+            return;
+        }
+    }
     if (onActionStart) onActionStart();
     
     if (e.button === 0) { 
@@ -5163,6 +5200,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     if (e.button === 1) {
       e.preventDefault();
       isPanningRef.current = true;
+      if (canvasRef.current) canvasRef.current.style.cursor = 'grabbing';
       // Pan/Zoom handling via middle click
       const startX = e.clientX - view.pan.x;
       const startY = e.clientY - view.pan.y;
@@ -5176,6 +5214,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
       const handleMouseUp = () => {
         isPanningRef.current = false;
+        if (canvasRef.current) canvasRef.current.style.cursor = 'default';
         window.removeEventListener('mousemove', handleMouseMove);
         window.removeEventListener('mouseup', handleMouseUp);
       };
@@ -6384,6 +6423,32 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
+    if (isZoomModeRef.current && isDraggingZoomRef.current) {
+        const dx = e.clientX - lastScreenMouseRef.current.x;
+        const zoomFactor = 1 + dx * 0.002;
+        const focus = screenToCanvas(rect.width / 2, rect.height / 2);
+        
+        setView(prev => {
+            const newZoom = Math.max(0.01, prev.zoom * zoomFactor);
+            const newPan = {
+                x: prev.pan.x + (focus.x * (prev.zoom - newZoom)),
+                y: prev.pan.y + (focus.y * (prev.zoom - newZoom))
+            };
+            return { zoom: newZoom, pan: newPan };
+        });
+        lastScreenMouseRef.current = { x: e.clientX, y: e.clientY };
+        return;
+    }
+    if (isZoomModeRef.current && isDraggingPanRef.current) {
+        const dx = e.clientX - lastScreenMouseRef.current.x;
+        const dy = e.clientY - lastScreenMouseRef.current.y;
+        setView(prev => ({
+            ...prev,
+            pan: { x: prev.pan.x + dx / prev.zoom, y: prev.pan.y + dy / prev.zoom }
+        }));
+        lastScreenMouseRef.current = { x: e.clientX, y: e.clientY };
+        return;
+    }
     mouseScreenPosRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
     let rawPoint = getDampenedCoordinate(screenToCanvas(e.clientX - rect.left, e.clientY - rect.top), e);
 
@@ -6975,6 +7040,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   };
 
   const handleMouseUp = (e: React.MouseEvent) => {
+    isDraggingZoomRef.current = false;
+    isDraggingPanRef.current = false;
+    if (canvasRef.current) canvasRef.current.style.cursor = 'default';
     if (isMovingTecnigrafo) {
         setIsMovingTecnigrafo(false);
         movingTecnigrafoStartRef.current = null;
@@ -7135,8 +7203,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             ...prev, 
             mode: prev.mode === 'pencil' ? 'ink' : 'pencil' 
         }));
-        setShortcutToast(`Stile Penna: ${defaultLineStyle.mode === 'pencil' ? 'KINA (Tecnica)' : 'MATITA (Schizzo)'}`);
-        setTimeout(() => setShortcutToast(null), 1000);
         return;
     }
 
@@ -7727,6 +7793,13 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       onDrop={handleDrop}
     >
       <canvas ref={canvasRef} />
+      {isZoomModeRef.current && (
+        <div className="absolute top-4 left-4 bg-white/90 p-4 rounded shadow-lg border border-gray-200 pointer-events-none z-10">
+          <h3 className="font-bold mb-2">Modalità Zoom/Pan (Tasto Z premuto)</h3>
+          <p className="text-sm text-gray-700">Tasto Sinistro: Zoom</p>
+          <p className="text-sm text-gray-700">Tasto Destro: Pan</p>
+        </div>
+      )}
 
       {helpContent && activeTool !== 'Select' && (
         <div 

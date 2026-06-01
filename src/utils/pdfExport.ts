@@ -94,9 +94,8 @@ export const exportNativePDF = (
   const drawingHeight = maxY - minY;
 
   // Precision Calibration Factor
-  // Helps compensate for printer-driver margin shrinkage (common with HP/Apple drivers)
-  // 1.0256 is the typical correction for 39mm -> 40mm errors
-  const CALIBRATION_FACTOR = 1.0256; 
+  // 1.0 is the faithful ratio.
+  const CALIBRATION_FACTOR = 1.0; 
 
   const chosenFormat = tavola ? tavola.format : format;
   const chosenScaleDenom = tavola ? tavola.scale : scaleDenom;
@@ -126,7 +125,7 @@ export const exportNativePDF = (
     floatPrecision: 16
   });
 
-  // Suggest 'Actual Size' to the printer to avoid 3.8cm/4.0cm scaling errors
+  // Suggest 'Actual Size' to the printer
   pdf.viewerPreferences({
     'PrintScaling': 'None'
   });
@@ -140,14 +139,10 @@ export const exportNativePDF = (
   // Apply the calibration factor to the base scale
   const scale = (multiplier / chosenScaleDenom) * CALIBRATION_FACTOR;
   
-  const pageWidth = pdf.internal.pageSize.getWidth();
-  const pageHeight = pdf.internal.pageSize.getHeight();
-
-  const scaledWidth = drawingWidth * scale;
-  const scaledHeight = drawingHeight * scale;
-
-  const offsetX = (pageWidth - scaledWidth) / 2 - minX * scale;
-  const offsetY = (pageHeight - scaledHeight) / 2 - minY * scale;
+  const marginMm = 5;
+  // Map tavola.position (x, y) to marginMm on the PDF
+  const offsetX = marginMm - (tavola ? tavola.position.x : minX) * scale;
+  const offsetY = marginMm - (tavola ? tavola.position.y : minY) * scale;
 
   const tx = (x: number) => x * scale + offsetX;
   const ty = (y: number) => y * scale + offsetY;

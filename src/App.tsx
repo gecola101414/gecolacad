@@ -917,9 +917,9 @@ export default function App() {
       </div>
 
       {/* Main Area */}
-      <div className="flex flex-1 overflow-auto relative">
+      <div className="flex flex-1 overflow-hidden relative">
         <main
-          className="flex-1 overflow-auto relative"
+          className="flex-1 overflow-hidden relative"
         >
           <CADCanvas
             ref={cadCanvasRef}
@@ -1166,7 +1166,7 @@ export default function App() {
 
         {/* Properties Panel (Drawer) */}
         {showProperties && (
-          <div className="w-80 bg-white border-l border-neutral-300 p-4 transition-all overflow-y-auto flex flex-col h-full">
+          <div className="w-80 bg-white border-l border-neutral-300 p-4 transition-all overflow-y-auto overflow-x-hidden flex flex-col h-full">
             <h3 className="font-bold mb-4 flex justify-between items-center text-neutral-800 border-b border-neutral-100 pb-2">
               <span className="text-xs font-black uppercase tracking-wider font-mono">
                 {activeSidebarTab === "tavole" ? "Gestione Tavole" 
