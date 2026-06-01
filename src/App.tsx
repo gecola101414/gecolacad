@@ -6,6 +6,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Document, Page, pdfjs } from 'react-pdf';
 import { CADCanvas } from "./components/CADCanvas";
+import { CanvasPDFPreview } from "./components/CanvasPDFPreview";
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 import { DimensionStyleDialog } from "./components/DimensionStyleDialog";
@@ -52,6 +53,7 @@ import {
   Code,
   BookOpen,
   Grid,
+  ExternalLink,
   X
 } from "lucide-react";
 
@@ -206,6 +208,7 @@ export default function App() {
   const [editingCartiglioTavolaId, setEditingCartiglioTavolaId] = useState<string | null>(null);
   const [doubleClickedTavolaId, setDoubleClickedTavolaId] = useState<string | null>(null);
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
+  const [activePreviewTavolaId, setActivePreviewTavolaId] = useState<string | null>(null);
   const [rulerStyle, setRulerStyle] = useState<"tecnigrafo" | "crosshair">(
     "crosshair",
   );
@@ -1227,6 +1230,7 @@ export default function App() {
                             const url = exportNativePDF(entities, tav.format, tav.scale, tav.unit, tav, 'bloburl');
                             if (url) {
                               setPdfPreviewUrl(url);
+                              setActivePreviewTavolaId(tav.id);
                             }
                           }}
                           className="px-4 py-2 bg-indigo-100 text-indigo-700 hover:text-indigo-800 rounded text-sm font-bold shadow-sm hover:bg-indigo-200 transition-colors flex items-center justify-center gap-1"
@@ -1250,12 +1254,21 @@ export default function App() {
           {pdfPreviewUrl && (
             <div className="absolute inset-0 bg-black/60 flex items-center justify-center p-6 z-[60] pointer-events-auto">
               <div className="bg-white rounded-lg shadow-2xl w-full h-full max-w-5xl flex flex-col overflow-hidden">
-                <div className="px-4 py-3 border-b flex items-center justify-between bg-neutral-50 shrink-0">
+                <div className="px-4 py-3 border-b flex items-center justify-between bg-neutral-50 shrink-0 border-neutral-200">
                   <h3 className="font-bold text-neutral-800 flex items-center gap-2">
                     <Printer size={18} className="text-indigo-600" />
                     Anteprima di Stampa PDF
                   </h3>
                   <div className="flex items-center gap-2">
+                    <a 
+                      href={pdfPreviewUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      className="px-3.5 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded font-bold text-sm transition-colors flex items-center gap-1.5 shadow-sm"
+                    >
+                      <ExternalLink size={14} />
+                      Apri / Stampa a pagina intera
+                    </a>
                     <button 
                       onClick={() => {
                         const a = document.createElement("a");
@@ -1268,36 +1281,33 @@ export default function App() {
                       Scarica File
                     </button>
                     <button 
-                      onClick={() => setPdfPreviewUrl(null)} 
+                      onClick={() => {
+                        setPdfPreviewUrl(null);
+                        setActivePreviewTavolaId(null);
+                      }} 
                       className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded font-bold text-sm transition-colors"
                     >
                       Chiudi Anteprima
                     </button>
                   </div>
                 </div>
-                <div id="pdf-scroll-container" className="flex-1 overflow-auto bg-neutral-200/50 p-4">
-                  <Document 
-                    file={pdfPreviewUrl} 
-                    onLoadSuccess={() => {
-                      setTimeout(() => {
-                         const container = document.getElementById("pdf-scroll-container");
-                         if (container) {
-                           container.scrollTo({ top: container.scrollHeight, left: container.scrollWidth, behavior: 'smooth' });
-                         }
-                      }, 200);
-                    }}
-                    loading={<div className="text-neutral-500 font-bold p-10 animate-pulse text-center w-full">Generazione PDF in corso...</div>}
-                    error={<div className="text-red-500 p-10 font-bold text-center w-full">Impossibile generare l'anteprima PDF.</div>}
-                    className="flex justify-center min-w-min"
-                  >
-                    <Page 
-                       pageNumber={1} 
-                       renderTextLayer={false} 
-                       renderAnnotationLayer={false}
-                       scale={2.0}
-                       className="shadow-2xl border border-neutral-300"
-                    />
-                  </Document>
+                <div id="pdf-scroll-container" className="flex-1 bg-neutral-100 p-4 flex flex-col h-full overflow-hidden justify-center items-center">
+                  {(() => {
+                    const previewTav = tavole.find(t => t.id === activePreviewTavolaId);
+                    if (previewTav) {
+                      return <CanvasPDFPreview entities={entities} tavola={previewTav} />;
+                    }
+                    return (
+                      <iframe 
+                        src={pdfPreviewUrl} 
+                        className="w-full h-full border-none rounded bg-white shadow-inner flex-1" 
+                        title="Anteprima PDF"
+                      />
+                    );
+                  })()}
+                  <div className="mt-2 text-center text-xs text-neutral-500 font-medium pb-1 shrink-0">
+                    💡 Per stampare o salvare in PDF vettoriale reale con retini perfetti, clicca su <span className="font-bold text-orange-700">"Apri / Stampa a pagina intera"</span> o <span className="font-bold text-indigo-700">"Scarica File"</span>.
+                  </div>
                 </div>
               </div>
             </div>
@@ -2515,11 +2525,12 @@ export default function App() {
                         <div className="flex gap-2 mt-3 pt-2">
                           <button
                             onClick={async () => {
-                              const { exportNativePDF } = await import("./utils/pdfExport");
-                              const url = exportNativePDF(entities, tav.format, tav.scale, tav.unit, tav, 'bloburl');
-                              if (url) {
-                                setPdfPreviewUrl(url);
-                              }
+                            const { exportNativePDF } = await import("./utils/pdfExport");
+                            const url = exportNativePDF(entities, tav.format, tav.scale, tav.unit, tav, 'bloburl');
+                            if (url) {
+                              setPdfPreviewUrl(url);
+                              setActivePreviewTavolaId(tav.id);
+                            }
                             }}
                             className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-bold py-1.5 px-2 rounded-md text-[10px] transition-colors flex items-center justify-center gap-1 shadow-sm uppercase tracking-wider"
                           >

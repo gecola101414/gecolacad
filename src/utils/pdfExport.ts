@@ -325,6 +325,8 @@ export const exportNativePDF = (
           if (entity.textAlign === 'right') align = 'right';
           
           pdf.text(entity.text, tx(entity.point.x), ty(entity.point.y), { align, baseline: 'top' });
+      } else if (entity.type === 'hatch') {
+          drawHatchInPDF(pdf, entity, tx, ty, ts, scale);
       }
   });
 
@@ -438,3 +440,435 @@ export const exportNativePDF = (
   const exportName = tavola ? `${tavola.name}.pdf` : 'disegno.pdf';
   pdf.save(exportName);
 };
+
+interface LocalPoint { x: number; y: number; }
+
+function isPointInPolygon(p: LocalPoint, poly: LocalPoint[]): boolean {
+  let inside = false;
+  const n = poly.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y;
+    const xj = poly[j].x, yj = poly[j].y;
+    const intersect = ((yi > p.y) !== (yj > p.y))
+        && (p.x < (xj - xi) * (p.y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function getLinePolygonIntersections(p0: LocalPoint, v: LocalPoint, poly: LocalPoint[]): number[] {
+  const ts: number[] = [];
+  const n = poly.length;
+  const len2 = v.x * v.x + v.y * v.y;
+  if (len2 < 1e-9) return ts;
+
+  for (let i = 0; i < n; i++) {
+    const vi = poly[i];
+    const vj = poly[(i + 1) % n];
+
+    const dx = vj.x - vi.x;
+    const dy = vj.y - vi.y;
+
+    const det = -v.x * dy + v.y * dx;
+    if (Math.abs(det) < 1e-9) continue;
+
+    const rx = vi.x - p0.x;
+    const ry = vi.y - p0.y;
+
+    const t = (-rx * dy + ry * dx) / det;
+    const u = (v.x * ry - v.y * rx) / det;
+
+    if (u >= -1e-6 && u <= 1 + 1e-6) {
+      ts.push(t);
+    }
+  }
+
+  ts.sort((a, b) => a - b);
+  const uniqueTs: number[] = [];
+  for (let i = 0; i < ts.length; i++) {
+    if (uniqueTs.length === 0 || ts[i] - uniqueTs[uniqueTs.length - 1] > 1e-5) {
+      uniqueTs.push(ts[i]);
+    }
+  }
+  return uniqueTs;
+}
+
+function drawPatternLine(
+  pdf: any,
+  p0: LocalPoint,
+  v: LocalPoint,
+  poly: LocalPoint[],
+  tx: (x: number) => number,
+  ty: (y: number) => number,
+  dashed: boolean = false,
+  dashPattern: number[] = [2, 2]
+) {
+  const ts = getLinePolygonIntersections(p0, v, poly);
+  if (ts.length < 2) return;
+
+  if (dashed) {
+    pdf.setLineDashPattern(dashPattern, 0);
+  } else {
+    pdf.setLineDashPattern([], 0);
+  }
+
+  for (let i = 0; i < ts.length - 1; i += 2) {
+    const tStart = ts[i];
+    const tEnd = ts[i + 1];
+    
+    const midT = (tStart + tEnd) / 2;
+    const midPt = { x: p0.x + midT * v.x, y: p0.y + midT * v.y };
+    if (isPointInPolygon(midPt, poly)) {
+      const startPt = { x: p0.x + tStart * v.x, y: p0.y + tStart * v.y };
+      const endPt = { x: p0.x + tEnd * v.x, y: p0.y + tEnd * v.y };
+      pdf.line(tx(startPt.x), ty(startPt.y), tx(endPt.x), ty(endPt.y));
+    }
+  }
+}
+
+function drawHatchInPDF(
+  pdf: any,
+  entity: any,
+  tx: (x: number) => number,
+  ty: (y: number) => number,
+  ts: (val: number) => number,
+  scale: number
+) {
+  const { pattern, scale: hScale, angle, color, points, sfumatura = 0 } = entity;
+  if (!points || points.length < 3) return;
+
+  // Set color
+  let r = 59, g = 130, b = 246; // Default `#3b82f6`
+  if (color && color.startsWith('#')) {
+    const hex = color.replace('#', '');
+    if (hex.length === 3) {
+      r = parseInt(hex[0] + hex[0], 16);
+      g = parseInt(hex[1] + hex[1], 16);
+      b = parseInt(hex[2] + hex[2], 16);
+    } else if (hex.length === 6) {
+      r = parseInt(hex.substring(0, 2), 16);
+      g = parseInt(hex.substring(2, 4), 16);
+      b = parseInt(hex.substring(4, 6), 16);
+    }
+  } else if (color && color.startsWith('rgb')) {
+    const match = color.match(/\d+/g);
+    if (match && match.length >= 3) {
+      r = parseInt(match[0]);
+      g = parseInt(match[1]);
+      b = parseInt(match[2]);
+    }
+  }
+
+  const pat = (pattern || 'ansi31').toLowerCase();
+
+  if (pat === 'solid') {
+    pdf.setFillColor(r, g, b);
+    const pdfPoints = points.map((pt: LocalPoint) => ({ x: tx(pt.x), y: ty(pt.y) }));
+    pdf.polygon(pdfPoints, 'F');
+    return;
+  }
+
+  // Find center and bounding box
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of points) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const diag = Math.sqrt((maxX - minX) ** 2 + (maxY - minY) ** 2);
+  const halfDiag = Math.max(50, diag / 2);
+
+  const radAngle = ((angle || 0) * Math.PI) / 180;
+  const step = Math.max(2, hScale || 14);
+
+  // Set drawing attributes
+  pdf.setDrawColor(r, g, b);
+  pdf.setFillColor(r, g, b);
+  pdf.setLineWidth(0.12);
+
+  const getGlobalPos = (lx: number, ly: number, extraRad: number = 0) => {
+    const theta = radAngle + extraRad;
+    const cosT = Math.cos(theta);
+    const sinT = Math.sin(theta);
+    return {
+      x: cx + lx * cosT - ly * sinT,
+      y: cy + lx * sinT + ly * cosT,
+    };
+  };
+
+  if (pat === 'ansi31') {
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      const pStart = getGlobalPos(x, -halfDiag, Math.PI / 4);
+      const pEnd = getGlobalPos(x, halfDiag, Math.PI / 4);
+      const v = { x: pEnd.x - pStart.x, y: pEnd.y - pStart.y };
+      drawPatternLine(pdf, pStart, v, points, tx, ty);
+    }
+  } else if (pat === 'ansi32') {
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      const pStart1 = getGlobalPos(x, -halfDiag, Math.PI / 4);
+      const pEnd1 = getGlobalPos(x, halfDiag, Math.PI / 4);
+      drawPatternLine(pdf, pStart1, { x: pEnd1.x - pStart1.x, y: pEnd1.y - pStart1.y }, points, tx, ty);
+
+      const pStart2 = getGlobalPos(x + step * 0.25, -halfDiag, Math.PI / 4);
+      const pEnd2 = getGlobalPos(x + step * 0.25, halfDiag, Math.PI / 4);
+      drawPatternLine(pdf, pStart2, { x: pEnd2.x - pStart2.x, y: pEnd2.y - pStart2.y }, points, tx, ty);
+    }
+  } else if (pat === 'ansi33') {
+    let idx = 0;
+    for (let x = -halfDiag; x <= halfDiag; x += step / 2) {
+      const pStart = getGlobalPos(x, -halfDiag, Math.PI / 4);
+      const pEnd = getGlobalPos(x, halfDiag, Math.PI / 4);
+      const v = { x: pEnd.x - pStart.x, y: pEnd.y - pStart.y };
+      const isDashed = idx % 2 !== 0;
+      const dPat = [ts(Math.max(1, step * 0.15)), ts(Math.max(1, step * 0.15))];
+      drawPatternLine(pdf, pStart, v, points, tx, ty, isDashed, dPat);
+      idx++;
+    }
+  } else if (pat === 'ansi34') {
+    const dPat = [ts(Math.max(1, step * 0.2)), ts(Math.max(1, step * 0.2))];
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      const pStart = getGlobalPos(x, -halfDiag, Math.PI / 4);
+      const pEnd = getGlobalPos(x, halfDiag, Math.PI / 4);
+      const v = { x: pEnd.x - pStart.x, y: pEnd.y - pStart.y };
+      drawPatternLine(pdf, pStart, v, points, tx, ty, true, dPat);
+    }
+  } else if (pat === 'grid') {
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      const pStart = getGlobalPos(x, -halfDiag);
+      const pEnd = getGlobalPos(x, halfDiag);
+      drawPatternLine(pdf, pStart, { x: pEnd.x - pStart.x, y: pEnd.y - pStart.y }, points, tx, ty);
+    }
+    for (let y = -halfDiag; y <= halfDiag; y += step) {
+      const pStart = getGlobalPos(-halfDiag, y);
+      const pEnd = getGlobalPos(halfDiag, y);
+      drawPatternLine(pdf, pStart, { x: pEnd.x - pStart.x, y: pEnd.y - pStart.y }, points, tx, ty);
+    }
+  } else if (pat === 'cross') {
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      const pStart = getGlobalPos(x, -halfDiag, Math.PI / 4);
+      const pEnd = getGlobalPos(x, halfDiag, Math.PI / 4);
+      drawPatternLine(pdf, pStart, { x: pEnd.x - pStart.x, y: pEnd.y - pStart.y }, points, tx, ty);
+    }
+    for (let y = -halfDiag; y <= halfDiag; y += step) {
+      const pStart = getGlobalPos(-halfDiag, y, Math.PI / 4);
+      const pEnd = getGlobalPos(halfDiag, y, Math.PI / 4);
+      drawPatternLine(pdf, pStart, { x: pEnd.x - pStart.x, y: pEnd.y - pStart.y }, points, tx, ty);
+    }
+  } else if (pat === 'stripe') {
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      const pStart = getGlobalPos(x, -halfDiag);
+      const pEnd = getGlobalPos(x, halfDiag);
+      drawPatternLine(pdf, pStart, { x: pEnd.x - pStart.x, y: pEnd.y - pStart.y }, points, tx, ty);
+    }
+  } else if (pat === 'horizontal') {
+    for (let y = -halfDiag; y <= halfDiag; y += step) {
+      const pStart = getGlobalPos(-halfDiag, y);
+      const pEnd = getGlobalPos(halfDiag, y);
+      drawPatternLine(pdf, pStart, { x: pEnd.x - pStart.x, y: pEnd.y - pStart.y }, points, tx, ty);
+    }
+  } else if (pat === 'dots') {
+    const rDot = Math.max(0.4, step / 14);
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      for (let y = -halfDiag; y <= halfDiag; y += step) {
+        const glob = getGlobalPos(x, y);
+        if (isPointInPolygon(glob, points)) {
+          pdf.circle(tx(glob.x), ty(glob.y), ts(rDot), 'F');
+        }
+      }
+    }
+  } else if (pat === 'zigzag') {
+    const wl = step * 0.9;
+    for (let y = -halfDiag; y <= halfDiag; y += step) {
+      let up = true;
+      let prevPt = getGlobalPos(-halfDiag, y);
+      for (let x = -halfDiag + wl; x <= halfDiag; x += wl) {
+        const nextLocalY = up ? y + step * 0.25 : y - step * 0.25;
+        const nextPt = getGlobalPos(x, nextLocalY);
+        const v = { x: nextPt.x - prevPt.x, y: nextPt.y - prevPt.y };
+        drawPatternLine(pdf, prevPt, v, points, tx, ty);
+        prevPt = nextPt;
+        up = !up;
+      }
+    }
+  } else if (pat === 'waves') {
+    const wl = step;
+    for (let y = -halfDiag; y <= halfDiag; y += step) {
+      let prevPt = getGlobalPos(-halfDiag, y + Math.sin(-halfDiag / (wl / 4.5)) * (step * 0.2));
+      for (let x = -halfDiag + 3; x <= halfDiag; x += 3) {
+        const nextLocalY = y + Math.sin(x / (wl / 4.5)) * (step * 0.2);
+        const nextPt = getGlobalPos(x, nextLocalY);
+        const v = { x: nextPt.x - prevPt.x, y: nextPt.y - prevPt.y };
+        drawPatternLine(pdf, prevPt, v, points, tx, ty);
+        prevPt = nextPt;
+      }
+    }
+  } else if (pat === 'brick') {
+    const bHeight = step;
+    const bWidth = step * 2.2;
+    for (let y = -halfDiag; y <= halfDiag; y += bHeight) {
+      const pStart = getGlobalPos(-halfDiag, y);
+      const pEnd = getGlobalPos(halfDiag, y);
+      drawPatternLine(pdf, pStart, { x: pEnd.x - pStart.x, y: pEnd.y - pStart.y }, points, tx, ty);
+    }
+    let rowIndex = 0;
+    for (let y = -halfDiag; y <= halfDiag; y += bHeight) {
+      const offsetX = (rowIndex % 2 === 0) ? 0 : bWidth / 2;
+      for (let x = -halfDiag + offsetX - bWidth; x <= halfDiag + bWidth; x += bWidth) {
+        const pStart = getGlobalPos(x, y);
+        const pEnd = getGlobalPos(x, y + bHeight);
+        drawPatternLine(pdf, pStart, { x: pEnd.x - pStart.x, y: pEnd.y - pStart.y }, points, tx, ty);
+      }
+      rowIndex++;
+    }
+  } else if (pat === 'checker') {
+    let i = 0;
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      let j = 0;
+      for (let y = -halfDiag; y <= halfDiag; y += step) {
+        if ((i + j) % 2 === 0) {
+          const p1 = getGlobalPos(x, y);
+          const p2 = getGlobalPos(x + step, y);
+          const p3 = getGlobalPos(x + step, y + step);
+          const p4 = getGlobalPos(x, y + step);
+          
+          const centerG = getGlobalPos(x + step/2, y + step/2);
+          if (isPointInPolygon(centerG, points)) {
+            pdf.polygon([
+              { x: tx(p1.x), y: ty(p1.y) },
+              { x: tx(p2.x), y: ty(p2.y) },
+              { x: tx(p3.x), y: ty(p3.y) },
+              { x: tx(p4.x), y: ty(p4.y) }
+            ], 'F');
+          }
+        }
+        j++;
+      }
+      i++;
+    }
+  } else if (pat === 'triangles') {
+    const h = step * Math.sin(Math.PI / 3);
+    for (let y = -halfDiag; y <= halfDiag; y += h) {
+      for (let x = -halfDiag; x <= halfDiag; x += step) {
+        const p1 = getGlobalPos(x, y);
+        const p2 = getGlobalPos(x + step / 2, y + h);
+        const p3 = getGlobalPos(x - step / 2, y + h);
+
+        drawPatternLine(pdf, p1, { x: p2.x - p1.x, y: p2.y - p1.y }, points, tx, ty);
+        drawPatternLine(pdf, p2, { x: p3.x - p2.x, y: p3.y - p2.y }, points, tx, ty);
+        drawPatternLine(pdf, p3, { x: p1.x - p3.x, y: p1.y - p3.y }, points, tx, ty);
+      }
+    }
+  } else if (pat === 'honey') {
+    const rHex = step / 1.73;
+    const h = rHex * Math.sin(Math.PI / 3);
+    for (let y = -halfDiag - rHex; y <= halfDiag + rHex; y += h * 2) {
+      let isAlt = false;
+      for (let x = -halfDiag - rHex; x <= halfDiag + rHex; x += rHex * 1.5) {
+        const startOffset = isAlt ? h : 0;
+        let prevPt = getGlobalPos(x + rHex * Math.cos(0), y + startOffset + rHex * Math.sin(0));
+        for (let side = 1; side <= 6; side++) {
+          const rad = ((side % 6) * Math.PI) / 3;
+          const nextPt = getGlobalPos(x + rHex * Math.cos(rad), y + startOffset + rHex * Math.sin(rad));
+          drawPatternLine(pdf, prevPt, { x: nextPt.x - prevPt.x, y: nextPt.y - prevPt.y }, points, tx, ty);
+          prevPt = nextPt;
+        }
+        isAlt = !isAlt;
+      }
+    }
+  } else if (pat === 'gravel') {
+    const size = step * 0.35;
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      for (let y = -halfDiag; y <= halfDiag; y += step) {
+        const rx = x + (Math.sin(x * y) * step * 0.15);
+        const ry = y + (Math.cos(x + y) * step * 0.15);
+        
+        const p1 = getGlobalPos(rx - size * 0.5, ry - size * 0.2);
+        const p2 = getGlobalPos(rx + size * 0.1, ry - size * 0.5);
+        const p3 = getGlobalPos(rx + size * 0.5, ry + size * 0.1);
+        const p4 = getGlobalPos(rx - size * 0.1, ry + size * 0.4);
+
+        drawPatternLine(pdf, p1, { x: p2.x - p1.x, y: p2.y - p1.y }, points, tx, ty);
+        drawPatternLine(pdf, p2, { x: p3.x - p2.x, y: p3.y - p2.y }, points, tx, ty);
+        drawPatternLine(pdf, p3, { x: p4.x - p3.x, y: p4.y - p3.y }, points, tx, ty);
+        drawPatternLine(pdf, p4, { x: p1.x - p4.x, y: p1.y - p4.y }, points, tx, ty);
+      }
+    }
+  } else if (pat === 'cobble') {
+    const rC = step * 0.33;
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      for (let y = -halfDiag; y <= halfDiag; y += step) {
+        const rx = x + (Math.sin(x * y) * step * 0.12);
+        const ry = y + (Math.cos(x + y) * step * 0.12);
+        const rot = Math.sin(x * y);
+
+        const getEllipsePt = (angleRad: number) => {
+          const ex = rx + rC * 1.15 * Math.cos(angleRad);
+          const ey = ry + rC * 0.75 * Math.sin(angleRad);
+          const s = Math.sin(rot);
+          const c = Math.cos(rot);
+          const dx = ex - rx;
+          const dy = ey - ry;
+          return getGlobalPos(rx + (dx * c - dy * s), ry + (dx * s + dy * c));
+        };
+
+        let prevPt = getEllipsePt(0);
+        for (let i = 1; i <= 8; i++) {
+          const ang = (i * Math.PI) / 4;
+          const nextPt = getEllipsePt(ang);
+          drawPatternLine(pdf, prevPt, { x: nextPt.x - prevPt.x, y: nextPt.y - prevPt.y }, points, tx, ty);
+          prevPt = nextPt;
+        }
+      }
+    }
+  } else if (pat === 'plaid') {
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      const pStart1 = getGlobalPos(x, -halfDiag);
+      const pEnd1 = getGlobalPos(x, halfDiag);
+      drawPatternLine(pdf, pStart1, { x: pEnd1.x - pStart1.x, y: pEnd1.y - pStart1.y }, points, tx, ty);
+
+      const pStart2 = getGlobalPos(x + step * 0.2, -halfDiag);
+      const pEnd2 = getGlobalPos(x + step * 0.2, halfDiag);
+      drawPatternLine(pdf, pStart2, { x: pEnd2.x - pStart2.x, y: pEnd2.y - pStart2.y }, points, tx, ty);
+    }
+    for (let y = -halfDiag; y <= halfDiag; y += step) {
+      const pStart1 = getGlobalPos(-halfDiag, y);
+      const pEnd1 = getGlobalPos(halfDiag, y);
+      drawPatternLine(pdf, pStart1, { x: pEnd1.x - pStart1.x, y: pEnd1.y - pStart1.y }, points, tx, ty);
+
+      const pStart2 = getGlobalPos(-halfDiag, y + step * 0.2);
+      const pEnd2 = getGlobalPos(halfDiag, y + step * 0.2);
+      drawPatternLine(pdf, pStart2, { x: pEnd2.x - pStart2.x, y: pEnd2.y - pStart2.y }, points, tx, ty);
+    }
+  } else if (pat === 'stars') {
+    const rStar = step * 0.28;
+    for (let x = -halfDiag; x <= halfDiag; x += step) {
+      for (let y = -halfDiag; y <= halfDiag; y += step) {
+        const starLocalPts = [
+          { x: 0, y: -rStar },
+          { x: rStar * 0.2, y: -rStar * 0.2 },
+          { x: rStar, y: 0 },
+          { x: rStar * 0.2, y: rStar * 0.2 },
+          { x: 0, y: rStar },
+          { x: -rStar * 0.2, y: rStar * 0.2 },
+          { x: -rStar, y: 0 },
+          { x: -rStar * 0.2, y: -rStar * 0.2 }
+        ];
+
+        let prevPt = getGlobalPos(x + starLocalPts[0].x, y + starLocalPts[0].y);
+        for (let i = 1; i <= 8; i++) {
+          const pt = starLocalPts[i % 8];
+          const nextPt = getGlobalPos(x + pt.x, y + pt.y);
+          drawPatternLine(pdf, prevPt, { x: nextPt.x - prevPt.x, y: nextPt.y - prevPt.y }, points, tx, ty);
+          prevPt = nextPt;
+        }
+      }
+    }
+  }
+
+  pdf.setLineDashPattern([], 0);
+}
+
