@@ -3529,10 +3529,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           const cartX = tav.position.x + w - marginOffset - cartiglioW;
           const cartY = tav.position.y + h - marginOffset - cartiglioH;
           
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+          const isCartiglioHovered = hoveredTavolaPart?.id === tav.id && hoveredTavolaPart?.part === 'cartiglio';
+          ctx.fillStyle = isCartiglioHovered ? 'rgba(37, 99, 235, 0.08)' : 'rgba(255, 255, 255, 0.9)';
           ctx.fillRect(cartX, cartY, cartiglioW, cartiglioH);
-          ctx.strokeStyle = '#2563eb';
-          ctx.lineWidth = 1.2 / view.zoom;
+          ctx.strokeStyle = isCartiglioHovered ? '#1d4ed8' : '#2563eb';
+          ctx.lineWidth = (isCartiglioHovered ? 2.0 : 1.2) / view.zoom;
           ctx.strokeRect(cartX, cartY, cartiglioW, cartiglioH);
           
           // Partition lines of Title Block
@@ -3597,7 +3598,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           ctx.fillText(dString, cartX + cartiglioW * 0.53, cartY + cartiglioH * 0.81);
           
           // Top-left tab label
-          ctx.fillStyle = 'rgba(37, 99, 235, 0.9)';
+          const isBadgeHovered = hoveredTavolaPart?.id === tav.id && hoveredTavolaPart?.part === 'badge';
+          ctx.fillStyle = isBadgeHovered ? 'rgba(29, 78, 216, 1)' : 'rgba(37, 99, 235, 0.9)';
           const badgeH = 18 / view.zoom;
           const badgeW = 120 / view.zoom;
           ctx.fillRect(tav.position.x, tav.position.y - badgeH, badgeW, badgeH);
@@ -5310,10 +5312,66 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
     }
 
-    if (e.button === 0 && hoveredTavolaPart && onDoubleClickTavola) {
-        onDoubleClickTavola(hoveredTavolaPart.id);
-        setDrawing(null);
-        return;
+    if (e.button === 0 && hoveredTavolaPart) {
+        if (hoveredTavolaPart.part === 'cartiglio' && onDoubleClickTavola) {
+            onDoubleClickTavola(hoveredTavolaPart.id);
+            setDrawing(null);
+            return;
+        } else if (hoveredTavolaPart.part === 'badge' && tavole) {
+            const tav = tavole.find(t => t.id === hoveredTavolaPart.id);
+            if (tav && containerRef.current) {
+                const rect = containerRef.current.getBoundingClientRect();
+                const { w, h } = getTavolaDimensions(tav);
+                
+                const padding = 60; // Clean safety padding around the sheet
+                const viewportW = rect.width - padding * 2;
+                const viewportH = rect.height - padding * 2;
+                
+                if (w > 0 && h > 0 && viewportW > 0 && viewportH > 0) {
+                    const zoomX = viewportW / w;
+                    const zoomY = viewportH / h;
+                    const targetZoom = Math.min(zoomX, zoomY);
+                    
+                    const sheetCenterX = tav.position.x + w / 2;
+                    const sheetCenterY = tav.position.y + h / 2;
+                    
+                    const screenCenterX = rect.width / 2;
+                    const screenCenterY = rect.height / 2;
+                    
+                    const targetPanX = screenCenterX - sheetCenterX * targetZoom;
+                    const targetPanY = screenCenterY - sheetCenterY * targetZoom;
+                    
+                    const startZoom = view.zoom;
+                    const startPan = { ...view.pan };
+                    const duration = 850; // Deliberate sweet cinematic cadence 
+                    const startTime = performance.now();
+                    
+                    const animateZoomToFit = (time: number) => {
+                        const elapsed = time - startTime;
+                        const progress = Math.min(elapsed / duration, 1);
+                        
+                        // Ease Out Quint
+                        const ease = 1 - Math.pow(1 - progress, 5);
+                        
+                        const currentZoom = startZoom + (targetZoom - startZoom) * ease;
+                        const currentPan = {
+                            x: startPan.x + (targetPanX - startPan.x) * ease,
+                            y: startPan.y + (targetPanY - startPan.y) * ease
+                        };
+                        
+                        setView({ zoom: currentZoom, pan: currentPan });
+                        
+                        if (progress < 1) {
+                            requestAnimationFrame(animateZoomToFit);
+                        }
+                    };
+                    
+                    requestAnimationFrame(animateZoomToFit);
+                }
+            }
+            setDrawing(null);
+            return;
+        }
     }
 
     if (onActionStart) onActionStart();
