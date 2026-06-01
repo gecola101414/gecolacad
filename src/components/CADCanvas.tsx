@@ -1475,14 +1475,20 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const [isShiftPressed, setIsShiftPressed] = useState(false);
   const isShiftPressedRef = useRef(false);
   const isPanningRef = useRef(false);
+  const [isZoomActive, setIsZoomActive] = useState(false);
   useEffect(() => {
     const handleKeyUp = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
       if (e.key === 'Shift') {
         setIsShiftPressed(false);
         isShiftPressedRef.current = false;
       }
-      if (e.key === 'z') {
+      if (e.key.toLowerCase() === 'z') {
         isZoomModeRef.current = false;
+        setIsZoomActive(false);
         zoomFocusRef.current = null;
       }
     };
@@ -1524,13 +1530,18 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
       handleArrowsLine(e);
       if (e.key === 'Shift') {
         setIsShiftPressed(true);
         isShiftPressedRef.current = true;
       }
-      if (e.key === 'z') {
+      if (e.key.toLowerCase() === 'z') {
         isZoomModeRef.current = true;
+        setIsZoomActive(true);
         zoomFocusRef.current = lastMouseRef.current;
       }
     };
@@ -7920,7 +7931,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       onDrop={handleDrop}
     >
       <canvas ref={canvasRef} />
-      {isZoomModeRef.current && (
+      {isZoomActive && (
         <div className="absolute top-4 left-4 bg-white/90 p-4 rounded shadow-lg border border-gray-200 pointer-events-none z-10">
           <h3 className="font-bold mb-2">Modalità Zoom/Pan (Tasto Z premuto)</h3>
           <p className="text-sm text-gray-700">Tasto Sinistro: Zoom</p>
