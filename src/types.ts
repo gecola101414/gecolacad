@@ -90,6 +90,7 @@ export interface HatchEntity extends CADEntity {
   angle: number; // in degrees
   points: Point[]; // Polygon boundary
   backgroundColor?: string;
+  sfumatura?: number;
 }
 
 export type Entity = LineEntity | CircleEntity | RectEntity | DimensionEntity | ArcEntity | PointEntity | TextEntity | HatchEntity;

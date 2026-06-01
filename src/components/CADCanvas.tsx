@@ -368,8 +368,36 @@ const simplifyPolygon = (points: Point[], epsilon: number): Point[] => {
   }
 };
 
+const getRgbaFromColor = (colorStr: string, alpha: number) => {
+  if (!colorStr) return `rgba(99, 102, 241, ${alpha})`;
+  const str = colorStr.trim();
+  if (str.startsWith('#')) {
+    const hex = str.replace('#', '');
+    let r = 0, g = 0, b = 0;
+    if (hex.length === 3) {
+      r = parseInt(hex[0] + hex[0], 16);
+      g = parseInt(hex[1] + hex[1], 16);
+      b = parseInt(hex[2] + hex[2], 16);
+    } else if (hex.length === 6) {
+      r = parseInt(hex.substring(0, 2), 16);
+      g = parseInt(hex.substring(2, 4), 16);
+      b = parseInt(hex.substring(4, 6), 16);
+    } else {
+      return str;
+    }
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  } else if (str.startsWith('rgb')) {
+    const match = str.match(/\d+/g);
+    if (match && match.length >= 3) {
+      const aVal = match.length >= 4 ? parseFloat(match[3]) * alpha : alpha;
+      return `rgba(${match[0]}, ${match[1]}, ${match[2]}, ${aVal})`;
+    }
+  }
+  return str;
+};
+
 const drawHatchPattern = (ctx: CanvasRenderingContext2D, entity: any, zoom: number) => {
-  const { pattern, scale, angle, color, points } = entity;
+  const { pattern, scale, angle, color, points, sfumatura = 0 } = entity;
   if (!points || points.length < 3) return;
 
   ctx.save();
@@ -383,9 +411,32 @@ const drawHatchPattern = (ctx: CanvasRenderingContext2D, entity: any, zoom: numb
   ctx.closePath();
   ctx.clip();
 
-  // If solid fill, draw solid color and return
+  // If solid fill, draw solid color or radial gradient and return
   if (pattern?.toLowerCase() === 'solid') {
-    ctx.fillStyle = color || 'rgba(99, 102, 241, 0.45)';
+    if (sfumatura > 0) {
+      // Calculate polygon center and bounds
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const p of points) {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      }
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      const diag = Math.sqrt((maxX - minX) ** 2 + (maxY - minY) ** 2);
+      const halfDiag = Math.max(10, diag / 2);
+
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, halfDiag);
+      const startColor = getRgbaFromColor(color || '#000000', 1.0);
+      const endOpacity = Math.max(0, 1 - (sfumatura / 100));
+      const endColor = getRgbaFromColor(color || '#000000', endOpacity);
+      grad.addColorStop(0, startColor);
+      grad.addColorStop(1, endColor);
+      ctx.fillStyle = grad;
+    } else {
+      ctx.fillStyle = color || 'rgba(99, 102, 241, 0.45)';
+    }
     ctx.fill();
     ctx.restore();
     return;
@@ -738,6 +789,57 @@ const drawHatchPattern = (ctx: CanvasRenderingContext2D, entity: any, zoom: numb
   ctx.restore();
 };
 
+const expandPolygon = (points: Point[], amount: number): Point[] => {
+  const N = points.length;
+  if (N < 3) return points;
+
+  // 1. Calculate signed area to determine winding order (shoelace formula)
+  let signedArea = 0;
+  for (let i = 0; i < N; i++) {
+    const p1 = points[i];
+    const p2 = points[(i + 1) % N];
+    signedArea += (p1.x * p2.y - p2.x * p1.y);
+  }
+  const isCCW = signedArea > 0;
+
+  const expanded: Point[] = [];
+
+  for (let i = 0; i < N; i++) {
+    const P = points[i];
+    const Prev = points[(i - 1 + N) % N];
+    const Next = points[(i + 1) % N];
+
+    const dx1 = P.x - Prev.x;
+    const dy1 = P.y - Prev.y;
+    const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+
+    const dx2 = Next.x - P.x;
+    const dy2 = Next.y - P.y;
+    const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+
+    const u1 = len1 > 0 ? { x: dx1 / len1, y: dy1 / len1 } : { x: 0, y: 0 };
+    const u2 = len2 > 0 ? { x: dx2 / len2, y: dy2 / len2 } : { x: 0, y: 0 };
+
+    // Outward unit normal for each of the two adjacent segments
+    const n1 = isCCW ? { x: u1.y, y: -u1.x } : { x: -u1.y, y: u1.x };
+    const n2 = isCCW ? { x: u2.y, y: -u2.x } : { x: -u2.y, y: u2.x };
+
+    // Average normal at vertex (pointing outwards)
+    const vnX = n1.x + n2.x;
+    const vnY = n1.y + n2.y;
+    const lenVN = Math.sqrt(vnX * vnX + vnY * vnY);
+
+    const vn = lenVN > 0.01 ? { x: vnX / lenVN, y: vnY / lenVN } : n1;
+
+    expanded.push({
+      x: P.x + vn.x * amount,
+      y: P.y + vn.y * amount
+    });
+  }
+
+  return expanded;
+};
+
 const findBoundaryPolygon = (
   clickPoint: Point,
   entities: Entity[],
@@ -890,16 +992,17 @@ const findBoundaryPolygon = (
   }
 
   const simplifiedScreen = simplifyPolygon(downsampled, 0.8);
-  const canvasPoints = simplifiedScreen.map(pt => screenToCanvas(pt.x, pt.y));
-
-  if (canvasPoints.length > 1) {
-    const p1 = canvasPoints[0];
-    const pE = canvasPoints[canvasPoints.length - 1];
+  if (simplifiedScreen.length > 1) {
+    const p1 = simplifiedScreen[0];
+    const pE = simplifiedScreen[simplifiedScreen.length - 1];
     const dist = Math.sqrt((p1.x - pE.x)**2 + (p1.y - pE.y)**2);
-    if (dist < 1e-4) {
-      canvasPoints.pop();
+    if (dist < 1e-3) {
+      simplifiedScreen.pop();
     }
   }
+
+  const expandedScreen = expandPolygon(simplifiedScreen, 1.2);
+  const canvasPoints = expandedScreen.map(pt => screenToCanvas(pt.x, pt.y));
 
   return canvasPoints;
 };
@@ -2378,8 +2481,15 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
 
         if ((entity.id === selectedParallelLine?.id && blink) || (selectedEntityId === entity.id) || (positioningGroupId && entity.groupId === positioningGroupId) || selectedRaccordoLineIds.includes(entity.id)) {
-          ctx.strokeStyle = '#fbbf24'; // Amber highlight
-          ctx.lineWidth = (entity.lineWidth + 2) / view.zoom;
+          if (isFlashing) {
+            // Let the flashing styles take precedence for initial attention blink
+          } else if (entity.type === 'hatch') {
+            ctx.strokeStyle = '#22c55e'; // Green highlight for selected hatch
+            ctx.lineWidth = (entity.lineWidth + 3) / view.zoom;
+          } else {
+            ctx.strokeStyle = '#fbbf24'; // Amber highlight
+            ctx.lineWidth = (entity.lineWidth + 2) / view.zoom;
+          }
         } else if ((dragEntityIds.includes(entity.id) || entity.id === highlightedTrimLine?.id) && (activeTool === 'Move' || activeTool === 'Cancella' || activeTool === 'Join' || activeTool === 'Copy')) {
             ctx.strokeStyle = activeTool === 'Cancella' ? '#ef4444' : activeTool === 'Join' ? '#22c55e' : '#3b82f6';
             ctx.lineWidth = (entity.lineWidth + 4) / view.zoom;
@@ -2596,6 +2706,13 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         } else if (entity.type === 'hatch') {
           drawHatchPattern(ctx, entity, view.zoom);
           ctx.beginPath();
+          if ((selectedEntityId === entity.id || isFlashing) && entity.points && entity.points.length >= 3) {
+            ctx.moveTo(entity.points[0].x, entity.points[0].y);
+            for (let i = 1; i < entity.points.length; i++) {
+              ctx.lineTo(entity.points[i].x, entity.points[i].y);
+            }
+            ctx.closePath();
+          }
         }
         ctx.stroke();
 
@@ -5719,6 +5836,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                     scale: defaultHatchStyle?.scale || 30,
                     angle: defaultHatchStyle?.angle || 0,
                     color: defaultHatchStyle?.color || defaultLineStyle.color || '#3b82f6',
+                    sfumatura: (defaultHatchStyle as any)?.sfumatura || 0,
                     mode: defaultLineStyle.mode,
                     points: poly,
                     layer: hatchLayerExists ? 'Hatch' : activeLayerId
@@ -7158,6 +7276,15 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     }
     return false;
   };
+
+  useEffect(() => {
+    if (selectedEntityId) {
+      const ent = entities.find(e => e.id === selectedEntityId);
+      if (ent && ent.type === 'hatch') {
+        setFlashIds([selectedEntityId]);
+      }
+    }
+  }, [selectedEntityId, entities]);
 
   useEffect(() => {
     if (flashIds.length === 0) {

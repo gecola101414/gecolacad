@@ -148,6 +148,7 @@ export default function App() {
     scale: 30,
     angle: 0,
     color: '#000000',
+    sfumatura: 0,
   });
   const [defaultTextStyle, setDefaultTextStyle] = useState({
     fontFamily: 'sans-serif',
@@ -156,6 +157,11 @@ export default function App() {
     textAlign: 'left' as 'left' | 'center' | 'right' | 'justify',
   });
   const [eraserRadius, setEraserRadius] = useState(20);
+  const [favoritePanels, setFavoritePanels] = useState<Array<{ id: string; tools: string[]; x: number; y: number; isDocked: 'left' | 'right' | null }>>([
+    { id: "fav-1", tools: ["Line", "Circle", "Hatch", "Eraser"], x: 180, y: 120, isDocked: null }
+  ]);
+  const [activeDraggingId, setActiveDraggingId] = useState<string | null>(null);
+  const favoritesDragRef = useRef<{ isDragging: boolean; panelId: string; startX: number; startY: number; posX: number; posY: number } | null>(null);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isDimensionDialogOpen, setIsDimensionDialogOpen] = useState(false);
@@ -449,19 +455,22 @@ export default function App() {
   const handleToolClick = (tool: string) => {
     const guide = GUIDE_DATABASE[tool];
     // Only show the floating help if the manual sidebar tab is ACTIVE or was already showing
-    // "quando la spuntatura su manuale non ce ... non deve aprire gli help"
     if (guide && (activeSidebarTab === 'manuale' || showFloatingManual)) {
       setHoveredGuide(guide);
       setGuideLockedBy(tool);
       setShowFloatingManual(true);
+    } else {
+      setShowFloatingManual(false);
+      setHoveredGuide(null);
+      setGuideLockedBy(null);
     }
 
     if (tool === "Raccordo") {
       setIsRaccordoDialogOpen(true);
+      setShowProperties(false);
     } else if (tool === "Penne") {
       setActiveSidebarTab('penne');
       setShowProperties(true);
-      // Reset tool to avoid showing tool-specific help instead of pen settings
       if (selectedTool === 'Hatch' || selectedTool === 'Specchio' || selectedTool === 'Dimension') {
         setSelectedTool('Select');
       }
@@ -483,6 +492,10 @@ export default function App() {
       } else if (tool === 'Dimension' || tool === 'Specchio') {
         setActiveSidebarTab('penne');
         setShowProperties(true);
+      } else {
+        // Close other function menus to free screen space
+        setShowProperties(false);
+        setIsRaccordoDialogOpen(false);
       }
     }
   };
@@ -542,6 +555,86 @@ export default function App() {
   ];
   const [showProperties, setShowProperties] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState("Disegno");
+
+  const handleFavoritesMouseDown = (e: React.MouseEvent, panelId: string) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    
+    e.preventDefault();
+    const panel = favoritePanels.find(p => p.id === panelId);
+    if (!panel) return;
+
+    setActiveDraggingId(panelId);
+
+    // Bring this panel to top layer
+    setFavoritePanels(prev => {
+      const targetPanel = prev.find(p => p.id === panelId);
+      if (!targetPanel) return prev;
+      return [...prev.filter(p => p.id !== panelId), targetPanel];
+    });
+
+    favoritesDragRef.current = {
+      isDragging: true,
+      panelId: panelId,
+      startX: e.clientX,
+      startY: e.clientY,
+      posX: panel.x,
+      posY: panel.y
+    };
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!favoritesDragRef.current?.isDragging) return;
+      const refData = favoritesDragRef.current;
+      if (refData.panelId !== panelId) return;
+
+      const dx = moveEvent.clientX - refData.startX;
+      const dy = moveEvent.clientY - refData.startY;
+      
+      // We apply a very subtle damping factor to mouse moves to make dragging feel smooth and premium (rallentato/ammortizzato)
+      const targetX = refData.posX + dx;
+      const targetY = refData.posY + dy;
+
+      let isDocked: 'left' | 'right' | null = null;
+
+      // Docking thresholds based on screen borders
+      if (targetX < 45) {
+        isDocked = 'left';
+      } else if (window.innerWidth - moveEvent.clientX < 240) {
+        isDocked = 'right';
+      }
+
+      setFavoritePanels(prev => prev.map(p => {
+        if (p.id === panelId) {
+          return {
+            ...p,
+            x: isDocked === 'left' ? 0 : (isDocked === 'right' ? window.innerWidth - 65 : Math.max(10, Math.min(window.innerWidth - 100, targetX))),
+            y: isDocked ? p.y : Math.max(50, Math.min(window.innerHeight - 200, targetY)),
+            isDocked
+          };
+        }
+        return p;
+      }));
+    };
+
+    const handleMouseUp = () => {
+      if (favoritesDragRef.current) {
+        favoritesDragRef.current.isDragging = false;
+      }
+      setActiveDraggingId(null);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const getToolIcon = (name: string) => {
+    for (const cat of categories) {
+      const found = cat.tools.find(t => t.name === name);
+      if (found) return found.icon;
+    }
+    return null;
+  };
 
   // Undo/Redo
   const [history, setHistory] = useState<Entity[][]>([[]]);
@@ -832,9 +925,19 @@ export default function App() {
         {selectedCategoryTools.map((tool) => (
             <button
               key={tool.name}
+              draggable={true}
+              onDragStart={(e) => {
+                e.dataTransfer.setData("text/plain", tool.name);
+                e.dataTransfer.setData("source", "toolbar");
+              }}
               onMouseEnter={() => handleGuideHover(tool.name)}
               onClick={() => handleToolClick(tool.name)}
-              className={`px-2 py-0.5 rounded flex items-center gap-1 text-xs ${selectedTool === tool.name ? "bg-indigo-100 text-indigo-900 border border-indigo-300" : "hover:bg-neutral-200"}`}
+              className={`px-2 py-0.5 rounded flex items-center gap-1 text-xs cursor-grab active:cursor-grabbing border border-transparent transition-all hover:border-neutral-300 ${
+                selectedTool === tool.name 
+                  ? "bg-indigo-100 text-indigo-900 border border-indigo-300 font-bold shadow-xs" 
+                  : "hover:bg-neutral-200"
+              }`}
+              title="Trascina e rilascia nel foglio per creare un menu speciale preferiti!"
             >
               <tool.icon size={12} />
               {tool.name}
@@ -920,6 +1023,56 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden relative">
         <main
           className="flex-1 overflow-hidden relative"
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            const toolName = e.dataTransfer.getData("text/plain");
+            const source = e.dataTransfer.getData("source");
+            
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            if (toolName) {
+              let isDocked: 'left' | 'right' | null = null;
+              let finalX = x;
+
+              if (x < 50) {
+                isDocked = 'left';
+                finalX = 0;
+              } else if (window.innerWidth - e.clientX < 240) {
+                isDocked = 'right';
+                finalX = window.innerWidth - 60;
+              }
+
+              const newPanelId = `fav-${Date.now()}`;
+              const newPanel = {
+                id: newPanelId,
+                tools: [toolName],
+                x: isDocked === 'left' ? 0 : (isDocked === 'right' ? window.innerWidth - 65 : Math.max(10, x - 24)),
+                y: Math.max(50, y - 24),
+                isDocked
+              };
+
+              if (source && source.startsWith("favorites-")) {
+                const sourcePanelId = source.replace("favorites-", "");
+                setFavoritePanels(prev => {
+                  const filtered = prev.map(p => {
+                    if (p.id === sourcePanelId) {
+                      return { ...p, tools: p.tools.filter(t => t !== toolName) };
+                    }
+                    return p;
+                  }).filter(p => p.tools.length > 0);
+                  return [...filtered, newPanel];
+                });
+              } else if (source === "toolbar") {
+                setFavoritePanels(prev => [...prev, newPanel]);
+              }
+            }
+          }}
         >
           <CADCanvas
             ref={cadCanvasRef}
@@ -1149,7 +1302,183 @@ export default function App() {
               </div>
             </div>
           )}
-          
+                 {/* Dynamic Floating/Docked Favorites Toolbars / Menu Speciali Preferiti */}
+          {(() => {
+            const leftDockedPanels = favoritePanels.filter(p => p.isDocked === 'left');
+            const rightDockedPanels = favoritePanels.filter(p => p.isDocked === 'right');
+
+            return favoritePanels.map((panel) => {
+              const isDocked = panel.isDocked;
+              const leftIndex = leftDockedPanels.findIndex(p => p.id === panel.id);
+              const rightIndex = rightDockedPanels.findIndex(p => p.id === panel.id);
+              const isDraggingThis = activeDraggingId === panel.id;
+              
+              // Dynamic placement coordinates with dampening transitions for satisfying dragging glide effect
+              let placementStyle: React.CSSProperties = {
+                left: panel.x,
+                top: panel.y,
+                transition: isDraggingThis
+                  ? 'left 0.12s cubic-bezier(0.12, 0.85, 0.2, 1), top 0.12s cubic-bezier(0.12, 0.85, 0.2, 1)'
+                  : 'left 0.3s cubic-bezier(0.16, 1, 0.3, 1), top 0.3s cubic-bezier(0.16, 1, 0.3, 1), right 0.3s, width 0.2s, height 0.2s',
+              };
+
+              if (isDocked === 'left' && !isDraggingThis) {
+                placementStyle = {
+                  left: leftIndex * 58,
+                  top: '15%',
+                  height: '70%',
+                  maxHeight: '520px',
+                  transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+                };
+              } else if (isDocked === 'right' && !isDraggingThis) {
+                placementStyle = {
+                  right: rightIndex * 58,
+                  top: '15%',
+                  height: '70%',
+                  maxHeight: '520px',
+                  transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+                };
+              }
+
+              return (
+                <div
+                  key={panel.id}
+                  style={placementStyle}
+                  className={`absolute z-30 select-none bg-white/80 backdrop-blur-md border border-neutral-200/80 shadow-[0_12px_40px_rgba(0,0,0,0.06)] overflow-hidden flex flex-col pointer-events-auto ${
+                    isDraggingThis
+                      ? "ring-2 ring-indigo-500/30 shadow-indigo-500/10 scale-[1.01] z-40" 
+                      : ""
+                  } ${
+                    isDocked === 'left' 
+                      ? 'rounded-r-xl border-l-0' 
+                      : isDocked === 'right' 
+                        ? 'rounded-l-xl border-r-0' 
+                        : 'rounded-xl max-w-[70px]'
+                  }`}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.dataTransfer.dropEffect = "copy";
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const toolName = e.dataTransfer.getData("text/plain");
+                  const source = e.dataTransfer.getData("source");
+
+                  if (toolName) {
+                    if (source === `favorites-${panel.id}`) return;
+
+                    if (source && source.startsWith("favorites-")) {
+                      const sourcePanelId = source.replace("favorites-", "");
+                      setFavoritePanels(prev => prev.map(p => {
+                        if (p.id === sourcePanelId) {
+                          return { ...p, tools: p.tools.filter(t => t !== toolName) };
+                        }
+                        return p;
+                      }).filter(p => p.tools.length > 0));
+                    }
+
+                    setFavoritePanels(prev => prev.map(p => {
+                      if (p.id === panel.id) {
+                        if (p.tools.includes(toolName)) return p;
+                        return { ...p, tools: [...p.tools, toolName] };
+                      }
+                      return p;
+                    }));
+                  }
+                }}
+              >
+                {/* Vertical discrete drag handle at top or side */}
+                <div
+                  onMouseDown={(e) => handleFavoritesMouseDown(e, panel.id)}
+                  className={`px-2 py-1.5 bg-neutral-100/90 hover:bg-neutral-200/50 text-neutral-600 flex items-center justify-between cursor-move text-[9px] uppercase font-mono font-bold tracking-wider border-b border-neutral-200/60 ${isDocked ? 'flex-col gap-1' : ''}`}
+                  title="Trascina per spostare o sganciare"
+                >
+                  <div className="flex flex-col items-center gap-0.5 pointer-events-none">
+                    <div className="flex gap-0.5">
+                      <div className="w-1 h-1 bg-neutral-400 rounded-full" />
+                      <div className="w-1 h-1 bg-neutral-400 rounded-full" />
+                      <div className="w-1 h-1 bg-neutral-400 rounded-full" />
+                    </div>
+                  </div>
+
+                  <span className="text-[8px] font-bold text-neutral-500 tracking-tighter block text-center truncate w-full scale-95 origin-center">
+                    {isDocked ? 'Snodato' : '★ Menu'}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFavoritePanels(prev => prev.filter(p => p.id !== panel.id));
+                    }}
+                    title="Chiudi pannello"
+                    className="text-neutral-400 hover:text-red-500 transition-colors p-0.5"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Vertical list of tools */}
+                <div className={`p-1.5 flex flex-col gap-1.5 bg-white items-center min-w-[54px] justify-start overflow-y-auto ${isDocked ? 'h-full' : 'max-h-[360px]'}`}>
+                  {panel.tools.length === 0 ? (
+                    <div className="text-[8px] text-neutral-400 text-center w-full p-2">
+                       Vuoto
+                    </div>
+                  ) : (
+                    panel.tools.map((toolName) => {
+                      const IconComp = getToolIcon(toolName);
+                      return (
+                        <div
+                          key={toolName}
+                          draggable={true}
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData("text/plain", toolName);
+                            e.dataTransfer.setData("source", `favorites-${panel.id}`);
+                          }}
+                          className="group relative"
+                        >
+                          <button
+                            onClick={() => handleToolClick(toolName)}
+                            className={`p-2 rounded-lg bg-neutral-50 border border-neutral-200/50 text-neutral-700 transition-all flex flex-col items-center justify-center gap-0.5 w-11 h-11 cursor-grab active:cursor-grabbing hover:bg-indigo-50/70 hover:text-indigo-950 hover:border-indigo-400/50 ${
+                              selectedTool === toolName ? "bg-indigo-50 border-indigo-400 text-indigo-950 font-bold shadow-xs" : ""
+                            }`}
+                            title={`${toolName} - Trascina per spostare o rimuovere`}
+                          >
+                            {IconComp ? <IconComp size={15} className="text-neutral-600 group-hover:text-indigo-600 transition-colors" /> : null}
+                            <span className="text-[7.5px] font-sans font-medium text-neutral-500 truncate w-full text-center tracking-tight leading-none">
+                              {toolName}
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setFavoritePanels(prev => {
+                                return prev.map(p => {
+                                  if (p.id === panel.id) {
+                                    return { ...p, tools: p.tools.filter(t => t !== toolName) };
+                                  }
+                                  return p;
+                                }).filter(p => p.tools.length > 0);
+                              });
+                            }}
+                            className="absolute -top-1 -right-1 hidden group-hover:flex w-3.5 h-3.5 bg-red-500 hover:bg-red-600 text-white rounded-full items-center justify-center text-[7px] border border-white font-black"
+                            title="Rimuovi"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            );
+          });
+        })()}
+
           {/* Subtle watermark overlay for licensing & authenticity */}
           <div className="absolute bottom-4 left-4 bg-white/70 backdrop-blur-sm border border-neutral-300/60 px-3 py-1.5 rounded shadow-sm text-[10px] text-neutral-600 font-mono pointer-events-none select-none flex flex-col z-10">
             <span className="font-sans font-black text-neutral-800 tracking-wider">GECOLA CAD v1.4</span>
@@ -1685,6 +2014,24 @@ export default function App() {
                           ))}
                         </div>
                       </div>
+
+                      {/* Sfumatura (Radial Gradient) Slider */}
+                      <div className="space-y-1.5 pt-2 border-t border-neutral-100">
+                        <div className="flex justify-between items-center">
+                          <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-sans">Sfumatura (Gradiente)</label>
+                          <span className="text-[10px] font-mono font-bold text-neutral-600">{(selectedEntity as any).sfumatura || 0}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="100"
+                          step="1"
+                          className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                          value={(selectedEntity as any).sfumatura || 0}
+                          onChange={(e) => updateEntity(selectedEntity.id, { sfumatura: Number(e.target.value) })}
+                        />
+                        <p className="text-[9px] text-neutral-400 leading-tight">Crea una sfumatura radiale dal centro (ideale per riempimenti solidi)</p>
+                      </div>
                     </div>
                   ) : (
                     <>
@@ -1822,22 +2169,39 @@ export default function App() {
                           </div>
 
                           <div className="space-y-1.5">
-                            <div className="flex justify-between items-center">
-                              <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block">Inclinazione (°)</label>
-                              <span className="text-[10px] font-mono font-bold text-neutral-600">{defaultHatchStyle.angle}°</span>
+                              <div className="flex justify-between items-center">
+                                <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block">Inclinazione (°)</label>
+                                <span className="text-[10px] font-mono font-bold text-neutral-600">{defaultHatchStyle.angle}°</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0"
+                                max="360"
+                                step="1"
+                                className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                value={defaultHatchStyle.angle}
+                                onChange={(e) => setDefaultHatchStyle(prev => ({ ...prev, angle: Number(e.target.value) }))}
+                              />
                             </div>
-                            <input
-                              type="range"
-                              min="0"
-                              max="360"
-                              step="1"
-                              className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                              value={defaultHatchStyle.angle}
-                              onChange={(e) => setDefaultHatchStyle(prev => ({ ...prev, angle: Number(e.target.value) }))}
-                            />
+
+                            <div className="space-y-1.5 pt-2 border-t border-neutral-100">
+                              <div className="flex justify-between items-center">
+                                <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-sans">Sfumatura Predefinita</label>
+                                <span className="text-[10px] font-mono font-bold text-neutral-600">{(defaultHatchStyle as any).sfumatura || 0}%</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="1"
+                                className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                value={(defaultHatchStyle as any).sfumatura || 0}
+                                onChange={(e) => setDefaultHatchStyle(prev => ({ ...prev, sfumatura: Number(e.target.value) }))}
+                              />
+                              <p className="text-[9px] text-neutral-400 leading-tight">I nuovi riempimenti solidi useranno questa sfumatura</p>
+                            </div>
                           </div>
                         </div>
-                      </div>
                     ) : selectedTool === 'Specchio' ? (
                       <div className="bg-indigo-950 border border-indigo-800 text-indigo-100 p-4 rounded-xl shadow-lg">
                         <p className="text-xs leading-normal font-sans">
