@@ -1751,6 +1751,27 @@ export default function App() {
                           </div>
                         </div>
 
+                        <div className="space-y-2 mt-4 pt-4 border-t border-neutral-100 bg-red-50/30 p-2 rounded">
+                          <h4 className="text-[10px] font-bold text-red-600 uppercase tracking-wider mb-2 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                            Calibrazione Righello (Stampante)
+                          </h4>
+                          <p className="text-[10px] text-neutral-500 leading-tight">
+                            Se stampando al 100% la "verifica 10mm" sul foglio misura diversamente (es. 9mm), inserisci qui la misura esatta letta col righello. Il CAD compenserà l'errore della stampante.
+                          </p>
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[10px] font-semibold text-neutral-600">Misura reale linea di verifica (in mm)</label>
+                            <input 
+                              type="number"
+                              step="0.1"
+                              placeholder="10"
+                              className="border border-neutral-300 rounded p-1.5 text-sm w-full bg-neutral-50 focus:bg-white focus:ring-1 focus:ring-red-500 focus:border-red-500 outline-none transition-all font-mono"
+                              value={tav.measuredCalibrationMm || 10}
+                              onChange={(e) => setTavole(tavole.map(t => t.id === tav.id ? {...t, measuredCalibrationMm: parseFloat(e.target.value) || 10} : t))}
+                            />
+                          </div>
+                        </div>
+
                       </div>
                       <div className="p-4 border-t border-neutral-100 bg-neutral-50 flex justify-end gap-2">
                         <button

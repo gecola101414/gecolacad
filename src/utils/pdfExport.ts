@@ -15,6 +15,7 @@ export interface TavolaExport {
     autore?: string;
     data?: string;
   };
+  measuredCalibrationMm?: number;
 }
 
 export const exportNativePDF = (
@@ -95,7 +96,9 @@ export const exportNativePDF = (
 
   // Precision Calibration Factor
   // 1.0 is the faithful ratio.
-  const CALIBRATION_FACTOR = 1.0; 
+  const CALIBRATION_FACTOR = tavola && tavola.measuredCalibrationMm && tavola.measuredCalibrationMm > 0
+      ? 10 / tavola.measuredCalibrationMm 
+      : 1.0; 
 
   const chosenFormat = tavola ? tavola.format : format;
   const chosenScaleDenom = tavola ? tavola.scale : scaleDenom;
@@ -374,9 +377,11 @@ export const exportNativePDF = (
       const marginMm = 5;
       pdf.rect(marginMm, marginMm, pSize.w - 2 * marginMm, pSize.h - 2 * marginMm, 'S');
       
-      // Draw Title Block background and borders
-      const cartW = 120;
-      const cartH = 40;
+      // Setup scale and apply CALIBRATION_FACTOR directly to margins and sizes too
+      const cartW = 120 * CALIBRATION_FACTOR;
+      const cartH = 40 * CALIBRATION_FACTOR;
+      const marginMmCart = marginMm * CALIBRATION_FACTOR;
+      
       const cartX = pSize.w - marginMm - cartW;
       const cartY = pSize.h - marginMm - cartH;
       
@@ -384,7 +389,7 @@ export const exportNativePDF = (
       pdf.rect(cartX, cartY, cartW, cartH, 'FD');
       
       // Secondary subdivision lines
-      pdf.setLineWidth(0.2);
+      pdf.setLineWidth(0.2 * CALIBRATION_FACTOR);
       pdf.line(cartX, cartY + cartH * 0.4, cartX + cartW, cartY + cartH * 0.4);
       pdf.line(cartX, cartY + cartH * 0.7, cartX + cartW, cartY + cartH * 0.7);
       pdf.line(cartX + cartW * 0.5, cartY + cartH * 0.4, cartX + cartW * 0.5, cartY + cartH);
@@ -392,58 +397,65 @@ export const exportNativePDF = (
       // Title Block Info
       pdf.setTextColor(30, 58, 138);
       pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(5);
-      pdf.text("PROGETTO:", cartX + 2.5, cartY + 4);
+      pdf.setFontSize(5 * CALIBRATION_FACTOR);
+      pdf.text("PROGETTO:", cartX + 2.5 * CALIBRATION_FACTOR, cartY + 4 * CALIBRATION_FACTOR);
       
-      pdf.setFontSize(8);
+      pdf.setFontSize(8 * CALIBRATION_FACTOR);
       const MAX_PROGETTO_LEN = 35;
       let pString = tavola.datiCartiglio?.progetto || "GECOLA CAD";
       if(pString.length > MAX_PROGETTO_LEN) pString = pString.substring(0, MAX_PROGETTO_LEN) + "...";
-      pdf.text(pString, cartX + 2.5, cartY + 10);
+      pdf.text(pString, cartX + 2.5 * CALIBRATION_FACTOR, cartY + 10 * CALIBRATION_FACTOR);
       
-      pdf.setFontSize(5);
-      pdf.text("TAVOLA:", cartX + 2.5, cartY + cartH * 0.4 + 4);
+      pdf.setFontSize(5 * CALIBRATION_FACTOR);
+      pdf.text("TAVOLA:", cartX + 2.5 * CALIBRATION_FACTOR, cartY + cartH * 0.4 + 4 * CALIBRATION_FACTOR);
       
-      pdf.setFontSize(8);
+      pdf.setFontSize(8 * CALIBRATION_FACTOR);
       const MAX_TITOLO_LEN = 20;
       let tString = tavola.datiCartiglio?.titolo || tavola.name;
       if(tString.length > MAX_TITOLO_LEN) tString = tString.substring(0, MAX_TITOLO_LEN) + "...";
-      pdf.text(tString, cartX + 2.5, cartY + cartH * 0.4 + 10);
+      pdf.text(tString, cartX + 2.5 * CALIBRATION_FACTOR, cartY + cartH * 0.4 + 10 * CALIBRATION_FACTOR);
       
-      pdf.setFontSize(5);
-      pdf.text("SCALA:", cartX + cartW * 0.5 + 2.5, cartY + cartH * 0.4 + 4);
+      pdf.setFontSize(5 * CALIBRATION_FACTOR);
+      pdf.text("SCALA:", cartX + cartW * 0.5 + 2.5 * CALIBRATION_FACTOR, cartY + cartH * 0.4 + 4 * CALIBRATION_FACTOR);
       
-      pdf.setFontSize(8);
-      pdf.text(`1:${tavola.scale}`, cartX + cartW * 0.5 + 2.5, cartY + cartH * 0.4 + 10);
+      pdf.setFontSize(8 * CALIBRATION_FACTOR);
+      pdf.text(`1:${tavola.scale}`, cartX + cartW * 0.5 + 2.5 * CALIBRATION_FACTOR, cartY + cartH * 0.4 + 10 * CALIBRATION_FACTOR);
       
-      pdf.setFontSize(5);
-      pdf.text("AUTORE:", cartX + 2.5, cartY + cartH * 0.7 + 4);
+      pdf.setFontSize(5 * CALIBRATION_FACTOR);
+      pdf.text("AUTORE:", cartX + 2.5 * CALIBRATION_FACTOR, cartY + cartH * 0.7 + 4 * CALIBRATION_FACTOR);
       
-      pdf.setFontSize(8);
+      pdf.setFontSize(8 * CALIBRATION_FACTOR);
       const MAX_AUTORE_LEN = 20;
       let aString = tavola.datiCartiglio?.autore || "Domenico Gimondo";
       if(aString.length > MAX_AUTORE_LEN) aString = aString.substring(0, MAX_AUTORE_LEN) + "...";
-      pdf.text(aString, cartX + 2.5, cartY + cartH * 0.7 + 10);
+      pdf.text(aString, cartX + 2.5 * CALIBRATION_FACTOR, cartY + cartH * 0.7 + 10 * CALIBRATION_FACTOR);
       
-      pdf.setFontSize(5);
-      pdf.text("DATA:", cartX + cartW * 0.5 + 2.5, cartY + cartH * 0.7 + 4);
+      pdf.setFontSize(5 * CALIBRATION_FACTOR);
+      pdf.text("DATA:", cartX + cartW * 0.5 + 2.5 * CALIBRATION_FACTOR, cartY + cartH * 0.7 + 4 * CALIBRATION_FACTOR);
       
-      pdf.setFontSize(8);
+      pdf.setFontSize(8 * CALIBRATION_FACTOR);
       const MAX_DATA_LEN = 15;
       let dString = tavola.datiCartiglio?.data || "";
       if(dString.length > MAX_DATA_LEN) dString = dString.substring(0, MAX_DATA_LEN) + "...";
-      pdf.text(dString, cartX + cartW * 0.5 + 2.5, cartY + cartH * 0.7 + 10);
+      pdf.text(dString, cartX + cartW * 0.5 + 2.5 * CALIBRATION_FACTOR, cartY + cartH * 0.7 + 10 * CALIBRATION_FACTOR);
 
       // Warning note for user about printer scaling
-      pdf.setFontSize(4);
+      pdf.setFontSize(4 * CALIBRATION_FACTOR);
       pdf.setTextColor(150, 0, 0);
-      pdf.text("STAMPARE AL 100% (DIMENSIONI EFFETTIVE). SE MISURA 38mm INVECE DI 40mm, DISATTIVARE 'ADATTA ALLA PAGINA' NELLE IMPOSTAZIONI STAMPANTE.", cartX + 2.5, cartY + cartH - 2);
+      if (CALIBRATION_FACTOR === 1.0) {
+        pdf.text("STAMPARE AL 100% (DIMENSIONI EFFETTIVE).", cartX + 2.5 * CALIBRATION_FACTOR, cartY + cartH - 2 * CALIBRATION_FACTOR);
+      } else {
+        pdf.text(`CALIBRAZIONE ATTIVA (${(CALIBRATION_FACTOR*100).toFixed(1)}%). COMPENSATA DISCREPANZA MARGINI STAMPANTE.`, cartX + 2.5 * CALIBRATION_FACTOR, cartY + cartH - 2 * CALIBRATION_FACTOR);
+      }
       
-      // Verification line (10mm)
+      // Verification line (10 * CALIBRATION_FACTOR mm)
+      // This will ensure that when printed, it physically measures 10mm given the user's report
       pdf.setDrawColor(150, 0, 0);
-      pdf.setLineWidth(0.3);
-      pdf.line(cartX + cartW - 15, cartY + cartH - 4.5, cartX + cartW - 5, cartY + cartH - 4.5);
-      pdf.text("VERIFICA 10mm", cartX + cartW - 10, cartY + cartH - 2.5, { align: 'center' });
+      pdf.setLineWidth(0.3 * CALIBRATION_FACTOR);
+      
+      const vLineLength = 10 * CALIBRATION_FACTOR;
+      pdf.line(cartX + cartW - 15 * CALIBRATION_FACTOR, cartY + cartH - 4.5 * CALIBRATION_FACTOR, cartX + cartW - 15 * CALIBRATION_FACTOR + vLineLength, cartY + cartH - 4.5 * CALIBRATION_FACTOR);
+      pdf.text("VERIFICA 10mm", cartX + cartW - 15 * CALIBRATION_FACTOR + (vLineLength / 2), cartY + cartH - 2.5 * CALIBRATION_FACTOR, { align: 'center' });
   }
 
   if (action === 'bloburl') {

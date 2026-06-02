@@ -151,4 +151,5 @@ export interface Tavola {
   position: { x: number; y: number };
   visible: boolean;
   datiCartiglio: TavolaData;
+  measuredCalibrationMm?: number;
 }

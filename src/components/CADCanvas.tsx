@@ -4264,29 +4264,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         ctx.restore();
       }
 
-      // Draw Tecnigrafo measurement label while drawing
-      if (drawing && tecnigrafoOrigin && (activeTool === 'Line' || activeTool === 'Mano Libera' || activeTool === 'Pencil')) {
-          const dist = Math.sqrt(Math.pow(actualMousePosRef.current.x - drawing.start.x, 2) + Math.pow(actualMousePosRef.current.y - drawing.start.y, 2));
-          if (dist > 0.1) {
-              ctx.save();
-              const labelX = actualMousePosRef.current.x + 15 / view.zoom;
-              const labelY = actualMousePosRef.current.y - 15 / view.zoom;
-              
-              const text = dist.toFixed(1);
-              ctx.font = `${12 / view.zoom}px Inter, sans-serif`;
-              const metrics = ctx.measureText(text);
-              const padding = 4 / view.zoom;
-              
-              ctx.fillStyle = 'rgba(15, 23, 42, 0.85)'; 
-              ctx.beginPath();
-              ctx.roundRect(labelX - padding, labelY - 12/view.zoom - padding, metrics.width + padding*2, 14/view.zoom + padding*2, 4/view.zoom);
-              ctx.fill();
-              
-              ctx.fillStyle = '#ffffff';
-              ctx.fillText(text + (defaultLineStyle.mode === 'ink' ? ' (HB)' : ''), labelX, labelY);
-              ctx.restore();
-          }
-      }
+      // Removed Redundant Tecnigrafo measurement label block here
 
       // --- BIM LIVE PREVIEWS (STARTS) ---
       if (activeTool === 'BIM_DisegnaStanza' && manualRoomPoints.length > 0) {
@@ -4583,7 +4561,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
         ctx.setLineDash([]);
 
-        if (!drawing.isFreehand) {
+        if (true) { // Measurement tooltip runs for all
             // Real-time measurement tooltip with emerald color indicator when wheel is tuning
             const tooltipDx = drawing.current.x - drawing.start.x;
             const tooltipDy = drawing.current.y - drawing.start.y;
@@ -4620,8 +4598,18 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
 
         if (label) {
-            const tooltipX = drawing.current.x + 12 / view.zoom;
-            const tooltipY = drawing.current.y + 12 / view.zoom;
+            let offsetX = 12;
+            let offsetY = 12;
+            
+            // Posizioniamo la finestrella dinamica spostata in alto a destra,
+            // per evitare che venga nascosta dalla mano dell'utente, dal tecnigrafo o dal cursore.
+            if (activeTool !== 'Eraser' && activeTool !== 'Trim' && activeTool !== 'Select') {
+                offsetX = 55;
+                offsetY = -55; // Sposta in alto e a destra in modo universale
+            }
+
+            const tooltipX = drawing.current.x + offsetX / view.zoom;
+            const tooltipY = drawing.current.y + offsetY / view.zoom;
             
             const metrics = ctx.measureText(label);
             const padW = 6 / view.zoom;
@@ -4643,19 +4631,21 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
         ctx.restore();
         
-        if (activeTool === 'Line' && isKnownAngle) {
-            ctx.save();
-            ctx.fillStyle = '#15803d'; // Green text confirmation
-            ctx.font = `bold ${12 / view.zoom}px sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'bottom';
-            const midX = (drawing.start.x + drawing.current.x) / 2;
-            const midY = (drawing.start.y + drawing.current.y) / 2;
-            ctx.fillText(`${matchedAngle}°`, midX, midY - 6 / view.zoom);
-            ctx.restore();
-        }
+        if (!drawing.isFreehand) {
+            
+            if (activeTool === 'Line' && isKnownAngle) {
+                ctx.save();
+                ctx.fillStyle = '#15803d'; // Green text confirmation
+                ctx.font = `bold ${12 / view.zoom}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+                const midX = (drawing.start.x + drawing.current.x) / 2;
+                const midY = (drawing.start.y + drawing.current.y) / 2;
+                ctx.fillText(`${matchedAngle}°`, midX, midY - 6 / view.zoom);
+                ctx.restore();
+            }
 
-        // --- TEMPLATE PREVIEW ---
+            // --- TEMPLATE PREVIEW ---
         if (activeTool === 'Template' && selectedTemplateId && hoverSnap) {
             const template = TEMPLATES.find(t => t.id === selectedTemplateId);
             if (template) {
@@ -4827,9 +4817,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 ctx.arc(refPt.x, refPt.y, 8 / view.zoom, 0, Math.PI * 2);
                 ctx.stroke();
             });
-        }
-        }
-      }
+        } // closes if (!drawing.isFreehand)
+        } // closes if (true)
+        } // closes the extra new if(!drawing.isFreehand) we added earlier
+      } // closes if (drawing)
 
       const isFreehandMode = activeTool === 'Line' && (defaultLineStyle.mode === 'pencil' || defaultLineStyle.mode === 'ink') && !orthoMode;
 
@@ -5488,201 +5479,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           ctx.restore();
       }
 
-      // LENTE INGRANDIMENTO HUD FOR PRECISION MODE (Right click activated)
-      const isPrecisionModeActive = (drawing && drawing.wheelLength !== undefined);
-      
-      if (isPrecisionModeActive) {
-          // Identify the exact physical point in canvas units of the object being drawn / matched
-          let targetCanvasPos = actualMousePosRef.current;
-          if (drawing) {
-              targetCanvasPos = drawing.current;
-          } else if (activeTool === 'Parallel' && selectedParallelLine) {
-              const line = selectedParallelLine as LineEntity;
-              const dxLine = line.end.x - line.start.x;
-              const dyLine = line.end.y - line.start.y;
-              const L = Math.sqrt(dxLine * dxLine + dyLine * dyLine);
-              if (L > 0) {
-                  const normX = -dyLine / L;
-                  const normY = dxLine / L;
-                  const offset = parallelDistance * parallelSign;
-                  // Midpoint of the offsets
-                  targetCanvasPos = {
-                      x: (line.start.x + line.end.x) / 2 + normX * offset,
-                      y: (line.start.y + line.end.y) / 2 + normY * offset
-                  };
-              }
-          }
-
-          const targetScreenPoint = canvasToScreen(targetCanvasPos.x, targetCanvasPos.y);
-          
-          ctx.save();
-          // Reset current canvas transform to identity to render in absolute screen pixels
-          ctx.setTransform(1, 0, 0, 1, 0, 0);
-          
-          const bubbleRadius = 85; // Slightly larger for better readability
-          // Offset the bubble up & right from the target spot so it doesn't obstruct target view
-          const bubbleCx = targetScreenPoint.x + 120;
-          const bubbleCy = targetScreenPoint.y - 120;
-          
-          // Draw target point accent dot
-          ctx.beginPath();
-          ctx.arc(targetScreenPoint.x, targetScreenPoint.y, 4, 0, Math.PI * 2);
-          ctx.fillStyle = '#10b981';
-          ctx.fill();
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-
-          // TANGET CONE - "due segmenti tangenti alla circonferenza così da impressione del ingrandimento"
-          const dxP = targetScreenPoint.x - bubbleCx;
-          const dyP = targetScreenPoint.y - bubbleCy;
-          const dP = Math.sqrt(dxP * dxP + dyP * dyP);
-          
-          if (dP > bubbleRadius) {
-              const alpha = Math.atan2(dyP, dxP);
-              const theta = Math.acos(bubbleRadius / dP);
-              
-              const t1X = bubbleCx + bubbleRadius * Math.cos(alpha + theta);
-              const t1Y = bubbleCy + bubbleRadius * Math.sin(alpha + theta);
-              
-              const t2X = bubbleCx + bubbleRadius * Math.cos(alpha - theta);
-              const t2Y = bubbleCy + bubbleRadius * Math.sin(alpha - theta);
-              
-              // Shadow/Fill for cone
-              ctx.beginPath();
-              ctx.moveTo(targetScreenPoint.x, targetScreenPoint.y);
-              ctx.lineTo(t1X, t1Y);
-              ctx.arc(bubbleCx, bubbleCy, bubbleRadius, alpha + theta, alpha - theta, true);
-              ctx.closePath();
-              const coneGrad = ctx.createLinearGradient(targetScreenPoint.x, targetScreenPoint.y, bubbleCx, bubbleCy);
-              coneGrad.addColorStop(0, 'rgba(16, 185, 129, 0)');
-              coneGrad.addColorStop(1, 'rgba(16, 185, 129, 0.15)');
-              ctx.fillStyle = coneGrad;
-              ctx.fill();
-              
-              // Tangent lines
-              ctx.beginPath();
-              ctx.moveTo(targetScreenPoint.x, targetScreenPoint.y);
-              ctx.lineTo(t1X, t1Y);
-              ctx.moveTo(targetScreenPoint.x, targetScreenPoint.y);
-              ctx.lineTo(t2X, t2Y);
-              ctx.strokeStyle = 'rgba(16, 185, 129, 0.4)';
-              ctx.lineWidth = 1;
-              ctx.setLineDash([5, 5]);
-              ctx.stroke();
-              ctx.setLineDash([]);
-          }
-
-          // Drop shadow for the magnifier glass HUD bubble
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
-          ctx.shadowBlur = 20;
-          ctx.shadowOffsetX = 5;
-          ctx.shadowOffsetY = 10;
-          
-          // Bubble frame backdrop
-          ctx.beginPath();
-          ctx.arc(bubbleCx, bubbleCy, bubbleRadius, 0, Math.PI * 2);
-          ctx.fillStyle = '#0f172a'; // Deep slate
-          ctx.fill();
-          
-          // Disable shadow for internal
-          ctx.shadowColor = 'transparent';
-          
-          // Radial gradient inside the lens
-          const glassGrad = ctx.createRadialGradient(bubbleCx - 30, bubbleCy - 30, 10, bubbleCx, bubbleCy, bubbleRadius);
-          glassGrad.addColorStop(0, '#1e293b');
-          glassGrad.addColorStop(1, '#0f172a');
-          ctx.fillStyle = glassGrad;
-          ctx.beginPath();
-          ctx.arc(bubbleCx, bubbleCy, bubbleRadius - 2, 0, Math.PI * 2);
-          ctx.fill();
-          
-          // Reflection line
-          ctx.save();
-          ctx.beginPath();
-          ctx.arc(bubbleCx, bubbleCy, bubbleRadius - 4, 0, Math.PI * 2);
-          ctx.clip();
-          ctx.beginPath();
-          ctx.moveTo(bubbleCx - bubbleRadius, bubbleCy - bubbleRadius);
-          ctx.lineTo(bubbleCx + bubbleRadius, bubbleCy + bubbleRadius);
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-          ctx.lineWidth = bubbleRadius;
-          ctx.stroke();
-          ctx.restore();
-          
-          // Outer bezel
-          ctx.beginPath();
-          ctx.arc(bubbleCx, bubbleCy, bubbleRadius, 0, Math.PI * 2);
-          ctx.strokeStyle = '#10b981';
-          ctx.lineWidth = 5;
-          ctx.stroke();
-          
-          // Internal highlights
-          ctx.beginPath();
-          ctx.arc(bubbleCx, bubbleCy, bubbleRadius - 4, 0, Math.PI * 2);
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-          ctx.lineWidth = 1;
-          ctx.stroke();
-          
-          // Content Label inside the glass
-          let valueText = '';
-          let subText = 'MISURA';
-          
-          if (activeTool === 'Parallel' && selectedParallelLine) {
-              const formatPrecisionVal = (val: number) => {
-                  if (Number.isInteger(val)) return val.toString();
-                  const roundedVal = Math.round(val * 100) / 100;
-                  return roundedVal.toString().replace('.', ',');
-              };
-              valueText = formatPrecisionVal(parallelDistance);
-              subText = 'OFF-SET';
-          } else if (drawing) {
-              const tooltipDx = drawing.current.x - drawing.start.x;
-              const tooltipDy = drawing.current.y - drawing.start.y;
-              const tooltipLength = Math.sqrt(tooltipDx * tooltipDx + tooltipDy * tooltipDy);
-              
-              const formatPrecisionVal = (val: number) => {
-                  if (Number.isInteger(val)) return val.toString();
-                  const roundedVal = Math.round(val * 100) / 100;
-                  return roundedVal.toString().replace('.', ',');
-              };
-              
-              valueText = formatPrecisionVal(tooltipLength);
-              if (activeTool === 'Line') subText = 'Distanza';
-              else if (activeTool === 'Circle') subText = 'Raggio';
-              else if (activeTool === 'Rectangle') {
-                  const rx = Math.abs(tooltipDx);
-                  const ry = Math.abs(tooltipDy);
-                  valueText = `${formatPrecisionVal(rx)} × ${formatPrecisionVal(ry)}`;
-                  subText = 'Rettangolo';
-              }
-          }
-          
-          // Header
-          ctx.fillStyle = '#34d399';
-          ctx.font = 'bold 11px system-ui';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(subText.toUpperCase(), bubbleCx, bubbleCy - 30);
-          
-          // HUGE Numbers
-          ctx.fillStyle = '#ffffff';
-          const fontSz = valueText.length > 8 ? 'bold 18px system-ui' : 'bold 32px system-ui';
-          ctx.font = fontSz;
-          ctx.fillText(valueText, bubbleCx, bubbleCy + 5);
-          
-          // Modalità
-          ctx.fillStyle = isJollyActive ? '#34d399' : '#94a3b8';
-          ctx.font = 'bold 10px system-ui';
-          ctx.fillText(isJollyActive ? 'MODALITÀ: DECIMALI' : 'MODALITÀ: INTERI', bubbleCx, bubbleCy + 32);
-
-          // Click to Edit hint
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-          ctx.font = '500 8px system-ui';
-          ctx.fillText('CLICCA PER INSERIRE MISURA', bubbleCx, bubbleCy + 48);
-          
-          ctx.restore();
-      }
+      // Removed LENTE INGRANDIMENTO HUD FOR PRECISION MODE as per instructions
     };
 
     renderRef.current = render;
