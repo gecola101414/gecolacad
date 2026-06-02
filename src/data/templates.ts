@@ -302,25 +302,6 @@ const bici: Elem[] = [
     line(-35, -35, 0, -35), line(0, -35, 20, -80), line(35, -35, 25, -90)
 ];
 
-const pianoCottura: Elem[] = [
-    ...rect(0, 0, 60, 50), // Tavola d'appoggio
-    circle(-15, -11, 8), circle(-15, -11, 4), // Fornello 1
-    circle(15, -11, 10), circle(15, -11, 5), // Fornello 2
-    circle(-15, 11, 10), circle(-15, 11, 5), // Fornello 3
-    circle(15, 11, 13), circle(15, 11, 6), // Fornello 4
-    circle(-20, 21, 2), circle(-7, 21, 2), circle(7, 21, 2), circle(20, 21, 2) // Manopole
-];
-
-const lavelloCucina: Elem[] = [
-    ...rect(0, 0, 85, 50), // Bordo vasca a due scomparti
-    ...rect(-18, 0, 36, 36), // Lavabo
-    line(12, -15, 36, -15), line(12, -10, 36, -10), line(12, -5, 36, -5), // Gocciolatoio
-    line(12, 0, 36, 0), line(12, 5, 36, 5), line(12, 10, 36, 10), line(12, 15, 36, 15),
-    circle(-18, 0, 2.5), // Scarico
-    circle(-32, 0, 2), // Miscelatore
-    line(-32, 0, -25, 0)
-];
-
 export const TEMPLATES: Template[] = [
     // BAGNO
     { id: 'vasca_hq', name: 'Vasca (Pianta)', category: 'Bagno', view: 'pianta', entities: vasca },
@@ -339,8 +320,6 @@ export const TEMPLATES: Template[] = [
     { id: 'sedia_ufficio_hq', name: 'Sedia Ufficio', category: 'Arredi', view: 'pianta', entities: sediaUfficio },
     { id: 'armadio_200_hq', name: 'Armadio 2 Antine 200cm', category: 'Arredi', view: 'pianta', entities: armadio200 },
     { id: 'armadio_300_hq', name: 'Armadio 3 Antine 300cm', category: 'Arredi', view: 'pianta', entities: armadio300 },
-    { id: 'piano_cottura_hq', name: 'Piano Cottura 4 Fuochi', category: 'Arredi', view: 'pianta', entities: pianoCottura },
-    { id: 'lavello_cucina_hq', name: 'Lavello Cucina Monovasca', category: 'Arredi', view: 'pianta', entities: lavelloCucina },
     
     // TAVOLI
     { id: 'tavolo_4_hq', name: 'Tavolo 4 Sedie', category: 'Arredi', view: 'pianta', entities: tavolo4 },

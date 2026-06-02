@@ -18,7 +18,6 @@ export interface CADEntity {
   dashed?: boolean;
   mode: 'ink' | 'pencil';
   groupId?: string;
-  templateId?: string;
   opacity?: number;
   raccordoMetadata?: {
     id1: string;
@@ -29,13 +28,6 @@ export interface CADEntity {
     clickPt2: { x: number; y: number };
     config: { type: 'curvo' | 'rettilineo'; value: number };
   };
-  isBIM?: boolean;
-  bimType?: 'room' | 'door' | 'window';
-  bimName?: string;
-  bimHeight?: number; // e.g. 2.70
-  bimWidth?: number;  // e.g. 80, 90, 120
-  bimWindowHeight?: number; // e.g. 140
-  bimPoints?: Point[]; // Polygon corners For rooms
 }
 
 export interface LineEntity extends CADEntity {

@@ -13,7 +13,6 @@ import { DimensionStyleDialog } from "./components/DimensionStyleDialog";
 import { RaccordoDialog } from "./components/RaccordoDialog";
 import { DXFTextReaderDialog } from "./components/DXFTextReaderDialog";
 import { TemplatePreview } from "./components/TemplatePreview";
-import { BIMWorkspacePanel } from "./components/BIMWorkspacePanel";
 import { TEMPLATES } from './data/templates';
 import { GUIDE_DATABASE, GuideItem } from './data/guides';
 import { Entity, Point, Layer, Measurement, Tavola } from "./types";
@@ -55,8 +54,7 @@ import {
   BookOpen,
   Grid,
   ExternalLink,
-  X,
-  Building
+  X
 } from "lucide-react";
 
 const ParallelIcon = ({ size = 16 }: { size?: number }) => (
@@ -128,57 +126,42 @@ const OrthoIcon = ({ size = 16 }: { size?: number }) => (
 );
 
 export default function App() {
-  const [selectedTool, setSelectedTool] = useState<string | null>(() => localStorage.getItem('selectedTool') || 'Select');
+  const [selectedTool, setSelectedTool] = useState<string | null>(null);
   const [entities, setEntities] = useState<Entity[]>([]);
-  const [layers, setLayers] = useState<Layer[]>(() => {
-    const saved = localStorage.getItem('layers');
-    return saved ? JSON.parse(saved) : [
-      { id: "0", name: "0", visible: true, frozen: false },
-      { id: "p1", name: "p1", visible: true, frozen: false },
-      { id: "p2", name: "p2", visible: true, frozen: false },
-      { id: "p4", name: "p4", visible: true, frozen: false },
-      { id: "Maschere", name: "Maschere", visible: true, frozen: false },
-      { id: "Misure", name: "Misure", visible: true, frozen: false },
-      { id: "Spessori", name: "Spessori", visible: true, frozen: false },
-      { id: "Hatch", name: "Hatch", visible: true, frozen: false },
-    ];
+  const [layers, setLayers] = useState<Layer[]>([
+    { id: "0", name: "0", visible: true, frozen: false },
+    { id: "p1", name: "p1", visible: true, frozen: false },
+    { id: "p2", name: "p2", visible: true, frozen: false },
+    { id: "p4", name: "p4", visible: true, frozen: false },
+    { id: "Maschere", name: "Maschere", visible: true, frozen: false },
+    { id: "Misure", name: "Misure", visible: true, frozen: false },
+    { id: "Spessori", name: "Spessori", visible: true, frozen: false },
+    { id: "Hatch", name: "Hatch", visible: true, frozen: false },
+  ]);
+  const [activeLayerId, setActiveLayerId] = useState<string>("0");
+  const [defaultLineStyle, setDefaultLineStyle] = useState({
+    color: "#000000",
+    lineWidth: 1,
+    dashed: false,
+    mode: "pencil" as "ink" | "pencil",
   });
-  const [activeLayerId, setActiveLayerId] = useState<string>(() => localStorage.getItem('activeLayerId') || "0");
-  const [defaultLineStyle, setDefaultLineStyle] = useState(() => {
-    const saved = localStorage.getItem('defaultLineStyle');
-    return saved ? JSON.parse(saved) : {
-      color: "#000000",
-      lineWidth: 1,
-      dashed: false,
-      mode: "pencil" as "ink" | "pencil",
-    };
+  const [defaultHatchStyle, setDefaultHatchStyle] = useState({
+    pattern: 'ANSI31',
+    scale: 30,
+    angle: 0,
+    color: '#000000',
+    sfumatura: 0,
   });
-  const [defaultHatchStyle, setDefaultHatchStyle] = useState(() => {
-    const saved = localStorage.getItem('defaultHatchStyle');
-    return saved ? JSON.parse(saved) : {
-      pattern: 'ANSI31',
-      scale: 30,
-      angle: 0,
-      color: '#000000',
-      sfumatura: 0,
-    };
+  const [defaultTextStyle, setDefaultTextStyle] = useState({
+    fontFamily: 'sans-serif',
+    fontSize: 14,
+    fontWeight: 'normal',
+    textAlign: 'left' as 'left' | 'center' | 'right' | 'justify',
   });
-  const [defaultTextStyle, setDefaultTextStyle] = useState(() => {
-    const saved = localStorage.getItem('defaultTextStyle');
-    return saved ? JSON.parse(saved) : {
-      fontFamily: 'sans-serif',
-      fontSize: 14,
-      fontWeight: 'normal',
-      textAlign: 'left' as 'left' | 'center' | 'right' | 'justify',
-    };
-  });
-  const [eraserRadius, setEraserRadius] = useState(() => Number(localStorage.getItem('eraserRadius')) || 20);
-  const [favoritePanels, setFavoritePanels] = useState<Array<{ id: string; tools: string[]; x: number; y: number; isDocked: 'left' | 'right' | null }>>(() => {
-    const saved = localStorage.getItem('favoritePanels');
-    return saved ? JSON.parse(saved) : [
-      { id: "fav-1", tools: ["Line", "Circle", "Hatch", "Eraser"], x: 180, y: 120, isDocked: null }
-    ];
-  });
+  const [eraserRadius, setEraserRadius] = useState(20);
+  const [favoritePanels, setFavoritePanels] = useState<Array<{ id: string; tools: string[]; x: number; y: number; isDocked: 'left' | 'right' | null }>>([
+    { id: "fav-1", tools: ["Line", "Circle", "Hatch", "Eraser"], x: 180, y: 120, isDocked: null }
+  ]);
   const [activeDraggingId, setActiveDraggingId] = useState<string | null>(null);
   const favoritesDragRef = useRef<{ isDragging: boolean; panelId: string; startX: number; startY: number; posX: number; posY: number } | null>(null);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
@@ -204,7 +187,7 @@ export default function App() {
     { id: "tav4", name: "Tavola n. 4", format: "A1", scale: 500, unit: "cm", position: { x: 40, y: 30 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 4", autore: "Ing. Domenico Gimondo", data: "2026" } },
     { id: "tav5", name: "Tavola n. 5", format: "A0", scale: 1000, unit: "cm", position: { x: 0, y: 0 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 5", autore: "Ing. Domenico Gimondo", data: "2026" } },
   ]);
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere' | 'testo' | 'gemini' | 'manuale' | 'bim'>(() => (localStorage.getItem('activeSidebarTab') as any) || 'penne');
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere' | 'testo' | 'gemini' | 'manuale'>('penne');
   const [hoveredGuide, setHoveredGuide] = useState<GuideItem | null>(null);
   const [guideLockedBy, setGuideLockedBy] = useState<string | null>(null);
   const [showFloatingManual, setShowFloatingManual] = useState(false);
@@ -226,10 +209,10 @@ export default function App() {
   const [doubleClickedTavolaId, setDoubleClickedTavolaId] = useState<string | null>(null);
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const [activePreviewTavolaId, setActivePreviewTavolaId] = useState<string | null>(null);
-  const [rulerStyle, setRulerStyle] = useState<"tecnigrafo" | "crosshair">(() => (localStorage.getItem('rulerStyle') as any) || "crosshair");
-  const [orthoMode, setOrthoMode] = useState(() => localStorage.getItem('orthoMode') === 'true');
-  const [showProperties, setShowProperties] = useState(() => localStorage.getItem('showProperties') === 'true');
-  const [selectedCategory, setSelectedCategory] = useState(() => localStorage.getItem('selectedCategory') || "Disegno");
+  const [rulerStyle, setRulerStyle] = useState<"tecnigrafo" | "crosshair">(
+    "crosshair",
+  );
+  const [orthoMode, setOrthoMode] = useState(true);
 
   // File System State
   const [fileHandle, setFileHandle] = useState<any>(null);
@@ -266,59 +249,6 @@ export default function App() {
     }, 1000);
     return () => clearTimeout(timeoutId);
   }, [entities, fileHandle, layers, tavole, measurements]);
-
-  // UI Persistence Effects
-  useEffect(() => {
-    localStorage.setItem('selectedTool', selectedTool || '');
-  }, [selectedTool]);
-
-  useEffect(() => {
-    localStorage.setItem('layers', JSON.stringify(layers));
-  }, [layers]);
-
-  useEffect(() => {
-    localStorage.setItem('activeLayerId', activeLayerId);
-  }, [activeLayerId]);
-
-  useEffect(() => {
-    localStorage.setItem('defaultLineStyle', JSON.stringify(defaultLineStyle));
-  }, [defaultLineStyle]);
-
-  useEffect(() => {
-    localStorage.setItem('defaultHatchStyle', JSON.stringify(defaultHatchStyle));
-  }, [defaultHatchStyle]);
-
-  useEffect(() => {
-    localStorage.setItem('defaultTextStyle', JSON.stringify(defaultTextStyle));
-  }, [defaultTextStyle]);
-
-  useEffect(() => {
-    localStorage.setItem('eraserRadius', eraserRadius.toString());
-  }, [eraserRadius]);
-
-  useEffect(() => {
-    localStorage.setItem('favoritePanels', JSON.stringify(favoritePanels));
-  }, [favoritePanels]);
-
-  useEffect(() => {
-    localStorage.setItem('activeSidebarTab', activeSidebarTab);
-  }, [activeSidebarTab]);
-
-  useEffect(() => {
-    localStorage.setItem('rulerStyle', rulerStyle);
-  }, [rulerStyle]);
-
-  useEffect(() => {
-    localStorage.setItem('orthoMode', orthoMode.toString());
-  }, [orthoMode]);
-
-  useEffect(() => {
-    localStorage.setItem('showProperties', showProperties.toString());
-  }, [showProperties]);
-
-  useEffect(() => {
-    localStorage.setItem('selectedCategory', selectedCategory);
-  }, [selectedCategory]);
 
   const handleOpenFile = async () => {
     try {
@@ -626,6 +556,8 @@ export default function App() {
       ],
     },
   ];
+  const [showProperties, setShowProperties] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState("Disegno");
 
   const handleFavoritesMouseDown = (e: React.MouseEvent, panelId: string) => {
     if ((e.target as HTMLElement).closest('button')) return;
@@ -909,22 +841,6 @@ export default function App() {
         >
           <Sparkles size={16} className={showProperties && activeSidebarTab === 'gemini' ? "text-amber-500 animate-pulse" : "text-amber-500"} />
           <span className="text-[10px]">Gemini AI</span>
-        </button>
-        <button
-          onClick={() => {
-            handleGuideClick('BIM');
-            if (activeSidebarTab === 'bim' && showProperties) {
-              setShowProperties(false);
-            } else {
-              setActiveSidebarTab('bim');
-              setShowProperties(true);
-            }
-          }}
-          onMouseEnter={() => handleGuideHover('BIM')}
-          className={`px-4 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 ${showProperties && activeSidebarTab === 'bim' ? "bg-cyan-50 text-cyan-800 font-bold border-x border-cyan-200" : "hover:bg-neutral-200 text-neutral-600"}`}
-        >
-          <Building size={16} className={showProperties && activeSidebarTab === 'bim' ? "text-cyan-600 animate-pulse" : "text-cyan-600"} />
-          <span className="text-[10px] font-bold">BIM</span>
         </button>
         <div className="flex-1"></div>
         <button
@@ -1602,7 +1518,6 @@ export default function App() {
                   : activeSidebarTab === "maschere" ? "Archivio Maschere" 
                   : activeSidebarTab === "testo" ? "Impostazioni Testo"
                   : activeSidebarTab === "gemini" ? "Disegno Gemini AI"
-                  : activeSidebarTab === "bim" ? "Tecnologia BIM / I.A."
                   : "Mazzo Penne & Stili"}
               </span>
               <button 
@@ -1614,18 +1529,7 @@ export default function App() {
             </h3>
 
             <div className="space-y-4 flex-1">
-              {activeSidebarTab === "bim" ? (
-                <BIMWorkspacePanel
-                  entities={entities}
-                  selectedTool={selectedTool}
-                  setSelectedTool={setSelectedTool}
-                  setEntities={setEntities}
-                  onCommitHistory={commitToHistory}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  cadCanvasRef={cadCanvasRef}
-                />
-              ) : activeSidebarTab === "maschere" ? (
+              {activeSidebarTab === "maschere" ? (
                 <div className="space-y-6">
                   <div className="bg-amber-100/50 border border-amber-200 p-3 rounded-lg shadow-sm">
                     <p className="text-[10px] text-amber-800 leading-relaxed font-serif italic">
