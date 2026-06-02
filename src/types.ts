@@ -115,6 +115,9 @@ export interface ImageEntity extends CADEntity {
   contrast?: number; // percentage (default 100)
   blendMode?: 'normal' | 'multiply'; // multiply is great for making white background transparent
   crop?: { top?: number, right?: number, bottom?: number, left?: number }; // Cropping support (percentages 0-100)
+  traceResolution?: number; // max resolution for tracing
+  traceSimplify?: number; // simplification tolerance
+  traceSmooth?: boolean; // smooth contours vs sharp
 }
 
 export type Entity = LineEntity | CircleEntity | RectEntity | DimensionEntity | ArcEntity | PointEntity | TextEntity | HatchEntity | ImageEntity;

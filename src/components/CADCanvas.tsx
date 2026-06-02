@@ -8607,40 +8607,42 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     }
 
     // TECNIGRAFO LOCK (Drafting Machine Effect)
-    let isTecnigrafoBlocked = false;
     if (tecnigrafoOrigin) {
         const rawCanvasPos = getDampenedCoordinate(screenToCanvas(e.clientX - rect.left, e.clientY - rect.top), e);
-        
-        if (!tecnigrafoLock) {
-            // Automatic axis detection on first significant movement
-            const dx = Math.abs(rawCanvasPos.x - tecnigrafoOrigin.x);
-            const dy = Math.abs(rawCanvasPos.y - tecnigrafoOrigin.y);
-            if (dx > 4 / view.zoom || dy > 4 / view.zoom) {
-                setTecnigrafoLock(dx > dy ? 'x' : 'y');
-            }
-        }
 
-        const bodyWidth = 32 / view.zoom;
+        // Costanti per determinare la prossimità ai righelli
         const edgeTolerance = 30 / view.zoom;
-        const snapMargin = 0.5 / view.zoom; // Margin to avoid floating point blocking exactly at the edge
+        const snapMargin = 10 / view.zoom;
 
-        if (tecnigrafoLock === 'x') {
-            // Brown body is below (y > origin.y). White edge is AT origin.y.
-            const dist = Math.abs(rawCanvasPos.y - tecnigrafoOrigin.y);
-            isTecnigrafoBlocked = rawCanvasPos.y > (tecnigrafoOrigin.y + snapMargin) || dist > edgeTolerance;
+        const distX = Math.abs(rawCanvasPos.y - tecnigrafoOrigin.y);
+        const distY = Math.abs(rawCanvasPos.x - tecnigrafoOrigin.x);
+        
+        // Verifica se il mouse è vicino al bordo di disegno dei righelli
+        // (supponendo che il righello orizzontale sia disegnato verso destra e quello verticale verso l'alto/basso,
+        // ma la tolleranza `edgeTolerance` funge da area di attivazione)
+        const onHorizontalRuler = rawCanvasPos.y <= (tecnigrafoOrigin.y + snapMargin) && distX <= edgeTolerance;
+        const onVerticalRuler = rawCanvasPos.x >= (tecnigrafoOrigin.x - snapMargin) && distY <= edgeTolerance;
+
+        if (onHorizontalRuler && !onVerticalRuler) {
+            setTecnigrafoLock('x');
             rawPoint = { x: rawCanvasPos.x, y: tecnigrafoOrigin.y };
-        } else if (tecnigrafoLock === 'y') {
-            // Brown body is to the left (x < origin.x). White edge is AT origin.x.
-            const dist = Math.abs(rawCanvasPos.x - tecnigrafoOrigin.x);
-            isTecnigrafoBlocked = rawCanvasPos.x < (tecnigrafoOrigin.x - snapMargin) || dist > edgeTolerance;
+        } else if (onVerticalRuler && !onHorizontalRuler) {
+            setTecnigrafoLock('y');
             rawPoint = { x: tecnigrafoOrigin.x, y: rawCanvasPos.y };
+        } else if (onHorizontalRuler && onVerticalRuler) {
+            // Se nell'angolo, scegli l'asse più vicino
+            if (distX < distY) {
+                setTecnigrafoLock('x');
+                rawPoint = { x: rawCanvasPos.x, y: tecnigrafoOrigin.y };
+            } else {
+                setTecnigrafoLock('y');
+                rawPoint = { x: tecnigrafoOrigin.x, y: rawCanvasPos.y };
+            }
+        } else {
+            // Fuori dai righelli: si disegna liberamente!
+            setTecnigrafoLock(null);
+            rawPoint = { x: rawCanvasPos.x, y: rawCanvasPos.y };
         }
-    }
-
-    if (isTecnigrafoBlocked && activeTool !== 'Eraser') {
-        setHoverSnap(null);
-        renderRef.current?.();
-        return;
     }
 
     onMouseMovePosition?.(rawPoint);
@@ -9408,54 +9410,39 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
 
-    // Tasto destro = ESC (Annulla operazioni correnti)
+    // Comportamento Invio / Conferma (Enter)
+    if (activeTool === 'Join' && dragEntityIds.length > 1) {
+        const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
+        window.dispatchEvent(ev);
+        return;
+    }
+
+    // Tasto destro = ESC (Annulla operazioni correnti o termina segmenti)
     if (drawing) {
         setDrawing(null);
         return;
     }
 
     // --- TECNIGRAFO SPECIAL TOGGLE ---
-    // If tecnigrafo is active, right click toggles between pencil and ink
-    // ONLY if not currently drawing a segment
     if (tecnigrafoOrigin) {
         setDefaultLineStyle(prev => {
             const nextMode = prev.mode === 'pencil' ? 'ink' : (prev.mode === 'ink' ? 'CAD' : 'pencil');
-            return { 
-                ...prev, 
-                mode: nextMode 
+            return { ...prev, mode: nextMode 
             };
         });
         return;
     }
 
-    // Solo se siamo in Select e non abbiamo selezioni, possiamo fare altro?
-    // In realtà l'utente vuole che se siamo in un tool di disegno, il tasto destro NON esca dal tool.
-    // Ma se non stiamo disegnando (drawing === null), allora cosa dovrebbe fare il tasto destro?
-    // Normalmente in CAD torna al comando precedente o esce.
-    // L'utente dice "non deve uscire dal disegno che stavo usando tipo line cerchio arco"
+    // ESC (Azzera selezioni e stati)
+    onSelect(null);
+    setPositioningEntityId(null);
+    setPositioningGroupId(null);
+    setDragEntityIds([]);
+    setDragEntityId(null);
+    setSelectionWindow(null);
     
-    const drawingTools = ['Line', 'Circle', 'Arc', 'Rectangle', 'Hatch', 'Dimension', 'Parallel', 'Trim', 'Specchio', 'Move', 'Copy', 'Join', 'Raccordo', 'Template'];
-    if (drawingTools.includes(activeTool as string)) {
-        // Se l'utente è in un tool ma non sta disegnando un segmento attivo, 
-        // forse facciamo un "doppio click" per uscire? 
-        // Per ora rispettiamo la richiesta: non usciamo.
-        // Se vogliono uscire devono cliccare su Puntatore o premere ESC.
-        return;
-    }
-
-    // Se c'è una selezione attiva, puliamola
-    if (selectedEntityId || positioningEntityId || positioningGroupId || dragEntityIds.length > 0) {
-        onSelect(null);
-        setPositioningEntityId(null);
-        setPositioningGroupId(null);
-        setDragEntityIds([]);
-        setDragEntityId(null);
-        setSelectionWindow(null);
-        return;
-    }
-
-    // Altri reset come ESC standard
     setIsLocked(false);
+    setLockedFocalPoint(null);
     setHighlightedTrimSegment(null);
     setSelectedParallelLine(null);
     setActiveMoveSnapPoint(null);
@@ -9470,6 +9457,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     setCopySourceEntityIds([]);
     setClonedEntityIds(new Set());
     isStickyCopyRef.current = false;
+    
+    // Propaga anche l'evento per listener globali
+    const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true });
+    window.dispatchEvent(ev);
   };
 
   useEffect(() => {

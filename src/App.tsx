@@ -2714,7 +2714,56 @@ export default function App() {
                       </div>
 
                       {/* Convert to CAD Vectors */}
-                      <div className="pt-3 border-t border-neutral-100">
+                      <div className="pt-3 border-t border-neutral-100 space-y-3">
+                        <div className="bg-orange-50 border border-orange-200 p-2 rounded-lg space-y-2">
+                          <p className="text-[10px] uppercase font-bold text-orange-800 tracking-wider flex items-center gap-1"><Sparkles size={12}/> Vettorializzazione Avanzata</p>
+                          
+                          <div className="space-y-1">
+                            <div className="flex justify-between items-center">
+                              <label className="text-[9px] font-bold text-orange-900 block font-sans">Risoluzione Tracciato</label>
+                              <span className="text-[9px] font-mono text-orange-800">{(selectedEntity as any).traceResolution || 1500}px</span>
+                            </div>
+                            <input
+                              type="range" min="500" max="2500" step="100"
+                              className="w-full h-1 bg-orange-200 rounded-lg appearance-none cursor-pointer accent-orange-600"
+                              value={(selectedEntity as any).traceResolution || 1500}
+                              onChange={(e) => updateEntity(selectedEntity.id, { traceResolution: Number(e.target.value) })}
+                            />
+                          </div>
+
+                          <div className="space-y-1 pt-1">
+                            <div className="flex justify-between items-center">
+                              <label className="text-[9px] font-bold text-orange-900 block font-sans">Semplificazione Linee</label>
+                              <span className="text-[9px] font-mono text-orange-800">{(selectedEntity as any).traceSimplify ?? 0.5}</span>
+                            </div>
+                            <input
+                              type="range" min="0.1" max="5.0" step="0.1"
+                              className="w-full h-1 bg-orange-200 rounded-lg appearance-none cursor-pointer accent-orange-600"
+                              value={(selectedEntity as any).traceSimplify ?? 0.5}
+                              onChange={(e) => updateEntity(selectedEntity.id, { traceSimplify: Number(e.target.value) })}
+                            />
+                            <p className="text-[8px] text-orange-700 leading-tight">Meno semplificazione (sinistra) = più dettagli e angoli esatti.</p>
+                          </div>
+
+                          <div className="pt-1">
+                            <label className="flex items-center gap-2 cursor-pointer group">
+                              <div className="relative flex items-center justify-center">
+                                <input
+                                  type="checkbox"
+                                  checked={(selectedEntity as any).traceSmooth ?? false}
+                                  onChange={(e) => updateEntity(selectedEntity.id, { traceSmooth: e.target.checked })}
+                                  className="peer sr-only"
+                                />
+                                <div className="w-8 h-4 bg-orange-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-orange-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-orange-600"></div>
+                              </div>
+                              <div>
+                                <span className="text-[9px] font-bold text-orange-900 block font-sans transition-colors group-hover:text-orange-700">Ammorbidisci Contorni (Smooth)</span>
+                                <span className="text-[8px] text-orange-700 block leading-tight mt-0.5">Disabilitalo per piante architettoniche con angoli retti.</span>
+                              </div>
+                            </label>
+                          </div>
+                        </div>
+
                         <button
                           onClick={() => {
                             const img = selectedEntity as any;
@@ -2722,7 +2771,7 @@ export default function App() {
                             imgElement.crossOrigin = 'anonymous';
                             imgElement.src = img.src;
                             imgElement.onload = () => {
-                              const maxDim = 800; // max resolution for tracing
+                              const maxDim = img.traceResolution || 1500; // max resolution for tracing
                               const w = imgElement.naturalWidth;
                               const h = imgElement.naturalHeight;
                               const scaleToFit = Math.min(1, maxDim / Math.max(w, h));
@@ -2784,7 +2833,8 @@ export default function App() {
                               }
                               
                               // We use 0.5 threshold to find boundaries
-                              const geoms = contours().size([traceW, traceH]).thresholds([0.5])(values);
+                              const isSmooth = img.traceSmooth ?? false;
+                              const geoms = contours().size([traceW, traceH]).smooth(isSmooth).thresholds([0.5])(values);
                               
                               const newEntities: Entity[] = [];
                               const baseId = `cad-svg-${Date.now()}`;
@@ -2836,7 +2886,7 @@ export default function App() {
                                           });
 
                                           // Simplify
-                                          const simplified = simplifyPoints(pts, 1.5);
+                                          const simplified = simplifyPoints(pts, img.traceSimplify ?? 0.5);
                                           if (simplified.length < 2) continue;
 
                                           for (let i = 0; i < simplified.length - 1; i++) {
