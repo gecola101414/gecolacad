@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf';
-import { Entity } from '../types';
+import { Entity, LineEntity } from '../types';
 
 export interface TavolaExport {
   id: string;

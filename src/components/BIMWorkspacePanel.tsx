@@ -15,8 +15,19 @@ import {
   FileText,
   Repeat,
   RotateCw,
-  Copy as CopyIcon
+  Copy as CopyIcon,
+  Maximize2,
+  Zap,
+  Droplet,
+  Grid,
+  ChevronDown,
+  User,
+  TreePine,
+  Car,
+  ChevronRight
 } from "lucide-react";
+import { TEMPLATES } from "../data/templates";
+import { TemplatePreview } from "./TemplatePreview";
 
 interface BIMWorkspacePanelProps {
   entities: Entity[];
@@ -27,6 +38,18 @@ interface BIMWorkspacePanelProps {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   cadCanvasRef?: React.RefObject<any>;
+  selectedTemplateId?: string | null;
+  setSelectedTemplateId?: (id: string | null) => void;
+
+  // Custom drill-down dialog openers
+  onOpenMuri?: () => void;
+  onOpenPorte?: () => void;
+  onOpenFinestre?: () => void;
+  onOpenArredi?: () => void;
+  onOpenSanitari?: () => void;
+  onOpenElettrico?: () => void;
+  onOpenIdraulico?: () => void;
+  onOpenFiniture?: () => void;
 }
 
 // Shoelace formula helper
@@ -63,9 +86,21 @@ export function BIMWorkspacePanel({
   onCommitHistory,
   selectedId,
   onSelect,
-  cadCanvasRef
+  cadCanvasRef,
+  selectedTemplateId,
+  setSelectedTemplateId,
+  onOpenMuri,
+  onOpenPorte,
+  onOpenFinestre,
+  onOpenArredi,
+  onOpenSanitari,
+  onOpenElettrico,
+  onOpenIdraulico,
+  onOpenFiniture
 }: BIMWorkspacePanelProps) {
   const [customRoomName, setCustomRoomName] = useState<string>("");
+  const [open2DSection, setOpen2DSection] = useState<boolean>(false);
+  const [active2DCat, setActive2DCat] = useState<string>('Verde');
 
   // Filter BIM entities
   const bimRooms = entities.filter(e => e.isBIM && e.bimType === 'room');
@@ -111,7 +146,6 @@ export function BIMWorkspacePanel({
         if (e.id === selectedId) {
           let updated = { ...e, [field]: value } as any;
           
-          // If width is updated for a door/window, update its line geometry too
           if (field === 'bimWidth' && (e.bimType === 'door' || e.bimType === 'window')) {
             const start = (e as any).start;
             const end = (e as any).end;
@@ -157,12 +191,11 @@ export function BIMWorkspacePanel({
     onSelect(null);
   };
 
-  // Export report as CSV file containing Bill of Quantities
+  // Export report as CSV containing Bill of Quantities
   const handleExportTextReport = () => {
     let report = `========================================================\n`;
     report += `COMPUTO METRICO BIM ESTIMATIVO & ANALISI SUPERFICI      \n`;
     report += `Generato automaticamente da GE-COLA CAD BIM AI          \n`;
-    report += `Data di generazione: ${new Date().toLocaleDateString()}  \n`;
     report += `========================================================\n\n`;
 
     report += `1. RILIEVO E STIMA DELLE SUPERFICI (STANTE)\n`;
@@ -178,39 +211,31 @@ export function BIMWorkspacePanel({
     });
     report += `--------------------------------------------------------\n`;
     report += `Totale Locali Rilevati: ${bimRooms.length}\n`;
-    report += `Superficie Calpestabile Totale: ${totalRoomArea.toFixed(2)} mq\n`;
-    report += `Volume Svuotamento Totale: ${(bimRooms.reduce((acc, r) => acc + (getRoomAreaMq((r as any).bimPoints || (r as any).points) * (r.bimHeight || 2.70)), 0)).toFixed(1)} mc\n\n`;
+    report += `Superficie Calpestabile Totale: ${totalRoomArea.toFixed(2)} mq\n\n`;
 
-    report += `2. RILIEVO INFISSI & ACCESSIBILITA'\n`;
+    report += `2. ELEMENTI BIM RILEVATI SUI LAYER DEDICATI\n`;
     report += `--------------------------------------------------------\n`;
-    report += `Tipo\tNome Codice\tLarghezza (cm)\tAltezza (cm)\tSuperficie Luce (mq)\n`;
-    bimDoors.forEach((d) => {
-      report += `PORTA\t${d.bimName || 'Porta'}\t${(d as any).bimWidth || 80}\t---\t---\n`;
-    });
-    bimWindows.forEach((w) => {
-      const area = (((w as any).bimWidth || 120) * ((w as any).bimWindowHeight || 140)) / 10000;
-      report += `FINESTRA\t${w.bimName || 'Finestra'}\t${(w as any).bimWidth || 120}\t${(w as any).bimWindowHeight || 140}\t${area.toFixed(2)}\n`;
+    entities.forEach(ent => {
+      if (ent.isBIM && ent.bimType) {
+        report += `ID: ${ent.id.substring(0, 5)}\tTipo: ${ent.bimType.toUpperCase()}\tNome: ${ent.bimName || 'Non specificato'}\tLayer: ${ent.layer || 'BIM'}\n`;
+      }
     });
     report += `--------------------------------------------------------\n\n`;
 
-    report += `3. COMPUTO METRICO INTELLIGENTE INTELLIGENTE DETRATTO\n`;
+    report += `3. ANALISI AEROILLUMINANTE & BATTISCOPA NETTO\n`;
     report += `--------------------------------------------------------\n`;
-    report += `Voce d'Opera:\n`;
-    report += `- Fornitura e posa di BATTISCOPA in legno/ceramica (Perimetri dedotti vani porte):\n`;
-    report += `  Sviluppo Metrico Netto: ${intelligentBaseboardM.toFixed(2)} m\n`;
-    report += `- Superficie Illuminante Netta Complessiva (Rapporto Aeroilluminante):\n`;
-    report += `  Superficie finestre totale: ${totalWindowsLightAreaMq.toFixed(2)} mq\n`;
+    report += `- Sviluppo Battiscopa Netto: ${intelligentBaseboardM.toFixed(2)} m\n`;
+    report += `- Superficie Finestratura Totale: ${totalWindowsLightAreaMq.toFixed(2)} mq\n`;
     const aerRatio = totalWindowsLightAreaMq > 0 && totalRoomArea > 0 ? (totalWindowsLightAreaMq / totalRoomArea) : 0;
-    report += `  Rapporto Illuminante Calcolato (A. finestre / A. stanze): 1 / ${(aerRatio > 0 ? (1/aerRatio).toFixed(1) : '∞')}\n`;
-    report += `  Verifica Regolamento Edilizio (Richiesto 1/8 = 0.125): ${aerRatio >= 0.125 ? 'IDONEO (Soddisfatto ✅)' : 'NON IDONEO ⚠️ (Verificare superfici illuminanti)'}\n`;
+    report += `  Superficie aerante/illuminante calcolata: 1 / ${(aerRatio > 0 ? (1/aerRatio).toFixed(1) : '∞')}\n`;
+    report += `  Regolamento Igienico-Sanitario (Limite 1/8): ${aerRatio >= 0.125 ? 'IDONEO (Soddisfatto ✅)' : 'NON IDONEO ⚠️ (Verificare rapporti)'}\n`;
     report += `========================================================\n`;
 
-    // Download text file
     const blob = new Blob([report], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `Computo_Metrico_GECOLA_BIM_${new Date().getFullYear()}.txt`;
+    link.download = `Computo_Metrico_BIM_${new Date().getFullYear()}.txt`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -229,120 +254,220 @@ export function BIMWorkspacePanel({
 
   return (
     <div className="space-y-6">
+      {/* Intestazione BIM */}
       <div className="bg-gradient-to-br from-cyan-900 to-slate-900 text-white p-4 rounded-xl shadow-lg border border-cyan-500/30">
         <div className="flex items-center gap-2 mb-2">
           <Building className="text-cyan-400 animate-pulse" size={20} />
-          <h4 className="font-bold text-sm tracking-wide">Automazione BIM / I.A.</h4>
+          <h4 className="font-bold text-sm tracking-wide">Automazione BIM Integrata</h4>
         </div>
         <p className="text-[11px] leading-relaxed text-slate-300">
-          Proietta il disegno CAD verso il Building Information Modeling. Rileva aree, calcola battiscopa intelligenti, infissi e genera esportazioni metriche automatiche.
+          Traccia elementi strutturali avanzati su layer automatici dedicati, configura impianti, arredi, e pavimenti per calcoli metrici in tempo reale.
         </p>
       </div>
 
       {/* Scansione Automatica Solver */}
-      <div className="bg-cyan-50 border border-cyan-200 p-4 rounded-xl shadow-sm space-y-2.5">
+      <div className="bg-cyan-50 shadow-sm border border-cyan-200 p-4 rounded-xl space-y-2.5">
         <span className="text-[10px] font-black uppercase tracking-wider text-cyan-800 block font-mono">
           Scansione Automatica ⚡
         </span>
-        <p className="text-[10.5px] leading-relaxed text-slate-600">
-          Rileva all-in-one l'intera planimetria per identificare automaticamente <strong>tutte le stanze</strong>, le <strong>porte</strong> e le <strong>finestre</strong> basandosi esclusivamente sul disegno geometrico!
-        </p>
         <button
-          onClick={() => {
-            cadCanvasRef?.current?.autoScanBIM();
-          }}
-          className="w-full bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-700 hover:to-cyan-600 text-white font-bold py-2.5 px-4 rounded-lg text-xs flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all active:scale-[0.98]"
+          onClick={() => cadCanvasRef?.current?.autoScanBIM()}
+          className="w-full bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-700 hover:to-cyan-600 text-white font-bold py-2 px-4 rounded-lg text-xs flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer"
         >
           <Sparkles size={14} className="animate-pulse" />
-          Avvia Scansione Geometrica 🤖
+          Scansione Geometrica Planimetria 🤖
         </button>
       </div>
 
-      {/* 1. BIM DRAFTING TOOLS */}
-      <div className="space-y-2">
-        <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block border-b pb-1 font-mono">
-          Strumenti di Rilievo BIM
+      {/* BIM SOTTOMENU PORTAL */}
+      <div className="space-y-2.5">
+        <span className="text-[10.5px] font-black uppercase tracking-wider text-slate-400 block border-b border-slate-100 pb-1 font-mono">
+          🗂️ Sottomenu BIM di Struttura
         </span>
+
         <div className="grid grid-cols-2 gap-2">
-          {/* AUTO AREA DETECTION */}
+          {/* MURI SUBMENU */}
           <button
-            onClick={() => setSelectedTool("BIM_RilevaStanza")}
-            className={`flex flex-col items-center justify-center p-3 rounded-lg border text-center transition-all ${
-              selectedTool === "BIM_RilevaStanza"
-                ? "bg-cyan-50 border-cyan-500 text-cyan-950 ring-2 ring-cyan-200 font-bold"
-                : "bg-white border-neutral-200 hover:bg-neutral-50 text-neutral-700"
-            }`}
+            onClick={onOpenMuri}
+            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-cyan-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
           >
-            <Sparkles size={18} className="text-cyan-600 mb-1" />
-            <span className="text-[10px] font-bold">Rileva Stanza</span>
-            <span className="text-[8px] opacity-60">Auto Area</span>
+            <Building className="text-slate-600 group-hover:text-cyan-600 transition duration-300 mb-1" size={20} />
+            <span className="text-[11px] font-black text-slate-800">🧱 Muri BIM</span>
+            <span className="text-[8px] opacity-60 font-mono text-slate-500">spessore/altezza</span>
+            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-cyan-500"></span>
           </button>
 
-          {/* MANUAL ROOM DRAWER */}
+          {/* PORTE SUBMENU */}
           <button
-            onClick={() => setSelectedTool("BIM_DisegnaStanza")}
-            className={`flex flex-col items-center justify-center p-3 rounded-lg border text-center transition-all ${
-              selectedTool === "BIM_DisegnaStanza"
-                ? "bg-emerald-50 border-emerald-500 text-emerald-950 ring-2 ring-emerald-200 font-bold"
-                : "bg-white border-neutral-200 hover:bg-neutral-50 text-neutral-700"
-            }`}
+            onClick={onOpenPorte}
+            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-rose-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
           >
-            <Square size={18} className="text-emerald-600 mb-1" />
-            <span className="text-[10px] font-bold">Disegna Stanza</span>
-            <span className="text-[8px] opacity-60">Traccia Punti</span>
+            <div className="w-5.5 h-5.5 flex items-center justify-center border border-dashed border-rose-500 rounded text-rose-500 font-black text-[10px] mb-1 group-hover:bg-rose-50 transition duration-300">D</div>
+            <span className="text-[11px] font-black text-slate-800">🚪 Porte BIM</span>
+            <span className="text-[8px] opacity-60 font-mono text-slate-500">larghezz./swing</span>
+            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-rose-500"></span>
           </button>
 
-          {/* BIM DOOR */}
+          {/* FINESTRE SUBMENU */}
           <button
-            onClick={() => setSelectedTool("BIM_Porta")}
-            className={`flex flex-col items-center justify-center p-3 rounded-lg border text-center transition-all ${
-              selectedTool === "BIM_Porta"
-                ? "bg-rose-50 border-rose-400 text-rose-950 ring-2 ring-rose-100 font-bold"
-                : "bg-white border-neutral-200 hover:bg-neutral-50 text-neutral-700"
-            }`}
+            onClick={onOpenFinestre}
+            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-blue-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
           >
-            <div className="w-5 h-5 flex items-center justify-center border-2 border-dashed border-rose-500 rounded mb-1 text-rose-500 font-black text-[9px]">
-              D
-            </div>
-            <span className="text-[10px] font-bold">Porta BIM</span>
-            <span className="text-[8px] opacity-60">P1 → P2 width</span>
+            <Maximize2 className="text-slate-600 group-hover:text-blue-600 transition mb-1" size={18} />
+            <span className="text-[11px] font-black text-slate-800">🪟 Finestre</span>
+            <span className="text-[8px] opacity-60 font-mono text-slate-500 font-semibold text-slate-400">luce/aerazione</span>
+            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-blue-500"></span>
           </button>
 
-          {/* BIM WINDOW */}
+          {/* ARREDI SUBMENU */}
           <button
-            onClick={() => setSelectedTool("BIM_Finestra")}
-            className={`flex flex-col items-center justify-center p-3 rounded-lg border text-center transition-all ${
-              selectedTool === "BIM_Finestra"
-                ? "bg-blue-50 border-blue-400 text-blue-950 ring-2 ring-blue-100 font-bold"
-                : "bg-white border-neutral-200 hover:bg-neutral-50 text-neutral-700"
-            }`}
+            onClick={onOpenArredi}
+            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-indigo-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
           >
-            <div className="w-5 h-5 flex items-center justify-center border-2 border-double border-blue-500 rounded mb-1 text-blue-500 font-black text-[9px]">
-              W
-            </div>
-            <span className="text-[10px] font-bold">Finestra BIM</span>
-            <span className="text-[8px] opacity-60">P1 → P2 width</span>
+            <Home className="text-slate-600 group-hover:text-indigo-600 transition mb-1" size={18} />
+            <span className="text-[11px] font-black text-slate-800">🛋️ Arredi</span>
+            <span className="text-[8px] opacity-60 font-mono text-slate-500">mobili di pianta</span>
+            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+          </button>
+
+          {/* SANITARI SUBMENU */}
+          <button
+            onClick={onOpenSanitari}
+            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-emerald-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
+          >
+            <Droplet className="text-slate-600 group-hover:text-emerald-600 transition mb-1" size={18} />
+            <span className="text-[11px] font-black text-slate-800">🚿 Sanitari</span>
+            <span className="text-[8px] opacity-60 font-mono text-slate-500">disegno bagno</span>
+            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+          </button>
+
+          {/* IMPIANTI ELETTRICI SUBMENU */}
+          <button
+            onClick={onOpenElettrico}
+            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-amber-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
+          >
+            <Zap className="text-slate-600 group-hover:text-amber-500 transition mb-1" size={18} />
+            <span className="text-[11px] font-black text-slate-800">⚡ Elettrico</span>
+            <span className="text-[8px] opacity-60 font-mono text-slate-500">prese, luci, QE</span>
+            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+          </button>
+
+          {/* IMPIANTI IDRAULICI SUBMENU */}
+          <button
+            onClick={onOpenIdraulico}
+            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-blue-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
+          >
+            <Droplet className="text-slate-600 group-hover:text-blue-500 transition mb-1" size={18} />
+            <span className="text-[11px] font-black text-slate-800">🚰 Idraulico</span>
+            <span className="text-[8px] opacity-60 font-mono text-slate-500">tubi, caldaie</span>
+            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+          </button>
+
+          {/* FINITURE SUBMENU */}
+          <button
+            onClick={onOpenFiniture}
+            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-rose-400 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
+          >
+            <Grid className="text-slate-600 group-hover:text-rose-500 transition mb-1" size={18} />
+            <span className="text-[11px] font-black text-slate-800">🎨 Finiture</span>
+            <span className="text-[8px] opacity-60 font-mono text-slate-500 font-semibold">pavimentazione</span>
+            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-rose-400"></span>
           </button>
         </div>
-        {selectedTool?.startsWith("BIM_") && (
-          <div className="p-2 bg-slate-50 border rounded text-[10px] text-slate-600 leading-normal animate-fade-in">
-            {selectedTool === "BIM_RilevaStanza" && (
-              <span>💡 <strong>AUTOMATICO:</strong> Clicca una volta all'interno di un'area chiusa per individuarne il perimetro e calcolare la superficie calpestabile automaticamente.</span>
-            )}
-            {selectedTool === "BIM_DisegnaStanza" && (
-              <span>✍️ <strong>CORNER BY CORNER:</strong> Clicca i vertici sul disegno. Per chiudere il locale, clicca nuovamente vicino al punto iniziale. Premi <strong>ESC</strong> per annullare.</span>
-            )}
-            {selectedTool === "BIM_Porta" && (
-              <span>🚪 <strong>PORTA:</strong> Clicca il primo stipite (P1) e poi il secondo stipite (P2) per inserire il vano e calcolare la spalla di passaggio.</span>
-            )}
-            {selectedTool === "BIM_Finestra" && (
-              <span>🪟 <strong>FINESTRA:</strong> Clicca i due estremi della bucatura (P1 → P2) per misurare la larghezza e impostare l'infisso luminoso.</span>
-            )}
+
+        {/* AREA TRACING GENERAL TOOLS */}
+        <div className="grid grid-cols-2 gap-2 mt-2">
+          <button
+            onClick={() => setSelectedTool("BIM_RilevaStanza")}
+            className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border text-[10.5px] font-bold tracking-tight transition duration-150 cursor-pointer ${
+              selectedTool === "BIM_RilevaStanza"
+                ? "bg-cyan-50 border-cyan-500 text-cyan-950 font-black shadow-inner"
+                : "bg-white border-slate-250 text-slate-700 hover:bg-slate-100"
+            }`}
+          >
+            <Sparkles size={13} className="text-cyan-600" />
+            Rileva Locale
+          </button>
+          <button
+            onClick={() => setSelectedTool("BIM_DisegnaStanza")}
+            className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border text-[10.5px] font-bold tracking-tight transition duration-150 cursor-pointer ${
+              selectedTool === "BIM_DisegnaStanza"
+                ? "bg-emerald-50 border-emerald-500 text-emerald-950 font-black shadow-inner"
+                : "bg-white border-slate-250 text-slate-700 hover:bg-slate-100"
+            }`}
+          >
+            <Square size={13} className="text-emerald-600" />
+            Traccia Locale
+          </button>
+        </div>
+      </div>
+
+      {/* 2D SYMBOLS COMPONENT RECONCILIATION */}
+      <div className="border border-slate-200 bg-slate-50/50 rounded-xl overflow-hidden shadow-sm">
+        <button
+          type="button"
+          onClick={() => setOpen2DSection(!open2DSection)}
+          className="w-full flex justify-between items-center bg-slate-100 p-3 text-[11px] uppercase font-black tracking-widest text-slate-600 hover:bg-slate-200 transition font-mono border-b border-slate-200"
+        >
+          <span className="flex items-center gap-1.5">
+            <Layers size={14} className="text-slate-500" />
+            📂 Biblioteca Elementi 2D
+          </span>
+          <ChevronDown size={14} className={`transform transition ${open2DSection ? "rotate-180" : ""}`} />
+        </button>
+
+        {open2DSection && (
+          <div className="p-3 bg-white space-y-3.5 max-h-[400px] overflow-y-auto">
+            <div className="flex gap-1.5 border-b border-neutral-100 pb-1.5">
+              {[
+                { id: 'Verde', name: 'Alberi 🌲', icon: TreePine },
+                { id: 'Persone', name: 'Persone 🧑', icon: User },
+                { id: 'Mezzi', name: 'Mezzi 🚗', icon: Car }
+              ].map(cat => {
+                const Icon = cat.icon;
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setActive2DCat(cat.id)}
+                    className={`flex-1 flex items-center justify-center gap-1 text-[9.5px] py-1 px-1.5 rounded transition ${
+                      active2DCat === cat.id ? 'bg-indigo-600/10 text-indigo-700 border border-indigo-500/20 font-bold' : 'text-slate-500 hover:bg-neutral-50 border border-transparent'
+                    }`}
+                  >
+                    <Icon size={11} />
+                    {cat.name.split(' ')[0]}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              {TEMPLATES.filter(t => t.category === active2DCat).map(template => (
+                <button
+                  key={template.id}
+                  onClick={() => {
+                    setSelectedTemplateId?.(template.id);
+                    setSelectedTool('Template');
+                  }}
+                  className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all border group relative overflow-hidden ${selectedTemplateId === template.id && selectedTool === 'Template' ? "bg-indigo-600/10 border-indigo-500 ring-2 ring-indigo-200" : "bg-neutral-50 border-neutral-200 hover:border-neutral-300 hover:bg-white"}`}
+                >
+                  <div className="mb-1.5 transform scale-75 group-hover:scale-95 transition-transform duration-300">
+                    <TemplatePreview template={template} size={40} />
+                  </div>
+                  <span className={`text-[8.5px] font-black text-center leading-tight line-clamp-1 ${selectedTemplateId === template.id && selectedTool === 'Template' ? "text-indigo-600" : "text-neutral-600"}`}>
+                    {template.name}
+                  </span>
+                  <div className={`absolute top-0 right-0 px-1 text-white text-[6.5px] font-black uppercase ${template.view === 'prospetto' ? "bg-orange-500" : "bg-indigo-400"}`}>
+                    {template.view === 'prospetto' ? 'Front' : 'Plan'}
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>
 
-      {/* 2. INSPECTOR FOR SELECTED BIM OBJECT */}
+      {/* INSPECTOR RANGE FOR SELECTED ELEMENTS */}
       {isBIMSelected && selectedEntity ? (
         <div className="bg-cyan-50/50 border border-cyan-200 rounded-xl p-4 space-y-3">
           <div className="flex justify-between items-center border-b border-cyan-100 pb-1">
@@ -353,14 +478,13 @@ export function BIMWorkspacePanel({
             <button
               onClick={deleteSelectedBIM}
               title="Elimina Elemento BIM"
-              className="text-rose-600 hover:text-rose-800 p-1 hover:bg-rose-50 rounded transition-colors"
+              className="text-rose-600 hover:text-rose-800 p-1 hover:bg-rose-50 rounded transition-colors cursor-pointer"
             >
               <Trash2 size={14} />
             </button>
           </div>
 
           <div className="space-y-2 text-xs">
-            {/* NAME SELECT / INPUT */}
             <div>
               <label className="text-[10px] text-slate-500 font-bold block mb-1">
                 Nome / Categoria locale
@@ -391,7 +515,6 @@ export function BIMWorkspacePanel({
               )}
             </div>
 
-            {/* BIM HEIGHT (Rooms) */}
             {selectedEntity.bimType === 'room' && (
               <div className="grid grid-cols-2 gap-2">
                 <div>
@@ -417,7 +540,6 @@ export function BIMWorkspacePanel({
               </div>
             )}
 
-            {/* BIM WIDTH (Doors / Windows) */}
             {(selectedEntity.bimType === 'door' || selectedEntity.bimType === 'window') && (
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-2">
@@ -454,20 +576,18 @@ export function BIMWorkspacePanel({
                 <div className="flex gap-2">
                   <button
                     onClick={() => updateSelectedBIMField("bimFlip", !(selectedEntity as any).bimFlip)}
-                    className="flex-1 flex items-center justify-center gap-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-[10px] font-bold py-1.5 rounded-lg shadow-sm transition-all active:scale-[0.98]"
+                    className="flex-1 flex items-center justify-center gap-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-[10px] font-bold py-1.5 rounded-lg shadow-sm transition-all active:scale-[0.98] cursor-pointer"
                   >
                     <Repeat size={12} className="text-cyan-600" />
                     Inverti Swing
                   </button>
                   <button
                     onClick={() => {
-                        // Rotation 90 degrees
                         const start = (selectedEntity as any).start;
                         const end = (selectedEntity as any).end;
                         if (start && end) {
                             const dx = end.x - start.x;
                             const dy = end.y - start.y;
-                            // Rotate 90 CW: (x, y) -> (-y, x)
                             const newEnd = {
                                 x: start.x - dy,
                                 y: start.y + dx
@@ -475,7 +595,7 @@ export function BIMWorkspacePanel({
                             updateSelectedBIMField("end", newEnd);
                         }
                     }}
-                    className="flex-1 flex items-center justify-center gap-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-[10px] font-bold py-1.5 rounded-lg shadow-sm transition-all active:scale-[0.98]"
+                    className="flex-1 flex items-center justify-center gap-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-[10px] font-bold py-1.5 rounded-lg shadow-sm transition-all active:scale-[0.98] cursor-pointer"
                   >
                     <RotateCw size={12} className="text-cyan-600" />
                     Ruota 90°
@@ -487,7 +607,6 @@ export function BIMWorkspacePanel({
                         const width = (selectedEntity as any).bimWidth || 80;
                         const height = (selectedEntity as any).bimWindowHeight || (selectedEntity.bimType === 'door' ? 210 : 140);
                         cadCanvasRef?.current?.setBIMDefaults(width, height, selectedEntity.bimType);
-                        // Visual feedback
                         const btn = (document.activeElement as HTMLElement);
                         if (btn) {
                             const original = btn.innerHTML;
@@ -495,10 +614,10 @@ export function BIMWorkspacePanel({
                             setTimeout(() => btn.innerHTML = original, 1500);
                         }
                     }}
-                    className="w-full flex items-center justify-center gap-1.5 bg-cyan-600 text-white hover:bg-cyan-700 text-[10px] font-bold py-2 rounded-lg shadow-md transition-all active:scale-[0.98]"
+                    className="w-full flex items-center justify-center gap-1.5 bg-cyan-600 text-white hover:bg-cyan-700 text-[10px] font-bold py-2 rounded-lg shadow-md transition-all active:scale-[0.98] cursor-pointer"
                 >
-                    <CopyIcon size={12} />
-                    Copia parametri come oggetto
+                  <CopyIcon size={12} />
+                  Copia parametri come oggetto
                 </button>
               </div>
             )}
@@ -506,16 +625,14 @@ export function BIMWorkspacePanel({
         </div>
       ) : null}
 
-      {/* 3. COMPUTO METRICO SUMMARY BOX */}
+      {/* BIM STATS QUANTITA SUMMARY */}
       <div className="space-y-3">
         <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block border-b pb-1 font-mono">
           Rilievo Quantità & Computo
         </span>
 
-        {/* BIM STATS GRID */}
         <div className="grid grid-cols-2 gap-2">
-          {/* FLOOR AREA */}
-          <div className="bg-slate-50 border border-slate-250 p-3 rounded-lg flex flex-col justify-between">
+          <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg flex flex-col justify-between">
             <span className="text-[8.5px] uppercase tracking-wider text-slate-400 font-bold block mb-1">
               Area Netta Stanze
             </span>
@@ -524,11 +641,10 @@ export function BIMWorkspacePanel({
               <span className="text-[10px] font-semibold text-slate-600 pl-1">mq</span>
             </div>
             <span className="text-[8px] text-slate-400 mt-1">
-              Locali tracciati: {bimRooms.length}
+              Vani mappati: {bimRooms.length}
             </span>
           </div>
 
-          {/* BATTISCOPA INTELLIGENTE */}
           <div className="bg-cyan-50/40 border border-cyan-200/50 p-3 rounded-lg flex flex-col justify-between">
             <span className="text-[8.5px] uppercase tracking-wider text-cyan-800 font-bold block mb-1">
               Battiscopa Netto 🚪
@@ -538,12 +654,11 @@ export function BIMWorkspacePanel({
               <span className="text-[10px] font-semibold text-cyan-800 pl-1">m</span>
             </div>
             <span className="text-[7.5px] text-cyan-600 mt-1 leading-none italic font-medium block">
-              Detratte le porte (-{totalDoorsWidthM.toFixed(1)}m)
+              Escluso varchi (-{totalDoorsWidthM.toFixed(1)}m)
             </span>
           </div>
         </div>
 
-        {/* DETAILED BIM LOCALI TABLE */}
         {bimRooms.length > 0 ? (
           <div className="border border-neutral-200 rounded-lg overflow-hidden bg-white">
             <div className="p-1 px-2.5 bg-neutral-100 text-[9.5px] font-bold uppercase tracking-wider text-slate-500 border-b flex justify-between">
@@ -577,27 +692,16 @@ export function BIMWorkspacePanel({
           </div>
         ) : (
           <div className="p-4 border border-dashed rounded-lg text-center text-[10px] text-slate-400 bg-slate-50">
-            Nessuna stanza rilevata. Utilizza "Rileva Stanza" o "Disegna Stanza" per iniziare!
+            Traccia o rileva una stanza per vederla qui!
           </div>
         )}
 
-        {/* RAPPORTI ILLUMINANTI COMPLIANCE BANNER */}
         {bimRooms.length > 0 && (
           <div className="p-3 bg-neutral-50 rounded-lg border text-[10.5px] space-y-1.5 leading-normal">
             <div className="flex justify-between items-center text-slate-600">
               <span className="font-semibold text-slate-500">Superficie finestre totale:</span>
-              <span className="font-mono text-[10.5px] font-bold text-slate-700">{totalWindowsLightAreaMq.toFixed(2)} mq</span>
+              <span className="font-mono text-[10.5px] font-bold text-slate-705">{totalWindowsLightAreaMq.toFixed(2)} mq</span>
             </div>
-            <div className="flex justify-between items-center text-slate-600">
-              <span className="font-semibold text-slate-500">Rapporto Aeroilluminante (R.A.):</span>
-              <span className="font-mono text-[10.5px] font-bold text-slate-705">
-                {totalWindowsLightAreaMq > 0 && totalRoomArea > 0 
-                  ? `1 / ${(totalRoomArea / totalWindowsLightAreaMq).toFixed(1)}` 
-                  : "Nessun infisso"}
-              </span>
-            </div>
-            
-            {/* Legal compliance check */}
             {totalRoomArea > 0 && (
               <div className="pt-1 border-t flex items-center gap-1.5 text-[9.5px]">
                 {totalWindowsLightAreaMq / totalRoomArea >= 0.125 ? (
@@ -606,8 +710,8 @@ export function BIMWorkspacePanel({
                     R.A. conforme a normativa italiana (≥ 1/8) ✅
                   </div>
                 ) : (
-                  <div className="text-amber-800 font-bold leading-tight">
-                    ⚠️ R.A. inferiore a 1/8. Aggiungi più finestre per verificare i requisiti igienico-sanitari.
+                  <div className="text-amber-850 font-bold leading-tight">
+                    ⚠️ Rapporto Illuminante perimetrale inferiore a 1/8 limitato.
                   </div>
                 )}
               </div>
@@ -615,14 +719,13 @@ export function BIMWorkspacePanel({
           </div>
         )}
 
-        {/* REPORT GENERATION BUTTON */}
         <button
           onClick={handleExportTextReport}
           disabled={entities.filter(e => e.isBIM).length === 0}
-          className="w-full bg-cyan-600 hover:bg-cyan-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white font-bold py-2 px-3 rounded-lg text-xs flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98]"
+          className="w-full bg-cyan-600 hover:bg-cyan-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white font-bold py-2.5 px-3 rounded-lg text-xs flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer"
         >
           <FileText size={14} />
-          Esporta Computo Medico
+          Esporta Computo Metrico BIM
         </button>
       </div>
     </div>

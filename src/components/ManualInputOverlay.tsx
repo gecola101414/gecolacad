@@ -3,7 +3,7 @@ import { Point } from '../types';
 import { Mic, MicOff, MoveHorizontal } from 'lucide-react';
 
 interface ManualInputOverlayProps {
-    type: 'line' | 'circle' | 'rectangle' | 'parallel' | 'bim_porta' | 'bim_finestra';
+    type: 'line' | 'circle' | 'rectangle' | 'parallel' | 'bim_porta' | 'bim_finestra' | 'bim_muro';
     drawing?: { start: Point, current: Point, lockedDir?: Point };
     parallelLine?: { start: Point, end: Point, mouse: Point, distance?: number };
     canvasToScreen: (x: number, y: number) => { x: number, y: number };
@@ -19,12 +19,12 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
     let initVal2 = 0;
     let screenPos = { x: 0, y: 0 };
 
-    if (type === 'line' || type === 'circle' || type === 'rectangle' || type === 'bim_porta' || type === 'bim_finestra') {
+    if (type === 'line' || type === 'bim_muro' || type === 'circle' || type === 'rectangle' || type === 'bim_porta' || type === 'bim_finestra') {
         if (!drawing) return null;
         const dx = drawing.current.x - drawing.start.x;
         const dy = drawing.current.y - drawing.start.y;
         
-        if (type === 'line') {
+        if (type === 'line' || type === 'bim_muro') {
             initVal1 = Math.sqrt(dx * dx + dy * dy);
             initVal2 = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
         } else if (type === 'circle') {
@@ -73,7 +73,7 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
 
     useEffect(() => {
         if (isOpen) {
-            if (type === 'line') {
+            if (type === 'line' || type === 'bim_muro') {
                 setVal1('');
                 setVal2(initVal2.toFixed(2));
             } else if (type === 'bim_porta' || type === 'bim_finestra') {
@@ -254,7 +254,7 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
 
     const handleSubmit = (e?: React.FormEvent) => {
         e?.preventDefault();
-        const v1 = val1 === '' && type === 'line' ? initVal1 : parseFloat(val1.replace(',', '.'));
+        const v1 = val1 === '' && (type === 'line' || type === 'bim_muro') ? initVal1 : parseFloat(val1.replace(',', '.'));
         const v2 = parseFloat(val2.replace(',', '.'));
         onCommit({ val1: v1, val2: v2 });
         onClose();
@@ -273,7 +273,7 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
                 style={{ position: 'absolute', left: screenPos.x + 10, top: screenPos.y + 10 }}
                 className="bg-slate-800/90 border border-slate-400/50 text-white p-2 rounded text-sm flex flex-col gap-1 pointer-events-none z-50"
             >
-                {type === 'line' && (
+                {(type === 'line' || type === 'bim_muro') && (
                     <>
                         <span>L: {initVal1.toFixed(2)}</span>
                         <span>A: {initVal2.toFixed(2)}°</span>
@@ -339,7 +339,7 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
                     {/* Primary Input with Microphone */}
                     <div className="flex items-center gap-2">
                         <span className="w-8 text-slate-400 font-mono text-[10px] whitespace-nowrap">
-                            {type === 'line' ? 'L:' : type === 'circle' ? 'R:' : type === 'rectangle' ? 'W:' : (type === 'bim_porta' || type === 'bim_finestra') ? 'Larg:' : 'Dist:'}
+                            {type === 'line' || type === 'bim_muro' ? 'L:' : type === 'circle' ? 'R:' : type === 'rectangle' ? 'W:' : (type === 'bim_porta' || type === 'bim_finestra') ? 'Larg:' : 'Dist:'}
                         </span>
                         <div className="flex-1 relative">
                             <input 
@@ -423,10 +423,10 @@ export const ManualInputOverlay: React.FC<ManualInputOverlayProps> = ({ type, dr
                     </div>
 
                     {/* Secondary Input for Angle/Height */}
-                    {(type === 'line' && !drawing?.lockedDir) || type === 'rectangle' || type === 'bim_porta' || type === 'bim_finestra' ? (
+                    {((type === 'line' || type === 'bim_muro') && !drawing?.lockedDir) || type === 'rectangle' || type === 'bim_porta' || type === 'bim_finestra' ? (
                         <div className="flex items-center gap-2">
                              <span className="w-8 text-slate-400 font-mono text-[10px] whitespace-nowrap">
-                                {type === 'line' ? 'A:' : type === 'rectangle' ? 'H:' : 'Alt:'}
+                                {type === 'line' || type === 'bim_muro' ? 'A:' : type === 'rectangle' ? 'H:' : 'Alt:'}
                             </span>
                             <div className="flex-1">
                                 <input 

@@ -14,11 +14,14 @@ import { RaccordoDialog } from "./components/RaccordoDialog";
 import { DXFTextReaderDialog } from "./components/DXFTextReaderDialog";
 import { TemplatePreview } from "./components/TemplatePreview";
 import { BIMWorkspacePanel } from "./components/BIMWorkspacePanel";
+import { BIMTopBarControls } from "./components/BIMTopBarControls";
 import { TEMPLATES } from './data/templates';
 import { GUIDE_DATABASE, GuideItem } from './data/guides';
 import { Entity, Point, Layer, Measurement, Tavola } from "./types";
 import { mergeAllSegments } from "./utils/entityUtils";
 import { parseScriptToEntities, updateScriptVariables } from "./utils/parametricParser";
+import { contours } from "d3-contour";
+import { simplifyPoints } from "./utils/simplify";
 import {
   Minus,
   Circle,
@@ -59,7 +62,14 @@ import {
   ExternalLink,
   X,
   Building,
-  Lock
+  Lock,
+  Home,
+  Maximize2,
+  Droplet,
+  Zap,
+  ChevronDown,
+  ArrowDown,
+  Clipboard
 } from "lucide-react";
 
 const ParallelIcon = ({ size = 16 }: { size?: number }) => (
@@ -189,6 +199,26 @@ export default function App() {
   const [isDimensionDialogOpen, setIsDimensionDialogOpen] = useState(false);
   const [isRaccordoDialogOpen, setIsRaccordoDialogOpen] = useState(false);
   const [isDXFTextReaderOpen, setIsDXFTextReaderOpen] = useState(false);
+  const [selectedBIMSymbolType, setSelectedBIMSymbolType] = useState<string | null>(null);
+
+  // BIM dedicated dialog states
+  const [isBIMMuriOpen, setIsBIMMuriOpen] = useState(false);
+  const [isBIMPorteOpen, setIsBIMPorteOpen] = useState(false);
+  const [isBIMFinestreOpen, setIsBIMFinestreOpen] = useState(false);
+  const [isBIMArrediOpen, setIsBIMArrediOpen] = useState(false);
+  const [isBIMSanitariOpen, setIsBIMSanitariOpen] = useState(false);
+  const [isBIMElettricoOpen, setIsBIMElettricoOpen] = useState(false);
+  const [isBIMIdraulicoOpen, setIsBIMIdraulicoOpen] = useState(false);
+  const [isBIMFinitureOpen, setIsBIMFinitureOpen] = useState(false);
+
+  // BIM top bar reactive parameters
+  const [bimWallThickness, setBimWallThickness] = useState<number>(() => parseFloat(localStorage.getItem('lastWallThickness') || '15'));
+  const [bimWallHeight, setBimWallHeight] = useState<number>(() => parseFloat(localStorage.getItem('lastWallHeight') || '270'));
+  const [bimDoorWidth, setBimDoorWidth] = useState<number>(() => parseFloat(localStorage.getItem('lastDoorWidth') || '80'));
+  const [bimDoorHeight, setBimDoorHeight] = useState<number>(() => parseFloat(localStorage.getItem('lastDoorHeight') || '210'));
+  const [bimWindowWidth, setBimWindowWidth] = useState<number>(() => parseFloat(localStorage.getItem('lastWindowWidth') || '120'));
+  const [bimWindowHeight, setBimWindowHeight] = useState<number>(() => parseFloat(localStorage.getItem('lastWindowHeight') || '140'));
+
   const [editingRaccordo, setEditingRaccordo] = useState<Entity | null>(null);
   const [raccordoConfig, setRaccordoConfig] = useState<{ type: 'curvo' | 'rettilineo'; value: number }>({
     type: 'curvo',
@@ -309,6 +339,30 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('activeSidebarTab', activeSidebarTab);
   }, [activeSidebarTab]);
+
+  useEffect(() => {
+    const requiredLayers = [
+      { id: "BIM_Muri", name: "BIM_Muri", visible: true, frozen: false },
+      { id: "BIM_Porte", name: "BIM_Porte", visible: true, frozen: false },
+      { id: "BIM_Finestre", name: "BIM_Finestre", visible: true, frozen: false },
+      { id: "BIM_Arredi", name: "BIM_Arredi", visible: true, frozen: false },
+      { id: "BIM_Sanitari", name: "BIM_Sanitari", visible: true, frozen: false },
+      { id: "BIM_Impianti_Elettrici", name: "BIM_Impianti_Elettrici", visible: true, frozen: false },
+      { id: "BIM_Impianti_Idraulici", name: "BIM_Impianti_Idraulici", visible: true, frozen: false },
+      { id: "BIM_Finiture", name: "BIM_Finiture", visible: true, frozen: false },
+    ];
+    setLayers(prev => {
+      const updated = [...prev];
+      let changed = false;
+      requiredLayers.forEach(rl => {
+        if (!updated.some(l => l.id === rl.id || l.name === rl.name)) {
+          updated.push(rl);
+          changed = true;
+        }
+      });
+      return changed ? updated : prev;
+    });
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('rulerStyle', rulerStyle);
@@ -460,6 +514,233 @@ export default function App() {
       else if (defaultLineStyle.lineWidth >= 0.5) setActiveLayerId("p4");
     }
   }, [defaultLineStyle.mode, defaultLineStyle.lineWidth, defaultLineStyle.color]);
+
+  // Gestione Appunti (Copy & Paste) per oggetti CAD, immagini e testi (Gecolacad 7.1)
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      // Se l'utente sta scrivendo in un campo di testo o area, lascia fare al browser
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') {
+        return;
+      }
+
+      e.preventDefault();
+      const clipboardData = e.clipboardData;
+      if (!clipboardData) return;
+
+      // 1. Controlla se ci sono files negli appunti (es. immagini copiate o screenshot)
+      const files = clipboardData.files;
+      if (files && files.length > 0) {
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          if (file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              const src = event.target?.result as string;
+              if (src) {
+                const point = cadCanvasRef.current?.getCurrentMousePosition() || { x: 100, y: 100 };
+                
+                const img = new Image();
+                img.onload = () => {
+                  const ar = img.naturalWidth / img.naturalHeight || 1;
+                  const defaultWidth = 300; // larghezza predefinita per inserimento CAD
+                  const defaultHeight = defaultWidth / ar;
+
+                  const newImageEntity: Entity = {
+                    id: `img-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                    type: 'image',
+                    color: '#000000',
+                    lineWidth: 1,
+                    layer: activeLayerId,
+                    point: { x: point.x - defaultWidth / 2, y: point.y - defaultHeight / 2 },
+                    width: defaultWidth,
+                    height: defaultHeight,
+                    src: src,
+                    name: file.name || 'Immagine Incollata',
+                    angle: 0,
+                    aspectRatio: ar,
+                    opacity: 1
+                  } as any;
+
+                  setEntities(prev => {
+                    commitToHistory(prev);
+                    return [...prev, newImageEntity];
+                  });
+
+                  setShortcutToast("Immagine incollata nell'area di lavoro!");
+                  setTimeout(() => setShortcutToast(null), 3000);
+                };
+                img.src = src;
+              }
+            };
+            reader.readAsDataURL(file);
+          }
+        }
+        return;
+      }
+
+      // 2. Controlla se c'è testo negli appunti (testo semplice o JSON serializzato del CAD)
+      const text = clipboardData.getData('text');
+      if (text) {
+        try {
+          if (text.startsWith('{"source":"gecolacad"') || (text.includes('"type":') && text.includes('"id":'))) {
+            const data = JSON.parse(text);
+            const entitiesToPaste: Entity[] = [];
+            
+            if (data.entities && Array.isArray(data.entities)) {
+              entitiesToPaste.push(...data.entities);
+            } else if (data.type && data.id) {
+              entitiesToPaste.push(data);
+            }
+
+            if (entitiesToPaste.length > 0) {
+              const point = cadCanvasRef.current?.getCurrentMousePosition() || { x: 100, y: 100 };
+              
+              // Calcola il rettangolo circoscritto (bounding box) per centrare il paste
+              let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+              entitiesToPaste.forEach((ent: any) => {
+                if (ent.type === 'line' || ent.type === 'dimension') {
+                  if (ent.start && ent.end) {
+                    minX = Math.min(minX, ent.start.x, ent.end.x);
+                    maxX = Math.max(maxX, ent.start.x, ent.end.x);
+                    minY = Math.min(minY, ent.start.y, ent.end.y);
+                    maxY = Math.max(maxY, ent.start.y, ent.end.y);
+                  }
+                } else if (ent.type === 'circle' || ent.type === 'arc') {
+                  if (ent.center) {
+                    minX = Math.min(minX, ent.center.x - (ent.radius || 0));
+                    maxX = Math.max(maxX, ent.center.x + (ent.radius || 0));
+                    minY = Math.min(minY, ent.center.y - (ent.radius || 0));
+                    maxY = Math.max(maxY, ent.center.y + (ent.radius || 0));
+                  }
+                } else if (ent.type === 'rectangle') {
+                  if (ent.p1 && ent.p2) {
+                    minX = Math.min(minX, ent.p1.x, ent.p2.x);
+                    maxX = Math.max(maxX, ent.p1.x, ent.p2.x);
+                    minY = Math.min(minY, ent.p1.y, ent.p2.y);
+                    maxY = Math.max(maxY, ent.p1.y, ent.p2.y);
+                  }
+                } else if (ent.type === 'text' || ent.type === 'image') {
+                  if (ent.point) {
+                    const w = ent.width || 100;
+                    const h = ent.height || 40;
+                    minX = Math.min(minX, ent.point.x);
+                    maxX = Math.max(maxX, ent.point.x + w);
+                    minY = Math.min(minY, ent.point.y);
+                    maxY = Math.max(maxY, ent.point.y + h);
+                  }
+                } else if (ent.type === 'hatch') {
+                  if (ent.points && ent.points.length > 0) {
+                    ent.points.forEach((p: Point) => {
+                      minX = Math.min(minX, p.x);
+                      maxX = Math.max(maxX, p.x);
+                      minY = Math.min(minY, p.y);
+                      maxY = Math.max(maxY, p.y);
+                    });
+                  }
+                }
+              });
+
+              const center = (minX !== Infinity) ? {
+                x: (minX + maxX) / 2,
+                y: (minY + maxY) / 2
+              } : { x: 100, y: 100 };
+
+              const dx = point.x - center.x;
+              const dy = point.y - center.y;
+
+              const preparedEntities = entitiesToPaste.map((ent: any) => {
+                const newId = `${ent.type}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                let updated = { ...ent, id: newId, layer: activeLayerId };
+                
+                if (ent.point) {
+                  updated.point = { x: ent.point.x + dx, y: ent.point.y + dy };
+                }
+                if (ent.center) {
+                  updated.center = { x: ent.center.x + dx, y: ent.center.y + dy };
+                }
+                if (ent.start && ent.end) {
+                  updated.start = { x: ent.start.x + dx, y: ent.start.y + dy };
+                  updated.end = { x: ent.end.x + dx, y: ent.end.y + dy };
+                }
+                if (ent.p1 && ent.p2) {
+                  updated.p1 = { x: ent.p1.x + dx, y: ent.p1.y + dy };
+                  updated.p2 = { x: ent.p2.x + dx, y: ent.p2.y + dy };
+                }
+                if (ent.points) {
+                  updated.points = ent.points.map((p: any) => ({ x: p.x + dx, y: p.y + dy }));
+                }
+                return updated;
+              });
+
+              setEntities(prev => {
+                commitToHistory(prev);
+                return [...prev, ...preparedEntities];
+              });
+
+              setShortcutToast(`Incollati ${preparedEntities.length} oggetti CAD nel disegno!`);
+              setTimeout(() => setShortcutToast(null), 3000);
+              return;
+            }
+          }
+        } catch (err) {
+          // Fallback a disegno del testo standard
+        }
+
+        // Se non è un oggetto CAD formattato, incolla come testo normale sul foglio
+        const point = cadCanvasRef.current?.getCurrentMousePosition() || { x: 100, y: 100 };
+        const newTextEntity: Entity = {
+          id: `txt-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          type: 'text',
+          color: defaultLineStyle.color,
+          lineWidth: 1,
+          layer: activeLayerId,
+          point: { ...point },
+          text: text,
+          fontFamily: defaultTextStyle.fontFamily,
+          fontSize: defaultTextStyle.fontSize,
+          fontWeight: defaultTextStyle.fontWeight,
+          textAlign: defaultTextStyle.textAlign,
+        };
+
+        setEntities(prev => {
+          commitToHistory(prev);
+          return [...prev, newTextEntity];
+        });
+
+        setSelectedId(newTextEntity.id);
+        setActiveSidebarTab('testo');
+        
+        setShortcutToast("Testo incollato nel disegno!");
+        setTimeout(() => setShortcutToast(null), 3000);
+      }
+    };
+
+    const handleCopy = (e: ClipboardEvent) => {
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') {
+        return;
+      }
+
+      if (!selectedId) return;
+      const selectedEnt = entities.find(el => el.id === selectedId);
+      if (selectedEnt) {
+        e.preventDefault();
+        const data = {
+          source: "gecolacad",
+          entities: [selectedEnt]
+        };
+        e.clipboardData?.setData('text/plain', JSON.stringify(data));
+        setShortcutToast("Oggetto CAD copiato negli appunti!");
+        setTimeout(() => setShortcutToast(null), 3000);
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    window.addEventListener('copy', handleCopy);
+    return () => {
+      window.removeEventListener('paste', handlePaste);
+      window.removeEventListener('copy', handleCopy);
+    };
+  }, [entities, selectedId, activeLayerId, defaultLineStyle, defaultTextStyle]);
 
   const [toolboxPos, setToolboxPos] = useState(() => {
     const saved = localStorage.getItem('toolboxPos');
@@ -629,6 +910,21 @@ export default function App() {
         { name: "Penne", icon: Pen },
         { name: "Maschere", icon: Square },
         { name: "Cancella", icon: Trash2 },
+      ],
+    },
+    {
+      name: "BIM",
+      icon: Building,
+      tools: [
+        { name: "BIM_Muro", icon: Building },
+        { name: "BIM_Porta", icon: Type },
+        { name: "BIM_Finestra", icon: Maximize2 },
+        { name: "BIM_Arredi", icon: Home },
+        { name: "BIM_Sanitari", icon: Droplet },
+        { name: "BIM_Elettrico", icon: Zap },
+        { name: "BIM_Idraulico", icon: Crosshair },
+        { name: "BIM_Finitura", icon: Grid },
+        { name: "BIM_Scansione", icon: Sparkles }
       ],
     },
   ];
@@ -875,22 +1171,6 @@ export default function App() {
         </button>
         <button
           onClick={() => {
-            handleGuideClick('Maschere');
-            if (activeSidebarTab === 'maschere' && showProperties) {
-              setShowProperties(false);
-            } else {
-              setActiveSidebarTab('maschere');
-              setShowProperties(true);
-            }
-          }}
-          onMouseEnter={() => handleGuideHover('Maschere')}
-          className={`px-4 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 ${showProperties && activeSidebarTab === 'maschere' ? "bg-neutral-100 text-indigo-600 font-bold" : "hover:bg-neutral-200"}`}
-        >
-          <Square size={16} />
-          <span className="text-[10px]">Maschere</span>
-        </button>
-        <button
-          onClick={() => {
             handleGuideClick('Testo');
             if (activeSidebarTab === 'testo' && showProperties) {
               setShowProperties(false);
@@ -928,6 +1208,7 @@ export default function App() {
               setShowProperties(false);
             } else {
               setActiveSidebarTab('bim');
+              setSelectedCategory('BIM');
               setShowProperties(true);
             }
           }}
@@ -1020,7 +1301,32 @@ export default function App() {
         </button>
       </header>
       <div className="h-8 bg-white border-b border-neutral-300 flex items-center px-4 gap-2">
-        {selectedCategoryTools.map((tool) => (
+        {selectedCategory === "BIM" ? (
+          <BIMTopBarControls
+            selectedTool={selectedTool}
+            setSelectedTool={setSelectedTool}
+            selectedTemplateId={selectedTemplateId}
+            setSelectedTemplateId={setSelectedTemplateId}
+            selectedBIMSymbolType={selectedBIMSymbolType}
+            setSelectedBIMSymbolType={setSelectedBIMSymbolType}
+            cadCanvasRef={cadCanvasRef}
+            defaultHatchStyle={defaultHatchStyle}
+            setDefaultHatchStyle={setDefaultHatchStyle}
+            bimWallThickness={bimWallThickness}
+            setBimWallThickness={setBimWallThickness}
+            bimWallHeight={bimWallHeight}
+            setBimWallHeight={setBimWallHeight}
+            bimDoorWidth={bimDoorWidth}
+            setBimDoorWidth={setBimDoorWidth}
+            bimDoorHeight={bimDoorHeight}
+            setBimDoorHeight={setBimDoorHeight}
+            bimWindowWidth={bimWindowWidth}
+            setBimWindowWidth={setBimWindowWidth}
+            bimWindowHeight={bimWindowHeight}
+            setBimWindowHeight={setBimWindowHeight}
+          />
+        ) : (
+          selectedCategoryTools.map((tool) => (
             <button
               key={tool.name}
               draggable={true}
@@ -1040,7 +1346,8 @@ export default function App() {
               <tool.icon size={12} />
               {tool.name}
             </button>
-        ))}
+          ))
+        )}
         {selectedCategory === "Seleziona" && (
           <>
             <div className="h-4 w-[1px] bg-neutral-300 mx-1" />
@@ -1068,6 +1375,64 @@ export default function App() {
             >
               <Crosshair size={12} />
               Incrocio CAD
+            </button>
+            <div className="h-4 w-[1px] bg-neutral-300 mx-1" />
+            <span className="text-[11px] text-neutral-500 font-medium">
+              Clipboard (Appunti):
+            </span>
+            <button
+              onClick={async () => {
+                if (selectedId) {
+                  const selectedEnt = entities.find(el => el.id === selectedId);
+                  if (selectedEnt) {
+                    try {
+                      const data = {
+                        source: "gecolacad",
+                        entities: [selectedEnt]
+                      };
+                      await navigator.clipboard.writeText(JSON.stringify(data));
+                      setShortcutToast("Oggetto CAD copiato negli appunti!");
+                      setTimeout(() => setShortcutToast(null), 3000);
+                    } catch (err) {
+                      setShortcutToast("Impossibile copiare. Usa Ctrl+C sul foglio!");
+                      setTimeout(() => setShortcutToast(null), 3000);
+                    }
+                  }
+                } else {
+                  setShortcutToast("Seleziona prima un oggetto da copiare!");
+                  setTimeout(() => setShortcutToast(null), 3000);
+                }
+              }}
+              className="px-2 py-0.5 rounded flex items-center gap-1 text-xs transition bg-neutral-50 hover:bg-neutral-100 border border-neutral-200 text-neutral-800"
+              title="Copia l'oggetto CAD selezionato negli appunti (Ctrl+C)"
+            >
+              <Copy size={12} />
+              Copia Oggetto
+            </button>
+            <button
+              onClick={async () => {
+                try {
+                  const text = await navigator.clipboard.readText();
+                  if (text) {
+                    const pasteEvent = new ClipboardEvent('paste', {
+                      clipboardData: new DataTransfer()
+                    });
+                    pasteEvent.clipboardData?.setData('text', text);
+                    window.dispatchEvent(pasteEvent);
+                  } else {
+                    setShortcutToast("Gli appunti sono vuoti!");
+                    setTimeout(() => setShortcutToast(null), 3000);
+                  }
+                } catch (err) {
+                  setShortcutToast("Premi Ctrl+V sul foglio per incollare testi, immagini o oggetti!");
+                  setTimeout(() => setShortcutToast(null), 4000);
+                }
+              }}
+              className="px-2 py-0.5 rounded flex items-center gap-1 text-xs transition bg-neutral-50 hover:bg-neutral-100 border border-neutral-200 text-neutral-800"
+              title="Incolla testi, immagini o oggetti CAD dagli appunti (Ctrl+V)"
+            >
+              <Clipboard size={12} />
+              Incolla (Ctrl+V)
             </button>
           </>
         )}
@@ -1275,6 +1640,8 @@ export default function App() {
             onDoubleClickTavola={setDoubleClickedTavolaId}
             selectedTemplateId={selectedTemplateId}
             selectedEntityId={selectedId}
+            selectedBIMSymbolType={selectedBIMSymbolType}
+            setSelectedBIMSymbolType={setSelectedBIMSymbolType}
             defaultHatchStyle={defaultHatchStyle}
             onActionStart={() => {
               setHoveredGuide(null);
@@ -1702,53 +2069,17 @@ export default function App() {
                   selectedId={selectedId}
                   onSelect={setSelectedId}
                   cadCanvasRef={cadCanvasRef}
+                  selectedTemplateId={selectedTemplateId}
+                  setSelectedTemplateId={setSelectedTemplateId}
+                  onOpenMuri={() => setIsBIMMuriOpen(true)}
+                  onOpenPorte={() => setIsBIMPorteOpen(true)}
+                  onOpenFinestre={() => setIsBIMFinestreOpen(true)}
+                  onOpenArredi={() => setIsBIMArrediOpen(true)}
+                  onOpenSanitari={() => setIsBIMSanitariOpen(true)}
+                  onOpenElettrico={() => setIsBIMElettricoOpen(true)}
+                  onOpenIdraulico={() => setIsBIMIdraulicoOpen(true)}
+                  onOpenFiniture={() => setIsBIMFinitureOpen(true)}
                 />
-              ) : activeSidebarTab === "maschere" ? (
-                <div className="space-y-6">
-                  <div className="bg-amber-100/50 border border-amber-200 p-3 rounded-lg shadow-sm">
-                    <p className="text-[10px] text-amber-800 leading-relaxed font-serif italic">
-                      <strong>TRASFERELLI REBER R41:</strong><br/>
-                      Seleziona e clicca, oppure trascina l'elemento nel disegno. Una volta inserito, usa lo strumento <strong>Selezione</strong> per spostarlo liberamente proprio come un foglio di trasferibili.
-                    </p>
-                  </div>
-                  {['Arredi', 'Bagno', 'Verde', 'Persone', 'Mezzi'].map(cat => (
-                    <div key={cat}>
-                      <h4 className="text-[10px] uppercase font-black text-neutral-400 mb-3 tracking-widest border-b border-neutral-100 pb-1 flex justify-between items-center">
-                        {cat}
-                        <span className="text-[8px] font-normal lowercase opacity-50 px-2 bg-neutral-50 rounded">In scala cm</span>
-                      </h4>
-                      <div className="grid grid-cols-2 gap-2">
-                        {TEMPLATES.filter(t => t.category === cat).map(template => (
-                          <button
-                            key={template.id}
-                            draggable
-                            onDragStart={(e) => {
-                              setSelectedTemplateId(template.id);
-                              setSelectedTool('Template');
-                              e.dataTransfer.setData('text/plain', template.id);
-                            }}
-                            onClick={() => {
-                              setSelectedTemplateId(template.id);
-                              setSelectedTool('Template');
-                            }}
-                            className={`flex flex-col items-center justify-center p-3 rounded-md transition-all border group relative overflow-hidden ${selectedTemplateId === template.id && selectedTool === 'Template' ? "bg-white border-indigo-500 ring-2 ring-indigo-100" : "bg-neutral-50 border-neutral-200 hover:border-neutral-300 hover:bg-white"}`}
-                          >
-                            <div className="mb-2 transform scale-75 group-hover:scale-100 transition-transform duration-300">
-                                <TemplatePreview template={template} size={48} />
-                            </div>
-                            <span className={`text-[9px] font-bold text-center leading-tight ${selectedTemplateId === template.id && selectedTool === 'Template' ? "text-indigo-600" : "text-neutral-500"}`}>
-                              {template.name}
-                            </span>
-                            <div className={`absolute top-0 right-0 px-1 text-white text-[7px] font-black uppercase ${template.view === 'prospetto' ? "bg-orange-500" : "bg-indigo-400"}`}>
-                                {template.view === 'prospetto' ? 'Front' : 'Pianta'}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                  <div className="h-20"></div>
-                </div>
               ) : activeSidebarTab === "gemini" ? (
                 <div className="space-y-4">
                   <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg shadow-sm">
@@ -2221,6 +2552,330 @@ export default function App() {
                           onChange={(e) => updateEntity(selectedEntity.id, { sfumatura: Number(e.target.value) })}
                         />
                         <p className="text-[9px] text-neutral-400 leading-tight">Crea una sfumatura radiale dal centro (ideale per riempimenti solidi)</p>
+                      </div>
+                    </div>
+                  ) : selectedEntity.type === "image" ? (
+                    <div className="space-y-4 font-sans">
+                      <div className="bg-blue-50 border border-blue-200 text-blue-900 p-3 rounded-lg shadow-sm">
+                        <p className="text-[10px] leading-tight font-mono font-bold uppercase">
+                          🖼️ MODIFICA IMMAGINE
+                        </p>
+                      </div>
+                      
+                      {/* Scale / Width Slider */}
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block">Larghezza</label>
+                          <span className="text-[10px] font-mono font-bold text-neutral-600">{Math.round((selectedEntity as any).width || 100)}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="10"
+                          max="2000"
+                          step="10"
+                          className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                          value={(selectedEntity as any).width || 100}
+                          onChange={(e) => {
+                            const newW = Number(e.target.value);
+                            const ar = (selectedEntity as any).aspectRatio || 1;
+                            updateEntity(selectedEntity.id, { width: newW, height: newW / ar });
+                          }}
+                        />
+                      </div>
+
+                      {/* Angle Slider */}
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-sans">Rotazione (°)</label>
+                          <span className="text-[10px] font-mono font-bold text-neutral-600">{(selectedEntity as any).angle || 0}°</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="360"
+                          step="1"
+                          className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                          value={(selectedEntity as any).angle || 0}
+                          onChange={(e) => updateEntity(selectedEntity.id, { angle: Number(e.target.value) })}
+                        />
+                      </div>
+
+                      {/* Opacity Slider */}
+                      <div className="space-y-1.5 pt-2 border-t border-neutral-100">
+                        <div className="flex justify-between items-center">
+                          <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-sans">Opacità (%)</label>
+                          <span className="text-[10px] font-mono font-bold text-neutral-600">{Math.round(((selectedEntity as any).opacity ?? 1) * 100)}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="10"
+                          max="100"
+                          step="1"
+                          className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                          value={Math.round(((selectedEntity as any).opacity ?? 1) * 100)}
+                          onChange={(e) => updateEntity(selectedEntity.id, { opacity: Number(e.target.value) / 100 })}
+                        />
+                        <p className="text-[9px] text-neutral-400 leading-tight">Regola la trasparenza per ricalcare o posizionare sfondi</p>
+                      </div>
+
+                      {/* Brightness / Contrast */}
+                      <div className="space-y-1.5 pt-2 border-t border-neutral-100">
+                        <div className="flex justify-between items-center">
+                          <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-sans">Luminosità</label>
+                          <span className="text-[10px] font-mono font-bold text-neutral-600">{(selectedEntity as any).brightness ?? 100}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="200"
+                          step="5"
+                          className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                          value={(selectedEntity as any).brightness ?? 100}
+                          onChange={(e) => updateEntity(selectedEntity.id, { brightness: Number(e.target.value) })}
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-sans">Contrasto</label>
+                          <span className="text-[10px] font-mono font-bold text-neutral-600">{(selectedEntity as any).contrast ?? 100}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="200"
+                          step="5"
+                          className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                          value={(selectedEntity as any).contrast ?? 100}
+                          onChange={(e) => updateEntity(selectedEntity.id, { contrast: Number(e.target.value) })}
+                        />
+                      </div>
+
+                      {/* Ritaglio (Crop) */}
+                      <div className="space-y-1.5 pt-2 border-t border-neutral-100">
+                        <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-sans mb-1">Ritaglia Immagine (%)</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="flex justify-between items-center bg-neutral-50 px-2 py-1 border border-neutral-200 rounded">
+                            <span className="text-[9px] text-neutral-500 uppercase tracking-wide">← Sinistra</span>
+                            <input
+                              type="number" min="0" max="90" step="1"
+                              className="w-10 text-right text-[10px] bg-transparent outline-none font-mono"
+                              value={(selectedEntity as any).crop?.left || 0}
+                              onChange={(e) => updateEntity(selectedEntity.id, { crop: { ...(selectedEntity as any).crop, left: Math.min(90, Math.max(0, Number(e.target.value))) } })}
+                            />
+                          </div>
+                          <div className="flex justify-between items-center bg-neutral-50 px-2 py-1 border border-neutral-200 rounded">
+                            <span className="text-[9px] text-neutral-500 uppercase tracking-wide">Destra →</span>
+                            <input
+                              type="number" min="0" max="90" step="1"
+                              className="w-10 text-right text-[10px] bg-transparent outline-none font-mono"
+                              value={(selectedEntity as any).crop?.right || 0}
+                              onChange={(e) => updateEntity(selectedEntity.id, { crop: { ...(selectedEntity as any).crop, right: Math.min(90, Math.max(0, Number(e.target.value))) } })}
+                            />
+                          </div>
+                          <div className="flex justify-between items-center bg-neutral-50 px-2 py-1 border border-neutral-200 rounded">
+                            <span className="text-[9px] text-neutral-500 uppercase tracking-wide">↑ Sopra</span>
+                            <input
+                              type="number" min="0" max="90" step="1"
+                              className="w-10 text-right text-[10px] bg-transparent outline-none font-mono"
+                              value={(selectedEntity as any).crop?.top || 0}
+                              onChange={(e) => updateEntity(selectedEntity.id, { crop: { ...(selectedEntity as any).crop, top: Math.min(90, Math.max(0, Number(e.target.value))) } })}
+                            />
+                          </div>
+                          <div className="flex justify-between items-center bg-neutral-50 px-2 py-1 border border-neutral-200 rounded">
+                            <span className="text-[9px] text-neutral-500 uppercase tracking-wide">Sotto ↓</span>
+                            <input
+                              type="number" min="0" max="90" step="1"
+                              className="w-10 text-right text-[10px] bg-transparent outline-none font-mono"
+                              value={(selectedEntity as any).crop?.bottom || 0}
+                              onChange={(e) => updateEntity(selectedEntity.id, { crop: { ...(selectedEntity as any).crop, bottom: Math.min(90, Math.max(0, Number(e.target.value))) } })}
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Blend Mode Toggle */}
+                      <div className="pt-2 border-t border-neutral-100">
+                        <label className="flex items-center gap-2 cursor-pointer group">
+                          <div className="relative flex items-center justify-center">
+                            <input
+                              type="checkbox"
+                              checked={(selectedEntity as any).blendMode === 'multiply'}
+                              onChange={(e) => updateEntity(selectedEntity.id, { blendMode: e.target.checked ? 'multiply' : 'normal' })}
+                              className="peer sr-only"
+                            />
+                            <div className="w-8 h-4 bg-neutral-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-600"></div>
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-neutral-700 block transition-colors group-hover:text-blue-700">Rendi Sfondo Trasparente</span>
+                            <span className="text-[9px] text-neutral-400 block leading-tight mt-0.5">Applica fusione Moltiplica (il bianco scompare)</span>
+                          </div>
+                        </label>
+                      </div>
+
+                      {/* Convert to CAD Vectors */}
+                      <div className="pt-3 border-t border-neutral-100">
+                        <button
+                          onClick={() => {
+                            const img = selectedEntity as any;
+                            const imgElement = document.createElement('img');
+                            imgElement.crossOrigin = 'anonymous';
+                            imgElement.src = img.src;
+                            imgElement.onload = () => {
+                              const maxDim = 800; // max resolution for tracing
+                              const w = imgElement.naturalWidth;
+                              const h = imgElement.naturalHeight;
+                              const scaleToFit = Math.min(1, maxDim / Math.max(w, h));
+                              
+                              const traceW = Math.max(1, Math.floor(w * scaleToFit));
+                              const traceH = Math.max(1, Math.floor(h * scaleToFit));
+                              
+                              const cvs = document.createElement('canvas');
+                              cvs.width = traceW;
+                              cvs.height = traceH;
+                              const cx = cvs.getContext('2d');
+                              if (!cx) return;
+                              
+                              // Handle cropping
+                              const left = (img.crop?.left || 0) / 100;
+                              const top = (img.crop?.top || 0) / 100;
+                              const right = (img.crop?.right || 0) / 100;
+                              const bottom = (img.crop?.bottom || 0) / 100;
+                              
+                              const sx = left * w;
+                              const sy = top * h;
+                              const sw = w * (1 - left - right);
+                              const sh = h * (1 - top - bottom);
+                              
+                              if (sw <= 0 || sh <= 0) return;
+
+                              // Apply Brightness / Contrast during drawing so it affects trace
+                              let filters = [];
+                              if (img.brightness !== undefined) filters.push(`brightness(${img.brightness}%)`);
+                              if (img.contrast !== undefined) filters.push(`contrast(${img.contrast}%)`);
+                              if (filters.length > 0) {
+                                cx.filter = filters.join(' ');
+                              }
+                              
+                              cx.drawImage(imgElement, sx, sy, sw, sh, 0, 0, traceW, traceH);
+                              const idata = cx.getImageData(0, 0, traceW, traceH);
+                              const data = idata.data;
+                              
+                              const values = new Float32Array(traceW * traceH);
+                              for (let i = 0; i < traceW * traceH; i++) {
+                                const r = data[i*4];
+                                const g = data[i*4 + 1];
+                                const b = data[i*4 + 2];
+                                const a = data[i*4 + 3];
+
+                                if (img.blendMode === 'multiply') {
+                                  // Trasparenza in bianco (moltiplica). Il disegno è dove i pixel sono scuri.
+                                  const brightness = (r + g + b) / 3;
+                                  values[i] = 1 - (brightness / 255);
+                                } else {
+                                  // Se non usa la moltiplica, guardiamo l'alpha o il pixel non bianco
+                                  if (a < 50) {
+                                    values[i] = 0;
+                                  } else {
+                                    const brightness = (r + g + b) / 3;
+                                    values[i] = 1 - (brightness / 255);
+                                  }
+                                }
+                              }
+                              
+                              // We use 0.5 threshold to find boundaries
+                              const geoms = contours().size([traceW, traceH]).thresholds([0.5])(values);
+                              
+                              const newEntities: Entity[] = [];
+                              const baseId = `cad-svg-${Date.now()}`;
+                              const imgRenderW = img.width * (1 - left - right);
+                              const imgRenderH = img.height * (1 - top - bottom);
+
+                              const entScaleX = imgRenderW / traceW;
+                              const entScaleY = imgRenderH / traceH;
+                              
+                              const angleRad = (img.angle || 0) * Math.PI / 180;
+                              const cosA = Math.cos(angleRad);
+                              const sinA = Math.sin(angleRad);
+                              
+                              // Center of original image placement
+                              // The image is rendered from -img.width/2 to img.width/2 in its local space.
+                              // Wait, the CADCanvas rendering logic:
+                              // cx = img.point.x + img.width / 2;
+                              // cy = img.point.y + img.height / 2;
+                              // dx = -img.width / 2 + img.width * left;
+                              // dy = -img.height / 2 + img.height * top;
+                              
+                              const centerX = img.point.x + img.width / 2;
+                              const centerY = img.point.y + img.height / 2;
+                              const offsetX = -img.width / 2 + img.width * left;
+                              const offsetY = -img.height / 2 + img.height * top;
+
+                              let eCount = 0;
+                              
+                              for (const contour of geoms) {
+                                  if (!contour.coordinates || contour.coordinates.length === 0) continue;
+                                  for (const polygon of contour.coordinates) {
+                                      for (const ring of polygon) {
+                                          if (ring.length < 3) continue;
+
+                                          // Convert ring coordinates into full CAD point coords
+                                          const pts = ring.map(pt => {
+                                              let p1x = pt[0] * entScaleX;
+                                              let p1y = pt[1] * entScaleY;
+
+                                              // add offset
+                                              let relX = p1x + offsetX;
+                                              let relY = p1y + offsetY;
+                                              
+                                              // rotation
+                                              let rotX = relX * cosA - relY * sinA;
+                                              let rotY = relX * sinA + relY * cosA;
+                                              
+                                              return { x: centerX + rotX, y: centerY + rotY };
+                                          });
+
+                                          // Simplify
+                                          const simplified = simplifyPoints(pts, 1.5);
+                                          if (simplified.length < 2) continue;
+
+                                          for (let i = 0; i < simplified.length - 1; i++) {
+                                              newEntities.push({
+                                                  type: 'line',
+                                                  id: `${baseId}-${eCount++}`,
+                                                  color: img.color || '#000000',
+                                                  lineWidth: 1,
+                                                  layer: img.layer || '0',
+                                                  start: simplified[i],
+                                                  end: simplified[i+1]
+                                              });
+                                          }
+                                      }
+                                  }
+                              }
+
+                              if (newEntities.length > 0) {
+                                  setEntities(prev => {
+                                      const next = prev.filter(e => e.id !== img.id).concat(newEntities);
+                                      commitToHistory(next);
+                                      return next;
+                                  });
+                                  setSelectedId(null);
+                                  setShortcutToast(`Successo! Immagine convertita in ${newEntities.length} linee vettoriali!`);
+                                  setTimeout(() => setShortcutToast(null), 4000);
+                              } else {
+                                  setShortcutToast(`Nessun tratto rilevato nell'immagine.`);
+                                  setTimeout(() => setShortcutToast(null), 3000);
+                              }
+                            };
+                          }}
+                          className="w-full relative overflow-hidden group py-2 px-3 rounded-lg flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-sm transition-all focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 focus:outline-none"
+                        >
+                          <div className="absolute inset-0 bg-[linear-gradient(45deg,transparent_25%,rgba(255,255,255,0.2)_50%,transparent_75%)] bg-[length:250%_250%] opacity-0 group-hover:opacity-100 group-hover:animate-[shimmer_2s_infinite]"></div>
+                          <Sparkles size={14} className="group-hover:rotate-12 transition-transform" />
+                          <span className="text-xs font-bold tracking-wide">Vettorializza in Linee CAD</span>
+                        </button>
+                        <p className="text-[9px] text-neutral-400 leading-tight mt-1.5 text-center">Trasforma l'immagine in tracce CAD in modo da poter usare la gomma o agganciare i punti.</p>
                       </div>
                     </div>
                   ) : (
@@ -3035,6 +3690,8 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* BIM Dialog Submenus were removed and redesigned in the inline top bars for higher efficiency */}
     </div>
   );
 }

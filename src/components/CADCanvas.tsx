@@ -30,7 +30,7 @@ export interface CADCanvasAPI {
     originalLine2: any
   ) => void;
   autoScanBIM: () => void;
-  setBIMDefaults: (width: number, height: number | undefined, type: 'door' | 'window') => void;
+  setBIMDefaults: (width: number, height: number | undefined, type: 'door' | 'window' | 'wall') => void;
 }
 
 export type DrawingState = {
@@ -73,6 +73,223 @@ const mirrorPoint = (p: Point, a: Point, b: Point): Point => {
     x: 2 * hx - p.x,
     y: 2 * hy - p.y
   };
+};
+
+const intersectLines = (p1: Point, v1: Point, p2: Point, v2: Point): Point | null => {
+  const denom = v1.x * v2.y - v1.y * v2.x;
+  if (Math.abs(denom) < 1e-6) return null;
+  const t = ((p2.x - p1.x) * v2.y - (p2.y - p1.y) * v2.x) / denom;
+  return { x: p1.x + t * v1.x, y: p1.y + t * v1.y };
+};
+
+const distToSegment = (p: Point, a: Point, b: Point): number => {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.sqrt((p.x - a.x) ** 2 + (p.y - a.y) ** 2);
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return Math.sqrt((p.x - (a.x + t * dx)) ** 2 + (p.y - (a.y + t * dy)) ** 2);
+};
+
+const getWallCorners = (l: LineEntity, entities: Entity[]): Point[] => {
+  const thickness = l.bimWidth || 15;
+  const dx = l.end.x - l.start.x;
+  const dy = l.end.y - l.start.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len <= 0.1) return [l.start, l.end];
+
+  const nx = -dy / len;
+  const ny = dx / len;
+  const N = { x: nx, y: ny };
+  const V = { x: dx / len, y: dy / len };
+
+  let startPlus = { x: l.start.x + nx * thickness / 2, y: l.start.y + ny * thickness / 2 };
+  let startMinus = { x: l.start.x - nx * thickness / 2, y: l.start.y - ny * thickness / 2 };
+  let endPlus = { x: l.end.x + nx * thickness / 2, y: l.end.y + ny * thickness / 2 };
+  let endMinus = { x: l.end.x - nx * thickness / 2, y: l.end.y - ny * thickness / 2 };
+
+  const startConns = entities.filter(e => e.type === 'line' && e.isBIM && e.bimType === 'wall' && e.id !== l.id) as LineEntity[];
+  let bestStartConn: LineEntity | null = null;
+  let isStartCorner = false;
+  let bestStartDist = 15.0;
+
+  for (const other of startConns) {
+      const dStart = Math.sqrt((other.start.x - l.start.x) ** 2 + (other.start.y - l.start.y) ** 2);
+      const dEnd = Math.sqrt((other.end.x - l.start.x) ** 2 + (other.end.y - l.start.y) ** 2);
+      if (dStart < bestStartDist) {
+          bestStartConn = other;
+          bestStartDist = dStart;
+          isStartCorner = true;
+      }
+      if (dEnd < bestStartDist) {
+          bestStartConn = other;
+          bestStartDist = dEnd;
+          isStartCorner = true;
+      }
+      const dSeg = distToSegment(l.start, other.start, other.end);
+      if (dSeg < bestStartDist) {
+          bestStartConn = other;
+          bestStartDist = dSeg;
+          isStartCorner = false;
+      }
+  }
+
+  if (bestStartConn) {
+      if (isStartCorner) {
+          const V1 = { x: -V.x, y: -V.y };
+          const N1 = { x: -V1.y, y: V1.x };
+          const isOtherStart = Math.sqrt((bestStartConn.start.x - l.start.x) ** 2 + (bestStartConn.start.y - l.start.y) ** 2) < 15.0;
+          const oStart = bestStartConn.start;
+          const oEnd = bestStartConn.end;
+          const oDx = oEnd.x - oStart.x;
+          const oDy = oEnd.y - oStart.y;
+          const oLen = Math.sqrt(oDx * oDx + oDy * oDy);
+          if (oLen > 0.1) {
+              const oV = { x: oDx / oLen, y: oDy / oLen };
+              const V2 = isOtherStart ? oV : { x: -oV.x, y: -oV.y };
+              const N2 = { x: -V2.y, y: V2.x };
+              const t2 = bestStartConn.bimWidth || 15;
+              const p1_plus = { x: l.start.x + N1.x * thickness / 2, y: l.start.y + N1.y * thickness / 2 };
+              const p2_plus = { x: l.start.x + N2.x * t2 / 2, y: l.start.y + N2.y * t2 / 2 };
+              const p1_minus = { x: l.start.x - N1.x * thickness / 2, y: l.start.y - N1.y * thickness / 2 };
+              const p2_minus = { x: l.start.x - N2.x * t2 / 2, y: l.start.y - N2.y * t2 / 2 };
+              const cross = Math.abs(V1.x * V2.y - V1.y * V2.x);
+              if (cross > 0.1) {
+                  const pt_plus = intersectLines(p1_plus, V1, p2_plus, V2);
+                  const pt_minus = intersectLines(p1_minus, V1, p2_minus, V2);
+                  if (pt_plus && pt_minus) {
+                      startMinus = pt_plus;
+                      startPlus = pt_minus;
+                  }
+              }
+          }
+      } else {
+          const oStart = bestStartConn.start;
+          const oEnd = bestStartConn.end;
+          const oDx = oEnd.x - oStart.x;
+          const oDy = oEnd.y - oStart.y;
+          const oLen = Math.sqrt(oDx * oDx + oDy * oDy);
+          if (oLen > 0.1) {
+              const oV = { x: oDx / oLen, y: oDy / oLen };
+              const oN = { x: -oV.y, y: oV.x };
+              const t2 = bestStartConn.bimWidth || 15;
+              const other_A_point = { x: oStart.x + oN.x * t2 / 2, y: oStart.y + oN.y * t2 / 2 };
+              const other_B_point = { x: oStart.x - oN.x * t2 / 2, y: oStart.y - oN.y * t2 / 2 };
+              const lp_p = { x: l.start.x + nx * thickness / 2, y: l.start.y + ny * thickness / 2 };
+              const lp_m = { x: l.start.x - nx * thickness / 2, y: l.start.y - ny * thickness / 2 };
+              const cross = Math.abs(V.x * oV.y - V.y * oV.x);
+              if (cross > 0.1) {
+                  const ipt_lp_p_A = intersectLines(lp_p, V, other_A_point, oV);
+                  const ipt_lp_p_B = intersectLines(lp_p, V, other_B_point, oV);
+                  if (ipt_lp_p_A && ipt_lp_p_B) {
+                      const d_A = (ipt_lp_p_A.x - lp_p.x) ** 2 + (ipt_lp_p_A.y - lp_p.y) ** 2;
+                      const d_B = (ipt_lp_p_B.x - lp_p.x) ** 2 + (ipt_lp_p_B.y - lp_p.y) ** 2;
+                      startPlus = d_A < d_B ? ipt_lp_p_A : ipt_lp_p_B;
+                  }
+                  const ipt_lp_m_A = intersectLines(lp_m, V, other_A_point, oV);
+                  const ipt_lp_m_B = intersectLines(lp_m, V, other_B_point, oV);
+                  if (ipt_lp_m_A && ipt_lp_m_B) {
+                      const d_A = (ipt_lp_m_A.x - lp_m.x) ** 2 + (ipt_lp_m_A.y - lp_m.y) ** 2;
+                      const d_B = (ipt_lp_m_B.x - lp_m.x) ** 2 + (ipt_lp_m_B.y - lp_m.y) ** 2;
+                      startMinus = d_A < d_B ? ipt_lp_m_A : ipt_lp_m_B;
+                  }
+              }
+          }
+      }
+  }
+
+  const endConns = entities.filter(e => e.type === 'line' && e.isBIM && e.bimType === 'wall' && e.id !== l.id) as LineEntity[];
+  let bestEndConn: LineEntity | null = null;
+  let isEndCorner = false;
+  let bestEndDist = 15.0;
+
+  for (const other of endConns) {
+      const dStart = Math.sqrt((other.start.x - l.end.x) ** 2 + (other.start.y - l.end.y) ** 2);
+      const dEnd = Math.sqrt((other.end.x - l.end.x) ** 2 + (other.end.y - l.end.y) ** 2);
+      if (dStart < bestEndDist) {
+          bestEndConn = other;
+          bestEndDist = dStart;
+          isEndCorner = true;
+      }
+      if (dEnd < bestEndDist) {
+          bestEndConn = other;
+          bestEndDist = dEnd;
+          isEndCorner = true;
+      }
+      const dSeg = distToSegment(l.end, other.start, other.end);
+      if (dSeg < bestEndDist) {
+          bestEndConn = other;
+          bestEndDist = dSeg;
+          isEndCorner = false;
+      }
+  }
+
+  if (bestEndConn) {
+      if (isEndCorner) {
+          const V1 = V;
+          const N1 = N;
+          const isOtherStart = Math.sqrt((bestEndConn.start.x - l.end.x) ** 2 + (bestEndConn.start.y - l.end.y) ** 2) < 15.0;
+          const oStart = bestEndConn.start;
+          const oEnd = bestEndConn.end;
+          const oDx = oEnd.x - oStart.x;
+          const oDy = oEnd.y - oStart.y;
+          const oLen = Math.sqrt(oDx * oDx + oDy * oDy);
+          if (oLen > 0.1) {
+              const oV = { x: oDx / oLen, y: oDy / oLen };
+              const V2 = isOtherStart ? oV : { x: -oV.x, y: -oV.y };
+              const N2 = { x: -V2.y, y: V2.x };
+              const t2 = bestEndConn.bimWidth || 15;
+              const p1_plus = { x: l.end.x + N1.x * thickness / 2, y: l.end.y + N1.y * thickness / 2 };
+              const p2_plus = { x: l.end.x + N2.x * t2 / 2, y: l.end.y + N2.y * t2 / 2 };
+              const p1_minus = { x: l.end.x - N1.x * thickness / 2, y: l.end.y - N1.y * thickness / 2 };
+              const p2_minus = { x: l.end.x - N2.x * t2 / 2, y: l.end.y - N2.y * t2 / 2 };
+              const cross = Math.abs(V1.x * V2.y - V1.y * V2.x);
+              if (cross > 0.1) {
+                  const pt_plus = intersectLines(p1_plus, V1, p2_plus, V2);
+                  const pt_minus = intersectLines(p1_minus, V1, p2_minus, V2);
+                  if (pt_plus && pt_minus) {
+                      endPlus = pt_plus;
+                      endMinus = pt_minus;
+                  }
+              }
+          }
+      } else {
+          const oStart = bestEndConn.start;
+          const oEnd = bestEndConn.end;
+          const oDx = oEnd.x - oStart.x;
+          const oDy = oEnd.y - oStart.y;
+          const oLen = Math.sqrt(oDx * oDx + oDy * oDy);
+          if (oLen > 0.1) {
+              const oV = { x: oDx / oLen, y: oDy / oLen };
+              const oN = { x: -oV.y, y: oV.x };
+              const t2 = bestEndConn.bimWidth || 15;
+              const other_A_point = { x: oStart.x + oN.x * t2 / 2, y: oStart.y + oN.y * t2 / 2 };
+              const other_B_point = { x: oStart.x - oN.x * t2 / 2, y: oStart.y - oN.y * t2 / 2 };
+              const lp_p = { x: l.end.x + nx * thickness / 2, y: l.end.y + ny * thickness / 2 };
+              const lp_m = { x: l.end.x - nx * thickness / 2, y: l.end.y - ny * thickness / 2 };
+              const cross = Math.abs(V.x * oV.y - V.y * oV.x);
+              if (cross > 0.1) {
+                  const ipt_lp_p_A = intersectLines(lp_p, V, other_A_point, oV);
+                  const ipt_lp_p_B = intersectLines(lp_p, V, other_B_point, oV);
+                  if (ipt_lp_p_A && ipt_lp_p_B) {
+                      const d_A = (ipt_lp_p_A.x - lp_p.x) ** 2 + (ipt_lp_p_A.y - lp_p.y) ** 2;
+                      const d_B = (ipt_lp_p_B.x - lp_p.x) ** 2 + (ipt_lp_p_B.y - lp_p.y) ** 2;
+                      endPlus = d_A < d_B ? ipt_lp_p_A : ipt_lp_p_B;
+                  }
+                  const ipt_lp_m_A = intersectLines(lp_m, V, other_A_point, oV);
+                  const ipt_lp_m_B = intersectLines(lp_m, V, other_B_point, oV);
+                  if (ipt_lp_m_A && ipt_lp_m_B) {
+                      const d_A = (ipt_lp_m_A.x - lp_m.x) ** 2 + (ipt_lp_m_A.y - lp_m.y) ** 2;
+                      const d_B = (ipt_lp_m_B.x - lp_m.x) ** 2 + (ipt_lp_m_B.y - lp_m.y) ** 2;
+                      endMinus = d_A < d_B ? ipt_lp_m_A : ipt_lp_m_B;
+                  }
+              }
+          }
+      }
+  }
+
+  return [startPlus, startMinus, endPlus, endMinus];
 };
 
 const mirrorAngle = (angleDeg: number, axisAngleDeg: number): number => {
@@ -195,6 +412,14 @@ const mirrorEntity = (entity: Entity, axisPt1: Point, axisPt2: Point): Entity =>
       start: newStart,
       end: newEnd,
     } as any;
+  } else if (entity.type === 'image') {
+    const newPoint = mirrorPoint(entity.point, axisPt1, axisPt2);
+    return {
+      ...entity,
+      ...common,
+      point: newPoint,
+      angle: entity.angle !== undefined ? (180 - entity.angle) % 360 : undefined,
+    } as any;
   } else if ((entity as any).type === 'hatch') {
     const h = entity as any;
     const newPoints = h.points ? h.points.map((p: Point) => mirrorPoint(p, axisPt1, axisPt2)) : [];
@@ -266,6 +491,16 @@ const drawTempEntityPreview = (ctx: CanvasRenderingContext2D, entity: Entity) =>
         ctx.lineTo(h.points[i].x, h.points[i].y);
       }
       ctx.closePath();
+      ctx.stroke();
+    }
+  } else if (entity.type === 'image') {
+    const imgElement = document.createElement('img');
+    imgElement.src = entity.src;
+    imgElement.crossOrigin = 'anonymous';
+    try {
+      ctx.drawImage(imgElement, entity.point.x, entity.point.y, entity.width, entity.height);
+    } catch (e) {
+      ctx.rect(entity.point.x, entity.point.y, entity.width, entity.height);
       ctx.stroke();
     }
   }
@@ -1418,6 +1653,80 @@ export const getTavolaDimensions = (tavola: { format: string; scale: number; uni
   return { w, h };
 };
 
+const getBIMSymbolEntities = (type: string): { type: 'line' | 'circle' | 'arc' | 'text'; start?: Point; end?: Point; center?: Point; radius?: number; startAngle?: number; endAngle?: number; text?: string; color?: string }[] => {
+  switch (type) {
+    case 'punto_luce':
+      return [
+        { type: 'circle', center: { x: 0, y: 0 }, radius: 10 },
+        { type: 'line', start: { x: -7, y: -7 }, end: { x: 7, y: 7 } },
+        { type: 'line', start: { x: -7, y: 7 }, end: { x: 7, y: -7 } }
+      ];
+    case 'presa_standard':
+      return [
+        { type: 'arc', center: { x: 0, y: 0 }, radius: 8, startAngle: 180, endAngle: 360 },
+        { type: 'line', start: { x: -8, y: 0 }, end: { x: 8, y: 0 } },
+        { type: 'line', start: { x: -3, y: 0 }, end: { x: -3, y: -6 } },
+        { type: 'line', start: { x: 0, y: 0 }, end: { x: 0, y: -6 } },
+        { type: 'line', start: { x: 3, y: 0 }, end: { x: 3, y: -6 } }
+      ];
+    case 'interruttore':
+      return [
+        { type: 'line', start: { x: 0, y: 0 }, end: { x: 8, y: -8 } },
+        { type: 'line', start: { x: 8, y: -8 }, end: { x: 11, y: -5 } }
+      ];
+    case 'deviatore':
+      return [
+        { type: 'line', start: { x: 0, y: 0 }, end: { x: 8, y: -8 } },
+        { type: 'line', start: { x: 8, y: -8 }, end: { x: 11, y: -5 } },
+        { type: 'line', start: { x: 0, y: 0 }, end: { x: -3, y: -3 } }
+      ];
+    case 'quadro':
+      return [
+        { type: 'line', start: { x: -10, y: -10 }, end: { x: 10, y: -10 } },
+        { type: 'line', start: { x: 10, y: -10 }, end: { x: 10, y: 10 } },
+        { type: 'line', start: { x: 10, y: 10 }, end: { x: -10, y: 10 } },
+        { type: 'line', start: { x: -10, y: 10 }, end: { x: -10, y: -10 } },
+        { type: 'line', start: { x: -10, y: -10 }, end: { x: 10, y: 10 } }
+      ];
+    case 'carico_af':
+      return [
+        { type: 'circle', center: { x: 0, y: 0 }, radius: 8 },
+        { type: 'text', text: 'AF', center: { x: 12, y: 3 } }
+      ];
+    case 'carico_ac':
+      return [
+        { type: 'circle', center: { x: 0, y: 0 }, radius: 8 },
+        { type: 'text', text: 'AC', center: { x: 12, y: 3 } }
+      ];
+    case 'scarico_idr':
+      return [
+        { type: 'circle', center: { x: 0, y: 0 }, radius: 10 },
+        { type: 'line', start: { x: -10, y: 10 }, end: { x: 10, y: -10 } },
+        { type: 'text', text: 'S', center: { x: 13, y: 3 } }
+      ];
+    case 'caldaia':
+      return [
+        { type: 'line', start: { x: -12, y: -18 }, end: { x: 12, y: -18 } },
+        { type: 'line', start: { x: 12, y: -18 }, end: { x: 12, y: 18 } },
+        { type: 'line', start: { x: 12, y: 18 }, end: { x: -12, y: 18 } },
+        { type: 'line', start: { x: -12, y: 18 }, end: { x: -12, y: -18 } },
+        { type: 'text', text: 'CALDAIA', center: { x: 0, y: 4 } }
+      ];
+    case 'collettore':
+      return [
+        { type: 'line', start: { x: -20, y: -6 }, end: { x: 20, y: -6 } },
+        { type: 'line', start: { x: 20, y: -6 }, end: { x: 20, y: 6 } },
+        { type: 'line', start: { x: 20, y: 6 }, end: { x: -20, y: 6 } },
+        { type: 'line', start: { x: -20, y: 6 }, end: { x: -20, y: -6 } },
+        { type: 'line', start: { x: -10, y: -6 }, end: { x: -10, y: 6 } },
+        { type: 'line', start: { x: 0, y: -6 }, end: { x: 0, y: 6 } },
+        { type: 'line', start: { x: 10, y: -6 }, end: { x: 10, y: 6 } }
+      ];
+    default:
+      return [];
+  }
+};
+
 interface CADCanvasProps {
   entities: Entity[];
   activeTool: string;
@@ -1444,6 +1753,8 @@ interface CADCanvasProps {
   onDoubleClickTavola?: (id: string) => void;
   selectedTemplateId?: string | null;
   selectedEntityId?: string | null;
+  selectedBIMSymbolType?: string | null;
+  setSelectedBIMSymbolType?: (val: string | null) => void;
   defaultTextStyle?: { fontFamily: string, fontSize: number, fontWeight: string, textAlign: 'left' | 'center' | 'right' | 'justify' };
   raccordoConfig?: { type: 'curvo' | 'rettilineo'; value: number };
   onEditRaccordo?: (raccordoEntity: Entity) => void;
@@ -1456,7 +1767,7 @@ interface CADCanvasProps {
   };
 }
 
-export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultHatchStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, setOrthoMode, isContinuousMode = false, cancelTrigger = 0, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, raccordoConfig, onEditRaccordo, onActionStart }, ref) => {
+export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultHatchStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, setOrthoMode, isContinuousMode = false, cancelTrigger = 0, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, selectedBIMSymbolType, setSelectedBIMSymbolType, raccordoConfig, onEditRaccordo, onActionStart }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [view, setView] = useState({ zoom: 0.15, pan: { x: window.innerWidth > 0 ? (window.innerWidth / 2) - 150 : 250, y: window.innerHeight > 0 ? (window.innerHeight / 2) - 220 : 80 } });
   const [dragTavolaId, setDragTavolaId] = useState<string | null>(null);
@@ -1643,6 +1954,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   const [positioningEntityId, setPositioningEntityId] = useState<string | null>(null);
   const [positioningEntityStartPos, setPositioningEntityStartPos] = useState<Point | null>(null);
   const [showManualInput, setShowManualInput] = useState(false);
+  const [lastWallThickness, setLastWallThickness] = useState(() => parseFloat(localStorage.getItem('lastWallThickness') || '15'));
   const [lastDoorWidth, setLastDoorWidth] = useState(() => parseFloat(localStorage.getItem('lastDoorWidth') || '80'));
   const [lastDoorHeight, setLastDoorHeight] = useState(() => parseFloat(localStorage.getItem('lastDoorHeight') || '210'));
   const [lastWindowWidth, setLastWindowWidth] = useState(() => parseFloat(localStorage.getItem('lastWindowWidth') || '120'));
@@ -1925,7 +2237,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     ) => {
       applyRaccordo(id1, id2, clickPt1, clickPt2, existingRaccordoId, config, { originalLine1, originalLine2 });
     },
-    setBIMDefaults: (width: number, height: number | undefined, type: 'door' | 'window') => {
+    setBIMDefaults: (width: number, height: number | undefined, type: 'door' | 'window' | 'wall') => {
       if (type === 'door') {
         setLastDoorWidth(width);
         if (height !== undefined) {
@@ -1933,13 +2245,16 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           localStorage.setItem('lastDoorHeight', height.toString());
         }
         localStorage.setItem('lastDoorWidth', width.toString());
-      } else {
+      } else if (type === 'window') {
         setLastWindowWidth(width);
         if (height !== undefined) {
           setLastWindowHeight(height);
           localStorage.setItem('lastWindowHeight', height.toString());
         }
         localStorage.setItem('lastWindowWidth', width.toString());
+      } else if (type === 'wall') {
+        setLastWallThickness(width);
+        localStorage.setItem('lastWallThickness', width.toString());
       }
     },
     autoScanBIM: () => {
@@ -2320,6 +2635,14 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
     visibleEntities.forEach(entity => {
       if (entity.type === 'line') {
+        const line = entity as LineEntity;
+        if (line.isBIM && line.bimType === 'wall') {
+            const corners = getWallCorners(line, visibleEntities);
+            corners.forEach(cp => {
+                snaps.push({ point: cp, type: 'CAD', refPoint: cp, refEntityId: line.id });
+                keyPoints.push(cp);
+            });
+        }
         snaps.push({point: entity.start, type: 'CAD', refPoint: entity.start});
         snaps.push({point: entity.end, type: 'CAD', refPoint: entity.end});
         const midPoint = {x: (entity.start.x + entity.end.x) / 2, y: (entity.start.y + entity.end.y) / 2};
@@ -2377,7 +2700,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
     }
 
-    const isDrawingTool = ['Line', 'Circle', 'Arc', 'Rectangle', 'Hatch', 'Dimension'].includes(activeTool);
+    const isDrawingTool = ['Line', 'Circle', 'Arc', 'Rectangle', 'Hatch', 'Dimension', 'BIM_Muro', 'BIM_Porta', 'BIM_Finestra', 'BIM_Symbol', 'BIM_DisegnaStanza'].includes(activeTool);
     if (isDrawingTool && (drawing ? true : isShiftPressedRef.current)) {
         const threshold = 12 / view.zoom;
         const uniqueKeyPoints: Point[] = [];
@@ -2643,6 +2966,14 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         if (h.points && isPointInPolygon(point, h.points)) {
           hit = true;
         }
+      } else if (ent.type === 'image') {
+        const minX = ent.point.x;
+        const maxX = ent.point.x + ent.width;
+        const minY = ent.point.y;
+        const maxY = ent.point.y + ent.height;
+        if (point.x >= minX - 5/view.zoom && point.x <= maxX + 5/view.zoom && point.y >= minY - 5/view.zoom && point.y <= maxY + 5/view.zoom) {
+          hit = true;
+        }
       }
       
       if (hit) {
@@ -2698,6 +3029,12 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       if (p) points.push(p);
     } else if (entity.type === 'text') {
       points.push(entity.point);
+    } else if (entity.type === 'image') {
+      points.push(entity.point);
+      points.push({ x: entity.point.x + entity.width, y: entity.point.y });
+      points.push({ x: entity.point.x, y: entity.point.y + entity.height });
+      points.push({ x: entity.point.x + entity.width, y: entity.point.y + entity.height });
+      points.push({ x: entity.point.x + entity.width / 2, y: entity.point.y + entity.height / 2 });
     }
     return points;
   };
@@ -2787,7 +3124,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       return;
     }
 
-    const config = overrideConfig || raccordoConfig || { type: 'curvo', value: 10 };
+    const isBothWalls = line1.isBIM && line1.bimType === 'wall' && line2.isBIM && line2.bimType === 'wall';
+    const config = isBothWalls
+      ? { type: 'rettilineo' as const, value: 0 }
+      : (overrideConfig || raccordoConfig || { type: 'curvo', value: 10 });
     const pVal = config.value;
 
     let T = 0; // tangent distance from I
@@ -2914,11 +3254,12 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       if (existingRaccordoId) {
         filtered = filtered.filter(ent => ent.id !== existingRaccordoId);
       }
-      return filtered.map(ent => {
+      const updated = filtered.map(ent => {
         if (ent.id === id1) return updatedLine1;
         if (ent.id === id2) return updatedLine2;
         return ent;
-      }).concat(newConnector);
+      });
+      return isBothWalls ? updated : updated.concat(newConnector);
     });
 
     // Smooth cinematic camera transition to the focal point of the raccordo
@@ -3101,7 +3442,285 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         ctx.beginPath();
         if (entity.type === 'line') {
           const l = entity as LineEntity;
-          if ((l.mode === 'ink' || l.mode === 'pencil') && l.isFreehand) {
+          if (l.isBIM && l.bimType === 'wall') {
+              const thickness = l.bimWidth || 15;
+              const dx = l.end.x - l.start.x;
+              const dy = l.end.y - l.start.y;
+              const len = Math.sqrt(dx * dx + dy * dy);
+              if (len > 0.1) {
+                  const nx = -dy / len;
+                  const ny = dx / len;
+                  const N = { x: nx, y: ny };
+                  const V = { x: dx / len, y: dy / len };
+
+                  let hasStartConn = false;
+                  let startPlus = { x: l.start.x + nx * thickness / 2, y: l.start.y + ny * thickness / 2 };
+                  let startMinus = { x: l.start.x - nx * thickness / 2, y: l.start.y - ny * thickness / 2 };
+                  const startConns = entities.filter(e => e.type === 'line' && e.isBIM && e.bimType === 'wall' && e.id !== l.id) as LineEntity[];
+                  let bestStartConn: LineEntity | null = null;
+                  let isStartCorner = false;
+                  let bestStartDist = 15.0; // wider tolerance for snaps (15 cm)
+
+                  for (const other of startConns) {
+                      const dStart = Math.sqrt((other.start.x - l.start.x) ** 2 + (other.start.y - l.start.y) ** 2);
+                      const dEnd = Math.sqrt((other.end.x - l.start.x) ** 2 + (other.end.y - l.start.y) ** 2);
+                      
+                      // Check corner connection
+                      if (dStart < bestStartDist) {
+                          bestStartConn = other;
+                          bestStartDist = dStart;
+                          isStartCorner = true;
+                      }
+                      if (dEnd < bestStartDist) {
+                          bestStartConn = other;
+                          bestStartDist = dEnd;
+                          isStartCorner = true;
+                      }
+                      
+                      // Check T-junction connection (distance to centerline segment)
+                      const dSeg = distToSegment(l.start, other.start, other.end);
+                      if (dSeg < bestStartDist) {
+                          bestStartConn = other;
+                          bestStartDist = dSeg;
+                          isStartCorner = false;
+                      }
+                  }
+
+                  if (bestStartConn) {
+                      if (isStartCorner) {
+                          const V1 = { x: -V.x, y: -V.y };
+                          const N1 = { x: -V1.y, y: V1.x }; // -N
+                          
+                          const isOtherStart = Math.sqrt((bestStartConn.start.x - l.start.x) ** 2 + (bestStartConn.start.y - l.start.y) ** 2) < 15.0;
+                          const oStart = bestStartConn.start;
+                          const oEnd = bestStartConn.end;
+                          const oDx = oEnd.x - oStart.x;
+                          const oDy = oEnd.y - oStart.y;
+                          const oLen = Math.sqrt(oDx * oDx + oDy * oDy);
+                          
+                          if (oLen > 0.1) {
+                              const oV = { x: oDx / oLen, y: oDy / oLen };
+                              const V2 = isOtherStart ? oV : { x: -oV.x, y: -oV.y };
+                              const N2 = { x: -V2.y, y: V2.x };
+                              
+                              const t2 = bestStartConn.bimWidth || 15;
+                              
+                              const p1_plus = { x: l.start.x + N1.x * thickness / 2, y: l.start.y + N1.y * thickness / 2 };
+                              const p2_plus = { x: l.start.x + N2.x * t2 / 2, y: l.start.y + N2.y * t2 / 2 };
+                              
+                              const p1_minus = { x: l.start.x - N1.x * thickness / 2, y: l.start.y - N1.y * thickness / 2 };
+                              const p2_minus = { x: l.start.x - N2.x * t2 / 2, y: l.start.y - N2.y * t2 / 2 };
+                              
+                              const cross = Math.abs(V1.x * V2.y - V1.y * V2.x);
+                              if (cross > 0.1) {
+                                  const pt_plus = intersectLines(p1_plus, V1, p2_plus, V2);
+                                  const pt_minus = intersectLines(p1_minus, V1, p2_minus, V2);
+                                  
+                                  if (pt_plus && pt_minus) {
+                                      startMinus = pt_plus;
+                                      startPlus = pt_minus;
+                                      hasStartConn = true;
+                                  }
+                              }
+                          }
+                      } else {
+                          // T-junction at l.start
+                          const oStart = bestStartConn.start;
+                          const oEnd = bestStartConn.end;
+                          const oDx = oEnd.x - oStart.x;
+                          const oDy = oEnd.y - oStart.y;
+                          const oLen = Math.sqrt(oDx * oDx + oDy * oDy);
+                          if (oLen > 0.1) {
+                              const oV = { x: oDx / oLen, y: oDy / oLen };
+                              const oN = { x: -oV.y, y: oV.x };
+                              const t2 = bestStartConn.bimWidth || 15;
+
+                              const other_A_point = { x: oStart.x + oN.x * t2 / 2, y: oStart.y + oN.y * t2 / 2 };
+                              const other_B_point = { x: oStart.x - oN.x * t2 / 2, y: oStart.y - oN.y * t2 / 2 };
+
+                              const lp_p = { x: l.start.x + nx * thickness / 2, y: l.start.y + ny * thickness / 2 };
+                              const lp_m = { x: l.start.x - nx * thickness / 2, y: l.start.y - ny * thickness / 2 };
+
+                              const cross = Math.abs(V.x * oV.y - V.y * oV.x);
+                              if (cross > 0.1) {
+                                  const ipt_lp_p_A = intersectLines(lp_p, V, other_A_point, oV);
+                                  const ipt_lp_p_B = intersectLines(lp_p, V, other_B_point, oV);
+                                  if (ipt_lp_p_A && ipt_lp_p_B) {
+                                      const d_A = (ipt_lp_p_A.x - lp_p.x) ** 2 + (ipt_lp_p_A.y - lp_p.y) ** 2;
+                                      const d_B = (ipt_lp_p_B.x - lp_p.x) ** 2 + (ipt_lp_p_B.y - lp_p.y) ** 2;
+                                      startPlus = d_A < d_B ? ipt_lp_p_A : ipt_lp_p_B;
+                                  }
+
+                                  const ipt_lp_m_A = intersectLines(lp_m, V, other_A_point, oV);
+                                  const ipt_lp_m_B = intersectLines(lp_m, V, other_B_point, oV);
+                                  if (ipt_lp_m_A && ipt_lp_m_B) {
+                                      const d_A = (ipt_lp_m_A.x - lp_m.x) ** 2 + (ipt_lp_m_A.y - lp_m.y) ** 2;
+                                      const d_B = (ipt_lp_m_B.x - lp_m.x) ** 2 + (ipt_lp_m_B.y - lp_m.y) ** 2;
+                                      startMinus = d_A < d_B ? ipt_lp_m_A : ipt_lp_m_B;
+                                  }
+                                  hasStartConn = true;
+                              }
+                          }
+                      }
+                  }
+
+                  let hasEndConn = false;
+                  let endPlus = { x: l.end.x + nx * thickness / 2, y: l.end.y + ny * thickness / 2 };
+                  let endMinus = { x: l.end.x - nx * thickness / 2, y: l.end.y - ny * thickness / 2 };
+
+                  const endConns = entities.filter(e => e.type === 'line' && e.isBIM && e.bimType === 'wall' && e.id !== l.id) as LineEntity[];
+                  let bestEndConn: LineEntity | null = null;
+                  let isEndCorner = false;
+                  let bestEndDist = 15.0; // wider tolerance for snaps (15 cm)
+
+                  for (const other of endConns) {
+                      const dStart = Math.sqrt((other.start.x - l.end.x) ** 2 + (other.start.y - l.end.y) ** 2);
+                      const dEnd = Math.sqrt((other.end.x - l.end.x) ** 2 + (other.end.y - l.end.y) ** 2);
+                      
+                      if (dStart < bestEndDist) {
+                          bestEndConn = other;
+                          bestEndDist = dStart;
+                          isEndCorner = true;
+                      }
+                      if (dEnd < bestEndDist) {
+                          bestEndConn = other;
+                          bestEndDist = dEnd;
+                          isEndCorner = true;
+                      }
+                      
+                      const dSeg = distToSegment(l.end, other.start, other.end);
+                      if (dSeg < bestEndDist) {
+                          bestEndConn = other;
+                          bestEndDist = dSeg;
+                          isEndCorner = false;
+                      }
+                  }
+
+                  if (bestEndConn) {
+                      if (isEndCorner) {
+                          const V1 = V;
+                          const N1 = N;
+                          
+                          const isOtherStart = Math.sqrt((bestEndConn.start.x - l.end.x) ** 2 + (bestEndConn.start.y - l.end.y) ** 2) < 15.0;
+                          const oStart = bestEndConn.start;
+                          const oEnd = bestEndConn.end;
+                          const oDx = oEnd.x - oStart.x;
+                          const oDy = oEnd.y - oStart.y;
+                          const oLen = Math.sqrt(oDx * oDx + oDy * oDy);
+                          
+                          if (oLen > 0.1) {
+                              const oV = { x: oDx / oLen, y: oDy / oLen };
+                              const V2 = isOtherStart ? oV : { x: -oV.x, y: -oV.y };
+                              const N2 = { x: -V2.y, y: V2.x };
+                              
+                              const t2 = bestEndConn.bimWidth || 15;
+                              
+                              const p1_plus = { x: l.end.x + N1.x * thickness / 2, y: l.end.y + N1.y * thickness / 2 };
+                              const p2_plus = { x: l.end.x + N2.x * t2 / 2, y: l.end.y + N2.y * t2 / 2 };
+                              
+                              const p1_minus = { x: l.end.x - N1.x * thickness / 2, y: l.end.y - N1.y * thickness / 2 };
+                              const p2_minus = { x: l.end.x - N2.x * t2 / 2, y: l.end.y - N2.y * t2 / 2 };
+                              
+                              const cross = Math.abs(V1.x * V2.y - V1.y * V2.x);
+                              if (cross > 0.1) {
+                                  const pt_plus = intersectLines(p1_plus, V1, p2_plus, V2);
+                                  const pt_minus = intersectLines(p1_minus, V1, p2_minus, V2);
+                                  
+                                  if (pt_plus && pt_minus) {
+                                      endPlus = pt_plus;
+                                      endMinus = pt_minus;
+                                      hasEndConn = true;
+                                  }
+                              }
+                          }
+                      } else {
+                          // T-junction at l.end
+                          const oStart = bestEndConn.start;
+                          const oEnd = bestEndConn.end;
+                          const oDx = oEnd.x - oStart.x;
+                          const oDy = oEnd.y - oStart.y;
+                          const oLen = Math.sqrt(oDx * oDx + oDy * oDy);
+                          if (oLen > 0.1) {
+                              const oV = { x: oDx / oLen, y: oDy / oLen };
+                              const oN = { x: -oV.y, y: oV.x };
+                              const t2 = bestEndConn.bimWidth || 15;
+
+                              const other_A_point = { x: oStart.x + oN.x * t2 / 2, y: oStart.y + oN.y * t2 / 2 };
+                              const other_B_point = { x: oStart.x - oN.x * t2 / 2, y: oStart.y - oN.y * t2 / 2 };
+
+                              const lp_p = { x: l.end.x + nx * thickness / 2, y: l.end.y + ny * thickness / 2 };
+                              const lp_m = { x: l.end.x - nx * thickness / 2, y: l.end.y - ny * thickness / 2 };
+
+                              const cross = Math.abs(V.x * oV.y - V.y * oV.x);
+                              if (cross > 0.1) {
+                                  const ipt_lp_p_A = intersectLines(lp_p, V, other_A_point, oV);
+                                  const ipt_lp_p_B = intersectLines(lp_p, V, other_B_point, oV);
+                                  if (ipt_lp_p_A && ipt_lp_p_B) {
+                                      const d_A = (ipt_lp_p_A.x - lp_p.x) ** 2 + (ipt_lp_p_A.y - lp_p.y) ** 2;
+                                      const d_B = (ipt_lp_p_B.x - lp_p.x) ** 2 + (ipt_lp_p_B.y - lp_p.y) ** 2;
+                                      endPlus = d_A < d_B ? ipt_lp_p_A : ipt_lp_p_B;
+                                  }
+
+                                  const ipt_lp_m_A = intersectLines(lp_m, V, other_A_point, oV);
+                                  const ipt_lp_m_B = intersectLines(lp_m, V, other_B_point, oV);
+                                  if (ipt_lp_m_A && ipt_lp_m_B) {
+                                      const d_A = (ipt_lp_m_A.x - lp_m.x) ** 2 + (ipt_lp_m_A.y - lp_m.y) ** 2;
+                                      const d_B = (ipt_lp_m_B.x - lp_m.x) ** 2 + (ipt_lp_m_B.y - lp_m.y) ** 2;
+                                      endMinus = d_A < d_B ? ipt_lp_m_A : ipt_lp_m_B;
+                                  }
+                                  hasEndConn = true;
+                              }
+                          }
+                      }
+                  }
+                  
+                  // 1. Solid fill for wall 2D thickness
+                  ctx.fillStyle = 'rgba(75, 85, 99, 0.12)';
+                  ctx.beginPath();
+                  ctx.moveTo(startPlus.x, startPlus.y);
+                  ctx.lineTo(endPlus.x, endPlus.y);
+                  ctx.lineTo(endMinus.x, endMinus.y);
+                  ctx.lineTo(startMinus.x, startMinus.y);
+                  ctx.closePath();
+                  ctx.fill();
+
+                  // 2. Wall border lines
+                  ctx.strokeStyle = isHighlighted ? highlightColor : '#374151';
+                  ctx.lineWidth = isHighlighted ? (3.0 / view.zoom) : (1.5 / view.zoom);
+                  ctx.beginPath();
+                  // Side 1
+                  ctx.moveTo(startPlus.x, startPlus.y);
+                  ctx.lineTo(endPlus.x, endPlus.y);
+                  // Side 2
+                  ctx.moveTo(startMinus.x, startMinus.y);
+                  ctx.lineTo(endMinus.x, endMinus.y);
+                  
+                  // End caps - only draw if not connected!
+                  if (!hasStartConn) {
+                      ctx.moveTo(startPlus.x, startPlus.y);
+                      ctx.lineTo(startMinus.x, startMinus.y);
+                  }
+                  if (!hasEndConn) {
+                      ctx.moveTo(endPlus.x, endPlus.y);
+                      ctx.lineTo(endMinus.x, endMinus.y);
+                  }
+                  ctx.stroke();
+
+                  // 3. Center line
+                  ctx.strokeStyle = isHighlighted ? highlightColor : 'rgba(75, 85, 99, 0.4)';
+                  ctx.lineWidth = 1.0 / view.zoom;
+                  ctx.setLineDash([4 / view.zoom, 4 / view.zoom]);
+                  ctx.beginPath();
+                  ctx.moveTo(l.start.x, l.start.y);
+                  ctx.lineTo(l.end.x, l.end.y);
+                  ctx.stroke();
+                  ctx.setLineDash([]);
+              } else {
+                  ctx.moveTo(l.start.x, l.start.y);
+                  ctx.lineTo(l.end.x, l.end.y);
+                  ctx.stroke();
+              }
+          } else if ((l.mode === 'ink' || l.mode === 'pencil') && l.isFreehand) {
               if (l.inkPoints) {
                   let lastX = l.start.x;
                   let lastY = l.start.y;
@@ -3300,6 +3919,81 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             }
             ctx.closePath();
           }
+        } else if (entity.type === 'image') {
+          const img = entity as any;
+          const imgElement = document.createElement('img');
+          imgElement.src = img.src;
+          imgElement.crossOrigin = 'anonymous';
+
+          ctx.save();
+          // Apply opacity if set, default to 1
+          ctx.globalAlpha = img.opacity ?? 1;
+
+          if (img.blendMode === 'multiply') {
+            ctx.globalCompositeOperation = 'multiply';
+          }
+
+          let filters = [];
+          if (img.brightness !== undefined) filters.push(`brightness(${img.brightness}%)`);
+          if (img.contrast !== undefined) filters.push(`contrast(${img.contrast}%)`);
+          if (filters.length > 0) {
+            ctx.filter = filters.join(' ');
+          }
+
+          // Compute rotate center
+          const cx = img.point.x + img.width / 2;
+          const cy = img.point.y + img.height / 2;
+          
+          ctx.translate(cx, cy);
+          if (img.angle) {
+            ctx.rotate((img.angle * Math.PI) / 180);
+          }
+          
+          try {
+            // Apply cropping if present (values are percentages 0-100)
+            const topCrop = (img.crop?.top || 0) / 100;
+            const rightCrop = (img.crop?.right || 0) / 100;
+            const bottomCrop = (img.crop?.bottom || 0) / 100;
+            const leftCrop = (img.crop?.left || 0) / 100;
+
+            const nw = imgElement.naturalWidth || 1;
+            const nh = imgElement.naturalHeight || 1;
+
+            const sx = nw * leftCrop;
+            const sy = nh * topCrop;
+            const sw = nw * (1 - leftCrop - rightCrop);
+            const sh = nh * (1 - topCrop - bottomCrop);
+
+            const dx = -img.width / 2 + img.width * leftCrop;
+            const dy = -img.height / 2 + img.height * topCrop;
+            const dw = img.width * (1 - leftCrop - rightCrop);
+            const dh = img.height * (1 - topCrop - bottomCrop);
+
+            if (sw > 0 && sh > 0) {
+              ctx.drawImage(imgElement, sx, sy, sw, sh, dx, dy, dw, dh);
+            }
+          } catch (e) {
+            // Draw placeholder box if loading
+            ctx.strokeStyle = '#8c8c8c';
+            ctx.setLineDash([4, 4]);
+            ctx.strokeRect(-img.width / 2, -img.height / 2, img.width, img.height);
+            ctx.fillStyle = '#f0f0f0';
+            ctx.fillRect(-img.width / 2, -img.height / 2, img.width, img.height);
+            ctx.fillStyle = '#666666';
+            ctx.font = '10px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(img.name || "Immagine", 0, 0);
+          }
+
+          // Draw selection outline if highlighted
+          if (isHighlighted) {
+            ctx.strokeStyle = highlightColor;
+            ctx.lineWidth = 2 / view.zoom;
+            ctx.setLineDash([]);
+            ctx.strokeRect(-img.width / 2 - 2/view.zoom, -img.height / 2 - 2/view.zoom, img.width + 4/view.zoom, img.height + 4/view.zoom);
+          }
+          
+          ctx.restore();
         }
         ctx.stroke();
 
@@ -3620,13 +4314,76 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         ctx.restore();
       }
 
-      if (drawing && (activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra')) {
+      if (drawing && (activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra' || activeTool === 'BIM_Muro')) {
         ctx.save();
         const start = drawing.start;
         const end = drawing.current || actualMousePosRef.current;
         const dx = end.x - start.x;
         const dy = end.y - start.y;
         const len = Math.sqrt(dx * dx + dy * dy);
+
+        if (activeTool === 'BIM_Muro' && len > 0.1) {
+          const thickness = lastWallThickness || 15;
+          const nx = -dy / len;
+          const ny = dx / len;
+          
+          ctx.strokeStyle = '#4b5563';
+          ctx.lineWidth = 1 / view.zoom;
+          
+          ctx.beginPath();
+          ctx.moveTo(start.x + nx * thickness / 2, start.y + ny * thickness / 2);
+          ctx.lineTo(end.x + nx * thickness / 2, end.y + ny * thickness / 2);
+          
+          ctx.moveTo(start.x - nx * thickness / 2, start.y - ny * thickness / 2);
+          ctx.lineTo(end.x - nx * thickness / 2, end.y - ny * thickness / 2);
+          
+          ctx.moveTo(start.x + nx * thickness / 2, start.y + ny * thickness / 2);
+          ctx.lineTo(start.x - nx * thickness / 2, start.y - ny * thickness / 2);
+          
+          ctx.moveTo(end.x + nx * thickness / 2, end.y + ny * thickness / 2);
+          ctx.lineTo(end.x - nx * thickness / 2, end.y - ny * thickness / 2);
+          
+          ctx.stroke();
+
+          ctx.fillStyle = 'rgba(75, 85, 99, 0.12)';
+          ctx.beginPath();
+          ctx.moveTo(start.x + nx * thickness / 2, start.y + ny * thickness / 2);
+          ctx.lineTo(end.x + nx * thickness / 2, end.y + ny * thickness / 2);
+          ctx.lineTo(end.x - nx * thickness / 2, end.y - ny * thickness / 2);
+          ctx.lineTo(start.x - nx * thickness / 2, start.y - ny * thickness / 2);
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.strokeStyle = 'rgba(75, 85, 99, 0.4)';
+          ctx.lineWidth = 1 / view.zoom;
+          ctx.setLineDash([4/view.zoom, 4/view.zoom]);
+          ctx.beginPath();
+          ctx.moveTo(start.x, start.y);
+          ctx.lineTo(end.x, end.y);
+          ctx.stroke();
+
+          // Render floating measurement tooltip for wall length in real time
+          ctx.save();
+          const labelX = end.x + 15 / view.zoom;
+          const labelY = end.y - 15 / view.zoom;
+          const text = len.toFixed(1);
+          ctx.font = `${12 / view.zoom}px Inter, sans-serif`;
+          const metrics = ctx.measureText(text);
+          const padding = 4 / view.zoom;
+          
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+          ctx.beginPath();
+          if (ctx.roundRect) {
+              ctx.roundRect(labelX - padding, labelY - 12/view.zoom - padding, metrics.width + padding*2, 14/view.zoom + padding*2, 4/view.zoom);
+          } else {
+              ctx.rect(labelX - padding, labelY - 12/view.zoom - padding, metrics.width + padding*2, 14/view.zoom + padding*2);
+          }
+          ctx.fill();
+          
+          ctx.fillStyle = '#ffffff';
+          ctx.fillText(text + " cm", labelX, labelY);
+          ctx.restore();
+        }
 
         if (activeTool === 'BIM_Porta' && len > 0.1) {
           ctx.strokeStyle = '#dc2626';
@@ -3635,14 +4392,12 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           const px = -dy / len;
           const py = dx / len;
           const leafEnd = { x: start.x + px * len, y: start.y + py * len };
-
-          // Leaf line
+          
           ctx.beginPath();
           ctx.moveTo(start.x, start.y);
           ctx.lineTo(leafEnd.x, leafEnd.y);
           ctx.stroke();
-
-          // Swing arc
+          
           ctx.strokeStyle = 'rgba(220, 38, 38, 0.4)';
           ctx.lineWidth = 1 / view.zoom;
           ctx.beginPath();
@@ -3650,8 +4405,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           const leafAngle = Math.atan2(leafEnd.y - start.y, leafEnd.x - start.x);
           ctx.arc(start.x, start.y, len, baseAngle, leafAngle, false);
           ctx.stroke();
-
-          // Standard opening line
+          
           ctx.strokeStyle = '#9ca3af';
           ctx.setLineDash([4/view.zoom, 4/view.zoom]);
           ctx.beginPath();
@@ -3906,9 +4660,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             const template = TEMPLATES.find(t => t.id === selectedTemplateId);
             if (template) {
                 ctx.save();
-                ctx.strokeStyle = defaultLineStyle.color || ((defaultLineStyle.mode === 'pencil') ? '#bbbbbb' : (defaultLineStyle.mode === 'ink' ? '#000000' : '#000000'));
+                const optLayerName = template.category === 'Arredi' ? 'BIM_Arredi' : (template.category === 'Bagno' ? 'BIM_Sanitari' : '0');
+                const targetColor = optLayerName === 'BIM_Arredi' ? '#818cf8' : (optLayerName === 'BIM_Sanitari' ? '#10b981' : '#bbbbbb');
+                ctx.strokeStyle = targetColor;
                 ctx.lineWidth = defaultLineStyle.lineWidth / view.zoom;
-                ctx.globalAlpha = 0.5;
+                ctx.globalAlpha = 0.55;
                 
                 const basePos = hoverSnap.point;
                 
@@ -3926,6 +4682,41 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 });
                 ctx.restore();
             }
+        }
+
+        // --- BIM SYMBOL PREVIEW ---
+        if (activeTool === 'BIM_Symbol' && selectedBIMSymbolType && hoverSnap) {
+            const isElectrical = ['punto_luce', 'presa_standard', 'interruttore', 'deviatore', 'quadro'].includes(selectedBIMSymbolType);
+            const targetColor = isElectrical ? '#fbbf24' : '#60a5fa';
+            
+            ctx.save();
+            ctx.strokeStyle = targetColor;
+            ctx.lineWidth = 1.5 / view.zoom;
+            ctx.globalAlpha = 0.65;
+            
+            const basePos = hoverSnap.point;
+            const geomList = getBIMSymbolEntities(selectedBIMSymbolType);
+            
+            geomList.forEach(te => {
+                ctx.beginPath();
+                if (te.type === 'line' && te.start && te.end) {
+                    ctx.moveTo(basePos.x + te.start.x, basePos.y + te.start.y);
+                    ctx.lineTo(basePos.x + te.end.x, basePos.y + te.end.y);
+                    ctx.stroke();
+                } else if (te.type === 'circle' && te.center && te.radius) {
+                    ctx.arc(basePos.x + te.center.x, basePos.y + te.center.y, te.radius, 0, Math.PI * 2);
+                    ctx.stroke();
+                } else if (te.type === 'arc' && te.center && te.radius) {
+                    ctx.arc(basePos.x + te.center.x, basePos.y + te.center.y, te.radius, (te.startAngle || 0) * Math.PI / 180, (te.endAngle || 0) * Math.PI / 180);
+                    ctx.stroke();
+                } else if (te.type === 'text' && te.center && te.text) {
+                    ctx.font = `bold ${8 / view.zoom}px Courier New`;
+                    ctx.fillStyle = targetColor;
+                    ctx.textAlign = 'center';
+                    ctx.fillText(te.text, basePos.x + te.center.x, basePos.y + te.center.y);
+                }
+            });
+            ctx.restore();
         }
 
         // Render snap indicator
@@ -3958,11 +4749,13 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             }
         }
 
-        ctx.strokeStyle = drawing.snapType === 'smart' ? '#9ca3af' : '#fbbf24';
-        ctx.lineWidth = 2 / view.zoom;
-        ctx.beginPath();
-        ctx.rect(drawing.current.x - 5/view.zoom, drawing.current.y - 5/view.zoom, 10/view.zoom, 10/view.zoom);
-        ctx.stroke();
+        if (drawing.snapType !== undefined) {
+            ctx.strokeStyle = drawing.snapType === 'smart' ? '#22c55e' : '#fbbf24';
+            ctx.lineWidth = 2 / view.zoom;
+            ctx.beginPath();
+            ctx.rect(drawing.current.x - 5/view.zoom, drawing.current.y - 5/view.zoom, 10/view.zoom, 10/view.zoom);
+            ctx.stroke();
+        }
         
         if (drawing.snapType === 'smart') {
             const anchorPointsToDraw: { ref: Point, constraint?: 'x' | 'y' }[] = [];
@@ -6820,25 +7613,28 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 return next;
             });
         }
-    } else if (activeTool === 'Hatch') {
-        const clickedHatch = entities.find(ent => ent.type === 'hatch' && (ent as any).points && isPointInPolygon(rawPoint, (ent as any).points));
+    } else if (activeTool === 'Hatch' || activeTool === 'BIM_Finitura') {
+        const isFinitura = activeTool === 'BIM_Finitura';
+        const targetLayerName = isFinitura ? 'BIM_Finiture' : 'Hatch';
+        const targetLayerId = layers.find(l => l.name === targetLayerName)?.id || (isFinitura ? 'BIM_Finiture' : activeLayerId);
+        
+        const clickedHatch = entities.find(ent => ent.type === 'hatch' && ent.layer === targetLayerId && (ent as any).points && isPointInPolygon(rawPoint, (ent as any).points));
         if (clickedHatch) {
             onSelect(clickedHatch.id);
         } else {
             const poly = findBoundaryPolygon(screenPos, entities, view, rect.width, rect.height, screenToCanvas, layers);
             if (poly) {
-                const hatchLayerExists = layers.some(l => l.id === 'Hatch');
                 const newHatch: Entity = {
                     id: Date.now().toString(),
                     type: 'hatch',
                     pattern: defaultHatchStyle?.pattern || 'ANSI31',
                     scale: defaultHatchStyle?.scale || 30,
                     angle: defaultHatchStyle?.angle || 0,
-                    color: defaultHatchStyle?.color || defaultLineStyle.color || '#3b82f6',
+                    color: isFinitura ? (defaultHatchStyle?.color || '#ef4444') : (defaultHatchStyle?.color || defaultLineStyle.color || '#3b82f6'),
                     sfumatura: (defaultHatchStyle as any)?.sfumatura || 0,
                     mode: defaultLineStyle.mode,
                     points: poly,
-                    layer: hatchLayerExists ? 'Hatch' : activeLayerId
+                    layer: targetLayerId
                 } as any;
                 setEntities(prev => {
                     onCommitHistory?.(prev);
@@ -6846,6 +7642,74 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 });
                 onSelect(newHatch.id);
             }
+        }
+    } else if (activeTool === 'BIM_Symbol' && selectedBIMSymbolType) {
+        const isElectrical = ['punto_luce', 'presa_standard', 'interruttore', 'deviatore', 'quadro'].includes(selectedBIMSymbolType);
+        const targetLayerName = isElectrical ? 'BIM_Impianti_Elettrici' : 'BIM_Impianti_Idraulici';
+        const targetLayerId = layers.find(l => l.name === targetLayerName)?.id || targetLayerName;
+        const targetColor = isElectrical ? '#fbbf24' : '#60a5fa';
+
+        const geomList = getBIMSymbolEntities(selectedBIMSymbolType);
+        const groupId = 'group_sym_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
+
+        const newEntities: Entity[] = geomList.map(te => {
+            const baseProps = {
+                id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5),
+                color: te.color || targetColor,
+                lineWidth: 1.5,
+                layer: targetLayerId,
+                mode: 'ink' as const,
+                groupId,
+                isBIM: true as const,
+                bimType: isElectrical ? 'electrical_symbol' as const : 'hydraulic_symbol' as const,
+                bimName: selectedBIMSymbolType
+            };
+
+            if (te.type === 'line' && te.start && te.end) {
+                return {
+                    ...baseProps,
+                    type: 'line',
+                    start: { x: snapped.point.x + te.start.x, y: snapped.point.y + te.start.y },
+                    end: { x: snapped.point.x + te.end.x, y: snapped.point.y + te.end.y },
+                } as any;
+            } else if (te.type === 'circle' && te.center && te.radius) {
+                return {
+                    ...baseProps,
+                    type: 'circle',
+                    center: { x: snapped.point.x + te.center.x, y: snapped.point.y + te.center.y },
+                    radius: te.radius
+                } as any;
+            } else if (te.type === 'arc' && te.center && te.radius) {
+                return {
+                    ...baseProps,
+                    type: 'arc',
+                    center: { x: snapped.point.x + te.center.x, y: snapped.point.y + te.center.y },
+                    radius: te.radius,
+                    startAngle: te.startAngle,
+                    endAngle: te.endAngle
+                } as any;
+            } else if (te.type === 'text' && te.center && te.text) {
+                return {
+                    ...baseProps,
+                    type: 'text',
+                    point: { x: snapped.point.x + te.center.x, y: snapped.point.y + te.center.y },
+                    text: te.text,
+                    fontFamily: 'Courier New',
+                    fontSize: 8,
+                    fontWeight: 'bold',
+                    textAlign: 'center'
+                } as any;
+            }
+            return null;
+        }).filter(e => e !== null) as Entity[];
+
+        if (newEntities.length > 0) {
+            setEntities(prev => {
+                const next = [...prev, ...newEntities];
+                onCommitHistory?.(next);
+                return next;
+            });
+            onSelect(newEntities[0].id);
         }
     } else if (activeTool === 'BIM_RilevaStanza') {
         const poly = findBoundaryPolygon(screenPos, entities, view, rect.width, rect.height, screenToCanvas, layers);
@@ -6908,7 +7772,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             }
         }
         setManualRoomPoints(prev => [...prev, clickedPoint]);
-    } else if (activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra') {
+    } else if (activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra' || activeTool === 'BIM_Muro') {
         const found = getEntityAtPoint(rawPoint);
         if (found && found.isBIM && (found.bimType === 'door' || found.bimType === 'window')) {
             onSelect(found.id);
@@ -6919,44 +7783,68 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         if (!drawing) {
             setDrawing({ start: snapped.point, current: snapped.point });
         } else {
-            const isLineLikeTool = activeTool === 'Line' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra';
+            const isLineLikeTool = activeTool === 'Line' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra' || activeTool === 'BIM_Muro';
             const effectiveOrthoMode = isLineLikeTool && (orthoMode ? !isShiftPressedRef.current : isShiftPressedRef.current);
             const isOrthoHorizontal = isLineLikeTool && effectiveOrthoMode && 
                   Math.abs(snapped.point.x - drawing.start.x) >= Math.abs(snapped.point.y - drawing.start.y);
 
-            let endPoint = snapped.point;
-            if (effectiveOrthoMode) {
-                endPoint = isOrthoHorizontal 
-                  ? { x: endPoint.x, y: drawing.start.y } 
-                  : { x: drawing.start.x, y: endPoint.y };
-            } else if (drawing.current) {
-                endPoint = drawing.current;
-            }
+            let endPoint = drawing.current || snapped.point;
 
-            const doorWidth = Math.round(Math.sqrt((endPoint.x - drawing.start.x)**2 + (endPoint.y - drawing.start.y)**2));
-            const isDoor = activeTool === 'BIM_Porta';
-            const h = isDoor ? lastDoorHeight : lastWindowHeight;
-            const newElem: Entity = {
-                id: Date.now().toString(),
-                type: 'line',
-                isBIM: true,
-                bimType: isDoor ? 'door' : 'window',
-                bimName: isDoor ? `Porta ${doorWidth}` : `Finestra ${doorWidth}x${h}`,
-                bimWidth: doorWidth,
-                bimWindowHeight: isDoor ? undefined : h,
-                start: drawing.start,
-                end: endPoint,
-                color: isDoor ? '#dc2626' : '#2563eb',
-                lineWidth: 2,
-                mode: 'ink',
-                layer: activeLayerId
-            } as any;
-            setEntities(prev => {
-                const next = [...prev, newElem];
-                onCommitHistory?.(next);
-                return next;
-            });
-            setDrawing(null);
+            if (activeTool === 'BIM_Muro') {
+                const thickness = lastWallThickness || 15;
+                const newElem: Entity = {
+                    id: Date.now().toString(),
+                    type: 'line',
+                    isBIM: true,
+                    bimType: 'wall',
+                    bimName: `Muro sp.${thickness} cm`,
+                    bimWidth: thickness,
+                    start: drawing.start,
+                    end: endPoint,
+                    color: '#4b5563',
+                    lineWidth: 2,
+                    mode: 'ink',
+                    layer: 'BIM_Muri'
+                } as any;
+                setEntities(prev => {
+                    const next = [...prev, newElem];
+                    onCommitHistory?.(next);
+                    return next;
+                });
+                // Make wall segments continuous, exactly like the continuous line tool!
+                setDrawing({
+                    start: endPoint,
+                    current: endPoint,
+                    snapType: 'CAD',
+                    startSnapped: true,
+                    isVirtual: false
+                });
+            } else {
+                const doorWidth = Math.round(Math.sqrt((endPoint.x - drawing.start.x)**2 + (endPoint.y - drawing.start.y)**2));
+                const isDoor = activeTool === 'BIM_Porta';
+                const h = isDoor ? lastDoorHeight : lastWindowHeight;
+                const newElem: Entity = {
+                    id: Date.now().toString(),
+                    type: 'line',
+                    isBIM: true,
+                    bimType: isDoor ? 'door' : 'window',
+                    bimName: isDoor ? `Porta ${doorWidth}` : `Finestra ${doorWidth}x${h}`,
+                    bimWidth: doorWidth,
+                    bimWindowHeight: isDoor ? undefined : h,
+                    start: drawing.start,
+                    end: endPoint,
+                    color: isDoor ? '#dc2626' : '#2563eb',
+                    lineWidth: 2,
+                    mode: 'ink',
+                    layer: isDoor ? 'BIM_Porte' : 'BIM_Finestre'
+                } as any;
+                setEntities(prev => {
+                    const next = [...prev, newElem];
+                    onCommitHistory?.(next);
+                    return next;
+                });
+                setDrawing(null);
+            }
         }
     } else if (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle' || activeTool === 'Point' || activeTool === 'Arc' || activeTool === 'Testo') {
       const wasLocked = isLocked;
@@ -8037,7 +8925,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             // 1. Check for Snaps around raw mouse position
             let snapRes = getSnappedPoint(rawPoint, entities, activeTool, drawing);
             
-            const isOrthoTool = activeTool === 'Line' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra' || activeTool === 'Rectangle' || activeTool === 'Circle' || activeTool === 'Arc' || activeTool === 'Dimension' || activeTool === 'Parallel';
+            const isOrthoTool = activeTool === 'Line' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra' || activeTool === 'BIM_Muro' || activeTool === 'Rectangle' || activeTool === 'Circle' || activeTool === 'Arc' || activeTool === 'Dimension' || activeTool === 'Parallel';
             const effectiveOrthoMode = isOrthoTool && (orthoMode ? !isShiftPressedRef.current : isShiftPressedRef.current);
 
             // 2. If we have a standard strong snap (Endpoint, Midpoint, etc.), it WINS over Ortho
@@ -8189,6 +9077,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 }
                 if (ent.type === 'point') return { ...ent, point: { x: ent.point.x + deltaX, y: ent.point.y + deltaY } };
                 if (ent.type === 'text') return { ...ent, point: { x: ent.point.x + deltaX, y: ent.point.y + deltaY } };
+                if (ent.type === 'image') return { ...ent, point: { x: ent.point.x + deltaX, y: ent.point.y + deltaY } };
                 if (ent.type === 'arc') return { ...ent, center: { x: ent.center.x + deltaX, y: ent.center.y + deltaY } };
                 if (ent.type === 'dimension') {
                     return { 
@@ -8325,7 +9214,20 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     const isFreehandMode = activeTool === 'Line' && (defaultLineStyle.mode === 'ink' || defaultLineStyle.mode === 'pencil') && !orthoMode;
     const isTempOrthoHover = false;
     
-    if (!drawing && !isFreehandMode && !isTempOrthoHover && (activeTool === 'Line' || activeTool === 'Rectangle' || activeTool === 'Circle' || activeTool === 'Arc' || activeTool === 'Dimension' || activeTool === 'Move' || activeTool === 'Copy')) {
+    if (!drawing && !isFreehandMode && !isTempOrthoHover && (
+        activeTool === 'Line' || 
+        activeTool === 'Rectangle' || 
+        activeTool === 'Circle' || 
+        activeTool === 'Arc' || 
+        activeTool === 'Dimension' || 
+        activeTool === 'Move' || 
+        activeTool === 'Copy' ||
+        activeTool === 'BIM_Muro' ||
+        activeTool === 'BIM_Porta' ||
+        activeTool === 'BIM_Finestra' ||
+        activeTool === 'BIM_Symbol' ||
+        activeTool === 'BIM_DisegnaStanza'
+    )) {
         const snapped = getSnappedPoint(rawPoint, entities, activeTool, null);
         if (snapped.snapped) {
             setHoverSnap(snapped);
@@ -8741,7 +9643,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 });
             }
         } else if (!showManualInput && /^[0-9\.\-]$/.test(e.key)) {
-            if ((drawing && !drawing.isFreehand && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra')) ||
+            if ((drawing && !drawing.isFreehand && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra' || activeTool === 'BIM_Muro')) ||
                 (activeTool === 'Parallel' && selectedParallelLine)) {
                 setShowManualInput(true);
             }
@@ -8886,9 +9788,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         };
         setEntities(prev => { onCommitHistory?.(prev); return [...prev, newEntity]; });
         setDrawing(null);
-    } else if ((tool === 'BIM_Porta' || tool === 'BIM_Finestra') && drawing) {
+    } else if ((tool === 'BIM_Porta' || tool === 'BIM_Finestra' || tool === 'BIM_Muro') && drawing) {
         const L = data.val1;
-        const H = data.val2;
+        const H = data.val2 || 0;
         let finalPoint: Point;
         
         const dx = drawing.current.x - drawing.start.x;
@@ -8907,36 +9809,68 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             };
         }
 
-        const isDoor = tool === 'BIM_Porta';
-        const newEntity: Entity = {
-            id: Date.now().toString(),
-            type: 'line',
-            isBIM: true,
-            bimType: isDoor ? 'door' : 'window',
-            bimName: isDoor ? `Porta ${L}` : `Finestra ${L}x${H}`,
-            bimWidth: L,
-            bimWindowHeight: isDoor ? undefined : H,
-            start: drawing.start,
-            end: finalPoint,
-            color: isDoor ? '#dc2626' : '#2563eb',
-            lineWidth: 2,
-            mode: 'ink',
-            layer: activeLayerId
-        } as any;
+        let newEntity: Entity;
+        if (tool === 'BIM_Muro') {
+            const thickness = lastWallThickness || 15;
+            newEntity = {
+                id: Date.now().toString(),
+                type: 'line',
+                isBIM: true,
+                bimType: 'wall',
+                bimName: `Muro sp.${thickness} cm`,
+                bimWidth: thickness,
+                start: drawing.start,
+                end: finalPoint,
+                color: '#4b5563',
+                lineWidth: 2,
+                mode: 'ink',
+                layer: 'BIM_Muri'
+            } as any;
+            setLastWallThickness(thickness);
+            localStorage.setItem('lastWallThickness', thickness.toString());
+        } else {
+            const isDoor = tool === 'BIM_Porta';
+            newEntity = {
+                id: Date.now().toString(),
+                type: 'line',
+                isBIM: true,
+                bimType: isDoor ? 'door' : 'window',
+                bimName: isDoor ? `Porta ${L}` : `Finestra ${L}x${H}`,
+                bimWidth: L,
+                bimWindowHeight: isDoor ? undefined : H,
+                start: drawing.start,
+                end: finalPoint,
+                color: isDoor ? '#dc2626' : '#2563eb',
+                lineWidth: 2,
+                mode: 'ink',
+                layer: isDoor ? 'BIM_Porte' : 'BIM_Finestre'
+            } as any;
+
+            if (isDoor) {
+                setLastDoorWidth(L);
+                setLastDoorHeight(H);
+                localStorage.setItem('lastDoorWidth', L.toString());
+                localStorage.setItem('lastDoorHeight', H.toString());
+            } else {
+                setLastWindowWidth(L);
+                setLastWindowHeight(H);
+                localStorage.setItem('lastWindowWidth', L.toString());
+                localStorage.setItem('lastWindowHeight', H.toString());
+            }
+        }
 
         setEntities(prev => { onCommitHistory?.(prev); return [...prev, newEntity]; });
-        setDrawing(null);
-
-        if (isDoor) {
-            setLastDoorWidth(L);
-            setLastDoorHeight(H);
-            localStorage.setItem('lastDoorWidth', L.toString());
-            localStorage.setItem('lastDoorHeight', H.toString());
+        
+        if (tool === 'BIM_Muro') {
+            setDrawing({
+                start: finalPoint,
+                current: finalPoint,
+                snapType: 'CAD',
+                startSnapped: true,
+                isVirtual: false
+            });
         } else {
-            setLastWindowWidth(L);
-            setLastWindowHeight(H);
-            localStorage.setItem('lastWindowWidth', L.toString());
-            localStorage.setItem('lastWindowHeight', H.toString());
+            setDrawing(null);
         }
     } else if (tool === 'Parallel' && selectedParallelLine && lastMouseRef.current) {
         const line = selectedParallelLine as LineEntity;

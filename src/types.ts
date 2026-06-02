@@ -7,7 +7,7 @@ export interface InkPoint {
   alpha: number;
 }
 
-export type EntityType = 'line' | 'circle' | 'rectangle' | 'dimension' | 'arc' | 'point' | 'text' | 'hatch';
+export type EntityType = 'line' | 'circle' | 'rectangle' | 'dimension' | 'arc' | 'point' | 'text' | 'hatch' | 'image';
 
 export interface CADEntity {
   id: string;
@@ -30,7 +30,7 @@ export interface CADEntity {
     config: { type: 'curvo' | 'rettilineo'; value: number };
   };
   isBIM?: boolean;
-  bimType?: 'room' | 'door' | 'window';
+  bimType?: 'room' | 'door' | 'window' | 'wall' | 'electrical_symbol' | 'hydraulic_symbol';
   bimName?: string;
   bimHeight?: number; // e.g. 2.70
   bimWidth?: number;  // e.g. 80, 90, 120
@@ -101,7 +101,23 @@ export interface HatchEntity extends CADEntity {
   sfumatura?: number;
 }
 
-export type Entity = LineEntity | CircleEntity | RectEntity | DimensionEntity | ArcEntity | PointEntity | TextEntity | HatchEntity;
+export interface ImageEntity extends CADEntity {
+  type: 'image';
+  point: Point;
+  width: number;
+  height: number;
+  src: string;
+  name?: string;
+  angle?: number;
+  aspectRatio?: number;
+  opacity?: number;
+  brightness?: number; // percentage (default 100)
+  contrast?: number; // percentage (default 100)
+  blendMode?: 'normal' | 'multiply'; // multiply is great for making white background transparent
+  crop?: { top?: number, right?: number, bottom?: number, left?: number }; // Cropping support (percentages 0-100)
+}
+
+export type Entity = LineEntity | CircleEntity | RectEntity | DimensionEntity | ArcEntity | PointEntity | TextEntity | HatchEntity | ImageEntity;
 
 export interface Measurement {
   id: string;
