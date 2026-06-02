@@ -1,0 +1,730 @@
+463-
+464-  ctx.translate(cx, cy);
+465-  ctx.rotate((angle || 0) * Math.PI / 180);
+466-
+467-  ctx.strokeStyle = color || '#3b82f6';
+468:  ctx.lineWidth = Math.max(0.7, 1.2 / zoom);
+469-  ctx.fillStyle = color || '#3b82f6';
+470-  ctx.setLineDash([]);
+471-
+472-  const step = Math.max(2, scale || 14);
+473-  const pat = (pattern || 'ansi31').toLowerCase();
+--
+3025-        if (layer && !layer.visible) return;
+3026-        
+3027-        const isFlashing = flashIds.includes(entity.id);
+3028-
+3029-        ctx.strokeStyle = entity.color || ((entity.mode === 'pencil') ? '#bbbbbb' : (entity.mode === 'ink' ? '#000000' : '#000000'));
+3030:        ctx.lineWidth = Math.max(0.8, entity.lineWidth / view.zoom); // Ensure visibility
+3031-        ctx.globalAlpha = entity.opacity !== undefined ? entity.opacity : 1.0;
+3032-        if (layer && layer.frozen) {
+3033-            ctx.globalAlpha *= 0.4;
+3034-        }
+3035-        if (activeTool === 'Specchio' && specchioMode === 'move' && specchioSelectedIds.includes(entity.id)) {
+--
+3041-            // Pulse between black and soft green
+3042-            const r = Math.round(0 + (34 - 0) * flashIntensity);
+3043-            const g = Math.round(0 + (197 - 0) * flashIntensity);
+3044-            const b = Math.round(0 + (94 - 0) * flashIntensity);
+3045-            ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
+3046:            ctx.lineWidth = (entity.lineWidth + 2 + 3 * flashIntensity) / view.zoom;
+3047-            ctx.shadowColor = `rgba(34, 197, 94, ${0.6 * flashIntensity})`;
+3048-            ctx.shadowBlur = 10 * flashIntensity;
+3049-        }
+3050-
+3051-        if ((entity.id === selectedParallelLine?.id && blink) || (selectedEntityId === entity.id) || (positioningGroupId && entity.groupId === positioningGroupId) || (positioningEntityId && entity.id === positioningEntityId) || selectedRaccordoLineIds.includes(entity.id)) {
+3052-          if (isFlashing) {
+3053-            // Let the flashing styles take precedence for initial attention blink
+3054-          } else if (entity.type === 'hatch') {
+3055-            ctx.strokeStyle = '#22c55e'; // Green highlight for selected hatch
+3056:            ctx.lineWidth = (entity.lineWidth + 3) / view.zoom;
+3057-          } else {
+3058-            ctx.strokeStyle = '#fbbf24'; // Amber highlight
+3059:            ctx.lineWidth = (entity.lineWidth + 2) / view.zoom;
+3060-          }
+3061-        } else if ((dragEntityIds.includes(entity.id) || entity.id === highlightedTrimLine?.id) && (activeTool === 'Move' || activeTool === 'Cancella' || activeTool === 'Join' || activeTool === 'Copy')) {
+3062-            ctx.strokeStyle = activeTool === 'Cancella' ? '#ef4444' : activeTool === 'Join' ? '#22c55e' : '#3b82f6';
+3063:            ctx.lineWidth = (entity.lineWidth + 4) / view.zoom;
+3064-        } else if (copySourceEntityIds.includes(entity.id) && activeTool === 'Copy') {
+3065-            ctx.strokeStyle = '#22c55e'; // Green highlight for original mother object(s)
+3066:            ctx.lineWidth = (entity.lineWidth + 4) / view.zoom;
+3067-        } else if (activeTool === 'Trim' && highlightedTrimSegment && entity.id === highlightedTrimLine?.id) {
+3068-            // Eraser highlight only
+3069-        }
+3070-        
+3071-        let isHighlighted = false;
+--
+3097-                      const px = pt.x;
+3098-                      const py = pt.y;
+3099-     
+3100-                      ctx.beginPath();
+3101-                      // Per i pennini Kina usiamo lo spessore pieno in modo più netto
+3102:                      ctx.lineWidth = l.mode === 'ink' 
+3103-                          ? Math.max(0.1, (0.8 + pt.width * 0.4) * (l.lineWidth / view.zoom))
+3104-                          : Math.max(0.1, pt.width * (l.lineWidth / view.zoom));
+3105-                      ctx.strokeStyle = isHighlighted ? highlightColor : (l.mode === 'ink' ? '#000000' : getAlphaColor(l.color, pt.alpha));
+3106-                      ctx.moveTo(lastX, lastY);
+3107-                      ctx.lineTo(px, py);
+--
+3127-                      const wave = Math.sin(t * Math.PI * 4) * (0.6 / view.zoom);
+3128-                      const px = bx + nx * wave;
+3129-                      const py = by + ny * wave;
+3130-
+3131-                      ctx.beginPath();
+3132:                      ctx.lineWidth = l.mode === 'ink'
+3133-                          ? l.lineWidth / view.zoom
+3134-                          : Math.max(0.2, (0.5 + Math.random() * 0.5) * (l.lineWidth / view.zoom));
+3135-                      ctx.strokeStyle = isHighlighted ? highlightColor : (l.mode === 'ink' ? '#000000' : getAlphaColor(l.color, 0.3 + Math.random() * 0.4));
+3136-                      ctx.moveTo(lastX, lastY);
+3137-                      ctx.lineTo(px, py);
+--
+3149-              if (len > 0.1) {
+3150-                  const steps = Math.max(10, Math.floor(len * 2));
+3151-                  let lastX = l.start.x;
+3152-                  let lastY = l.start.y;
+3153-                  ctx.strokeStyle = isHighlighted ? highlightColor : getAlphaColor(l.color, 0.4);
+3154:                  ctx.lineWidth = Math.max(0.1, 0.4 * (l.lineWidth / view.zoom));
+3155-                  for(let i=1; i<=steps; i++) {
+3156-                      const t = i/steps;
+3157-                      const px = l.start.x + dx * t + (Math.random() - 0.5) * (0.1 / view.zoom);
+3158-                      const py = l.start.y + dy * t + (Math.random() - 0.5) * (0.1 / view.zoom);
+3159-                      ctx.beginPath();
+--
+3185-            
+3186-            // Define a fixed scale factor equivalent to a 200 unit length dimension
+3187-            const scaleFactor = 2.0;
+3188-
+3189-            // Thinner line for dimensions
+3190:            ctx.lineWidth = (0.5 / view.zoom) * (Math.max(1, scaleFactor * 0.5));
+3191-            
+3192-            // Dimension line
+3193-            ctx.moveTo(p1.x, p1.y);
+3194-            ctx.lineTo(p2.x, p2.y);
+3195-
+--
+3266-            ctx.fillText(line, entity.point.x, entity.point.y + idx * lineHeight);
+3267-          });
+3268-
+3269-          if (isHighlighted) {
+3270-            ctx.strokeStyle = highlightColor;
+3271:            ctx.lineWidth = 1 / view.zoom;
+3272-            // Draw a precise box around all lines of text
+3273-            const maxW = Math.max(...lines.map(line => ctx.measureText(line).width));
+3274-            const h = lines.length * lineHeight;
+3275-            let offsetX = 0;
+3276-            if (ctx.textAlign === 'center') offsetX = -maxW / 2;
+--
+3291-        ctx.stroke();
+3292-
+3293-        if (activeTool === 'Trim' && highlightedTrimSegment && entity.id === highlightedTrimLine?.id) {
+3294-             // Draw red highlight for Trim
+3295-             ctx.strokeStyle = 'rgba(255,50,50,0.8)';
+3296:             ctx.lineWidth = (entity.lineWidth + 4) / view.zoom;
+3297-             ctx.beginPath();
+3298-             if (highlightedTrimSegment.type === 'line' && highlightedTrimSegment.start && highlightedTrimSegment.end) {
+3299-                 ctx.moveTo(highlightedTrimSegment.start.x, highlightedTrimSegment.start.y);
+3300-                 ctx.lineTo(highlightedTrimSegment.end.x, highlightedTrimSegment.end.y);
+3301-             } else if (highlightedTrimSegment.type === 'arc' && highlightedTrimSegment.center && highlightedTrimSegment.radius !== undefined && highlightedTrimSegment.startAngle !== undefined && highlightedTrimSegment.endAngle !== undefined) {
+--
+3309-             }
+3310-             ctx.stroke();
+3311-        }
+3312-        if (activeTool === 'Cancella' && entity.id === highlightedTrimLine?.id) {
+3313-             ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+3314:             ctx.lineWidth = (entity.lineWidth + 4) / view.zoom;
+3315-             ctx.beginPath();
+3316-             if (entity.type === 'line' || entity.type === 'dimension') {
+3317-                 ctx.moveTo(entity.start.x, entity.start.y);
+3318-                 ctx.lineTo(entity.end.x, entity.end.y);
+3319-             } else if (entity.type === 'circle') {
+--
+3345-      if (activeTool === 'Eraser') {
+3346-          ctx.save();
+3347-          
+3348-          // 1. Draw target indicator (semi-transparent dashed circular boundary for precision CAD work)
+3349-          ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+3350:          ctx.lineWidth = 1 / view.zoom;
+3351-          ctx.setLineDash([4 / view.zoom, 4 / view.zoom]);
+3352-          ctx.beginPath();
+3353-          ctx.arc(eraserPos.x, eraserPos.y, eraserRadius / view.zoom, 0, Math.PI * 2);
+3354-          ctx.stroke();
+3355-          ctx.setLineDash([]); // clear dash
+--
+3373-              ctx.closePath();
+3374-              ctx.fill();
+3375-              
+3376-              // Red detail highlight/shadow
+3377-              ctx.strokeStyle = '#c62828';
+3378:              ctx.lineWidth = 1 / view.zoom;
+3379-              ctx.beginPath();
+3380-              ctx.moveTo(-w, -h * 0.8);
+3381-              ctx.lineTo(0, -h);
+3382-              ctx.stroke();
+3383-
+--
+3392-              ctx.closePath();
+3393-              ctx.fill();
+3394-
+3395-              // Blue detail shadow
+3396-              ctx.strokeStyle = '#1565c0';
+3397:              ctx.lineWidth = 1 / view.zoom;
+3398-              ctx.beginPath();
+3399-              ctx.moveTo(0, -h);
+3400-              ctx.lineTo(w - 2/view.zoom, -h);
+3401-              ctx.lineTo(w, -h * 0.5);
+3402-              ctx.stroke();
+3403-
+3404-              // White separation line in the middle
+3405-              ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+3406:              ctx.lineWidth = 1.5 / view.zoom;
+3407-              ctx.beginPath();
+3408-              ctx.moveTo(0, -h);
+3409-              ctx.lineTo(0, h);
+3410-              ctx.stroke();
+3411-          } else {
+--
+3421-              ctx.closePath();
+3422-              ctx.fill();
+3423-
+3424-              // Orange shadow highlight for high-quality definition
+3425-              ctx.strokeStyle = '#d97706';
+3426:              ctx.lineWidth = 1 / view.zoom;
+3427-              ctx.beginPath();
+3428-              ctx.moveTo(-w, -h);
+3429-              ctx.lineTo(w - 2/view.zoom, -h);
+3430-              ctx.lineTo(w, -h * 0.4);
+3431-              ctx.moveTo(w - 2/view.zoom, h);
+--
+3491-            ctx.globalAlpha = 1.0;
+3492-            ctx.fillRect(tecnigrafoOrigin.x - 10/view.zoom, tecnigrafoOrigin.y, rulerLength, edgeWidth);
+3493-            
+3494-            // Thin black line for the sharp edge
+3495-            ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+3496:            ctx.lineWidth = 0.5 / view.zoom;
+3497-            ctx.beginPath();
+3498-            ctx.moveTo(tecnigrafoOrigin.x - 10/view.zoom, tecnigrafoOrigin.y);
+3499-            ctx.lineTo(tecnigrafoOrigin.x + rulerLength, tecnigrafoOrigin.y);
+3500-            ctx.stroke();
+3501-
+--
+3526-            ctx.globalAlpha = 1.0;
+3527-            ctx.fillRect(tecnigrafoOrigin.x - edgeWidth, tecnigrafoOrigin.y - 10/view.zoom, edgeWidth, rulerLength);
+3528-
+3529-            // Thin black line
+3530-            ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+3531:            ctx.lineWidth = 0.5 / view.zoom;
+3532-            ctx.beginPath();
+3533-            ctx.moveTo(tecnigrafoOrigin.x, tecnigrafoOrigin.y - 10/view.zoom);
+3534-            ctx.lineTo(tecnigrafoOrigin.x, tecnigrafoOrigin.y + rulerLength);
+3535-            ctx.stroke();
+3536-
+--
+3549-        ctx.beginPath();
+3550-        ctx.arc(tecnigrafoOrigin.x, tecnigrafoOrigin.y, 10 / view.zoom, 0, Math.PI * 2);
+3551-        ctx.fillStyle = '#64748b';
+3552-        ctx.fill();
+3553-        ctx.strokeStyle = '#fff';
+3554:        ctx.lineWidth = 2 / view.zoom;
+3555-        ctx.stroke();
+3556-        
+3557-        ctx.restore();
+3558-      }
+3559-
+--
+3583-
+3584-      // --- BIM LIVE PREVIEWS (STARTS) ---
+3585-      if (activeTool === 'BIM_DisegnaStanza' && manualRoomPoints.length > 0) {
+3586-        ctx.save();
+3587-        ctx.strokeStyle = '#10b981';
+3588:        ctx.lineWidth = 1.5 / view.zoom;
+3589-        ctx.fillStyle = 'rgba(16, 185, 129, 0.08)';
+3590-        ctx.beginPath();
+3591-        ctx.moveTo(manualRoomPoints[0].x, manualRoomPoints[0].y);
+3592-        for (let i = 1; i < manualRoomPoints.length; i++) {
+3593-          ctx.lineTo(manualRoomPoints[i].x, manualRoomPoints[i].y);
+--
+3615-        const dy = end.y - start.y;
+3616-        const len = Math.sqrt(dx * dx + dy * dy);
+3617-
+3618-        if (activeTool === 'BIM_Porta' && len > 0.1) {
+3619-          ctx.strokeStyle = '#dc2626';
+3620:          ctx.lineWidth = 2 / view.zoom;
+3621-          
+3622-          const px = -dy / len;
+3623-          const py = dx / len;
+3624-          const leafEnd = { x: start.x + px * len, y: start.y + py * len };
+3625-
+--
+3629-          ctx.lineTo(leafEnd.x, leafEnd.y);
+3630-          ctx.stroke();
+3631-
+3632-          // Swing arc
+3633-          ctx.strokeStyle = 'rgba(220, 38, 38, 0.4)';
+3634:          ctx.lineWidth = 1 / view.zoom;
+3635-          ctx.beginPath();
+3636-          const baseAngle = Math.atan2(end.y - start.y, end.x - start.x);
+3637-          const leafAngle = Math.atan2(leafEnd.y - start.y, leafEnd.x - start.x);
+3638-          ctx.arc(start.x, start.y, len, baseAngle, leafAngle, false);
+3639-          ctx.stroke();
+--
+3650-        if (activeTool === 'BIM_Finestra' && len > 0.1) {
+3651-          const nx = -dy / len;
+3652-          const ny = dx / len;
+3653-          const wWidth = 10;
+3654-          ctx.strokeStyle = '#2563eb';
+3655:          ctx.lineWidth = 1.5 / view.zoom;
+3656-          
+3657-          ctx.beginPath();
+3658-          ctx.moveTo(start.x, start.y);
+3659-          ctx.lineTo(end.x, end.y);
+3660-          ctx.moveTo(start.x + nx * wWidth / 2, start.y + ny * wWidth / 2);
+--
+3702-                const pt = drawing.freehandPoints[i];
+3703-                // Pseudo-random but stable stroke thickness & opacity based on index
+3704-                const widthSeed = (0.5 + ((i % 5) * 0.1)); // values from 0.5 to 0.9
+3705-                const alphaSeed = (0.5 + ((i % 3) * 0.1)); // values from 0.5 to 0.7
+3706-                ctx.beginPath();
+3707:                ctx.lineWidth = defaultLineStyle.mode === 'ink'
+3708-                    ? Math.max(0.4, (0.8 + widthSeed * 0.2) * (defaultLineStyle.lineWidth / view.zoom))
+3709-                    : Math.max(0.4, widthSeed * (defaultLineStyle.lineWidth / view.zoom));
+3710-                ctx.strokeStyle = defaultLineStyle.mode === 'ink' 
+3711-                    ? '#000000' 
+3712-                    : getAlphaColor(defaultLineStyle.color, alphaSeed);
+--
+3720-            ctx.strokeStyle = drawing.isVirtual
+3721-                ? '#9ca3af' // Gray for virtual
+3722-                : (isKnownAngle 
+3723-                    ? '#22c55e' 
+3724-                    : (defaultLineStyle.color || ((defaultLineStyle.mode === 'pencil') ? 'rgba(187, 187, 187, 0.5)' : (defaultLineStyle.mode === 'ink' ? '#000000' : 'rgba(0, 0, 0, 1.0)'))));
+3725:            ctx.lineWidth = (drawing.wheelLength !== undefined ? 4 : (defaultLineStyle.mode === 'ink' ? defaultLineStyle.lineWidth : 2)) / view.zoom;
+3726-            ctx.setLineDash((defaultLineStyle.mode === 'CAD') ? [] : [5, 5]);
+3727-            ctx.beginPath();
+3728-            if (activeTool === 'Line') {
+3729-                if (drawing.wheelLength !== undefined) {
+3730-                    const steps = 20;
+--
+3743-                        const wave = Math.sin(t * Math.PI * 4) * (0.6 / view.zoom);
+3744-                        const px = bx + nx * wave;
+3745-                        const py = by + ny * wave;
+3746-
+3747-                        ctx.beginPath();
+3748:                        ctx.lineWidth = Math.max(0.2, (0.5 + Math.random() * 0.5) * (2 / view.zoom));
+3749-                        ctx.strokeStyle = getAlphaColor(defaultLineStyle.color, 0.3 + Math.random() * 0.4);
+3750-                        ctx.moveTo(lastX, lastY);
+3751-                        ctx.lineTo(px, py);
+3752-                        ctx.stroke();
+3753-                        
+--
+3862-            ctx.beginPath();
+3863-            ctx.roundRect(tooltipX, tooltipY, bgW, bgH, 4 / view.zoom);
+3864-            ctx.fill();
+3865-            
+3866-            ctx.strokeStyle = drawing.wheelLength !== undefined ? '#10b981' : '#64748b';
+3867:            ctx.lineWidth = 1 / view.zoom;
+3868-            ctx.stroke();
+3869-            
+3870-            ctx.fillStyle = drawing.wheelLength !== undefined ? '#34d399' : '#f8fafc';
+3871-            ctx.fillText(label, tooltipX + padW, tooltipY + 2 / view.zoom);
+3872-        }
+--
+3888-        if (activeTool === 'Template' && selectedTemplateId && hoverSnap) {
+3889-            const template = TEMPLATES.find(t => t.id === selectedTemplateId);
+3890-            if (template) {
+3891-                ctx.save();
+3892-                ctx.strokeStyle = defaultLineStyle.color || ((defaultLineStyle.mode === 'pencil') ? '#bbbbbb' : (defaultLineStyle.mode === 'ink' ? '#000000' : '#000000'));
+3893:                ctx.lineWidth = defaultLineStyle.lineWidth / view.zoom;
+3894-                ctx.globalAlpha = 0.5;
+3895-                
+3896-                const basePos = hoverSnap.point;
+3897-                
+3898-                template.entities.forEach(te => {
+--
+3921-                const refEnt = entities.find(e => e.id === activeSnap.refEntityId);
+3922-                if (refEnt && refEnt.type === 'line') {
+3923-                    const l = refEnt as LineEntity;
+3924-                    ctx.save();
+3925-                    ctx.strokeStyle = '#22c55e';
+3926:                    ctx.lineWidth = 4 / view.zoom;
+3927-                    ctx.beginPath();
+3928-                    ctx.moveTo(l.start.x, l.start.y);
+3929-                    ctx.lineTo(l.end.x, l.end.y);
+3930-                    ctx.stroke();
+3931-
+3932-                    // Trajectory guide
+3933-                    ctx.setLineDash([5 / view.zoom, 5 / view.zoom]);
+3934:                    ctx.lineWidth = 1 / view.zoom;
+3935-                    ctx.beginPath();
+3936-                    ctx.moveTo(activeSnap.refPoint!.x, activeSnap.refPoint!.y);
+3937-                    ctx.lineTo(drawing.current.x, drawing.current.y);
+3938-                    ctx.stroke();
+3939-                    ctx.restore();
+3940-                }
+3941-            }
+3942-        }
+3943-
+3944-        ctx.strokeStyle = drawing.snapType === 'smart' ? '#9ca3af' : '#fbbf24';
+3945:        ctx.lineWidth = 2 / view.zoom;
+3946-        ctx.beginPath();
+3947-        ctx.rect(drawing.current.x - 5/view.zoom, drawing.current.y - 5/view.zoom, 10/view.zoom, 10/view.zoom);
+3948-        ctx.stroke();
+3949-        
+3950-        if (drawing.snapType === 'smart') {
+--
+3958-
+3959-            anchorPointsToDraw.forEach(anchor => {
+3960-                const refPt = anchor.ref;
+3961-                ctx.setLineDash([5 / view.zoom, 5 / view.zoom]);
+3962-                ctx.strokeStyle = '#9ca3af';
+3963:                ctx.lineWidth = 1 / view.zoom;
+3964-                ctx.beginPath();
+3965-                ctx.moveTo(drawing.current.x, drawing.current.y);
+3966-                ctx.lineTo(refPt.x, refPt.y);
+3967-                ctx.stroke();
+3968-                ctx.setLineDash([]);
+--
+3989-                const metrics = ctx.measureText(txt);
+3990-                const bgW = metrics.width + 8 / view.zoom;
+3991-                const bgH = 14 / view.zoom;
+3992-                ctx.fillStyle = 'rgba(240, 253, 244, 0.95)'; // emerald-50 with high opacity for readability
+3993-                ctx.strokeStyle = '#bbf7d0'; // emerald-200
+3994:                ctx.lineWidth = 1 / view.zoom;
+3995-                ctx.beginPath();
+3996-                ctx.roundRect(midX - bgW / 2, midY - bgH / 2, bgW, bgH, 3 / view.zoom);
+3997-                ctx.fill();
+3998-                ctx.stroke();
+3999-                
+--
+4002-                ctx.restore();
+4003-
+4004-                // Highlight the distant point (the anchor point we are aligned with) while drawing
+4005-                ctx.fillStyle = '#22c55e';
+4006-                ctx.strokeStyle = '#15803d';
+4007:                ctx.lineWidth = 1.5 / view.zoom;
+4008-                
+4009-                // Draw filled inner circle
+4010-                ctx.beginPath();
+4011-                ctx.arc(refPt.x, refPt.y, 4 / view.zoom, 0, Math.PI * 2);
+4012-                ctx.fill();
+--
+4029-            const refEnt = entities.find(e => e.id === hoverSnap.refEntityId);
+4030-            if (refEnt && refEnt.type === 'line') {
+4031-                const l = refEnt as LineEntity;
+4032-                ctx.save();
+4033-                ctx.strokeStyle = '#22c55e';
+4034:                ctx.lineWidth = 4 / view.zoom;
+4035-                ctx.beginPath();
+4036-                ctx.moveTo(l.start.x, l.start.y);
+4037-                ctx.lineTo(l.end.x, l.end.y);
+4038-                ctx.stroke();
+4039-                ctx.restore();
+4040-            }
+4041-        }
+4042-
+4043-        ctx.strokeStyle = hoverSnap.type === 'smart' ? '#22c55e' : '#fbbf24';
+4044:        ctx.lineWidth = 2 / view.zoom;
+4045-        ctx.beginPath();
+4046-        ctx.rect(hoverSnap.point.x - 5/view.zoom, hoverSnap.point.y - 5/view.zoom, 10/view.zoom, 10/view.zoom);
+4047-        ctx.stroke();
+4048-
+4049-        if (hoverSnap.type === 'smart') {
+--
+4057-
+4058-            hoverAnchorsToDraw.forEach(anchor => {
+4059-                const refPt = anchor.ref;
+4060-                ctx.setLineDash([5 / view.zoom, 5 / view.zoom]);
+4061-                ctx.strokeStyle = '#22c55e';
+4062:                ctx.lineWidth = 1 / view.zoom;
+4063-                ctx.beginPath();
+4064-                ctx.moveTo(hoverSnap.point.x, hoverSnap.point.y);
+4065-                ctx.lineTo(refPt.x, refPt.y);
+4066-                ctx.stroke();
+4067-                ctx.setLineDash([]);
+--
+4082-                const hMetrics = ctx.measureText(hTxt);
+4083-                const hBgW = hMetrics.width + 8 / view.zoom;
+4084-                const hBgH = 14 / view.zoom;
+4085-                ctx.fillStyle = 'rgba(240, 253, 244, 0.95)';
+4086-                ctx.strokeStyle = '#bbf7d0';
+4087:                ctx.lineWidth = 1 / view.zoom;
+4088-                ctx.beginPath();
+4089-                ctx.roundRect(hMidX - hBgW / 2, hMidY - hBgH / 2, hBgW, hBgH, 3 / view.zoom);
+4090-                ctx.fill();
+4091-                ctx.stroke();
+4092-                ctx.fillStyle = '#15803d';
+--
+4094-                ctx.restore();
+4095-
+4096-                // Highlight the distant point (the anchor point we are aligned with)
+4097-                ctx.fillStyle = '#22c55e';
+4098-                ctx.strokeStyle = '#15803d';
+4099:                ctx.lineWidth = 1.5 / view.zoom;
+4100-                
+4101-                // Draw filled inner circle
+4102-                ctx.beginPath();
+4103-                ctx.arc(refPt.x, refPt.y, 4 / view.zoom, 0, Math.PI * 2);
+4104-                ctx.fill();
+--
+4121-          
+4122-          const { w, h } = getTavolaDimensions(tav);
+4123-          
+4124-          // Draw thin dashed sheet outline
+4125-          ctx.strokeStyle = '#2563eb';
+4126:          ctx.lineWidth = 1.5 / view.zoom;
+4127-          ctx.setLineDash([5 / view.zoom, 4 / view.zoom]);
+4128-          ctx.strokeRect(tav.position.x, tav.position.y, w, h);
+4129-          
+4130-          // Draw printable margin (5mm offset standard frame border)
+4131-          let mFactor = 5;
+--
+4133-          if (tav.unit === 'cm') scaleFactor = 10;
+4134-          if (tav.unit === 'mm') scaleFactor = 1;
+4135-          const marginOffset = mFactor * (tav.scale / scaleFactor);
+4136-          
+4137-          ctx.strokeStyle = '#3b82f6';
+4138:          ctx.lineWidth = 0.8 / view.zoom;
+4139-          ctx.setLineDash([]);
+4140-          ctx.strokeRect(
+4141-            tav.position.x + marginOffset, 
+4142-            tav.position.y + marginOffset, 
+4143-            w - 2 * marginOffset, 
+--
+4152-          
+4153-          const isCartiglioHovered = hoveredTavolaPart?.id === tav.id && hoveredTavolaPart?.part === 'cartiglio';
+4154-          ctx.fillStyle = isCartiglioHovered ? 'rgba(37, 99, 235, 0.08)' : 'rgba(255, 255, 255, 0.9)';
+4155-          ctx.fillRect(cartX, cartY, cartiglioW, cartiglioH);
+4156-          ctx.strokeStyle = isCartiglioHovered ? '#1d4ed8' : '#2563eb';
+4157:          ctx.lineWidth = (isCartiglioHovered ? 2.0 : 1.2) / view.zoom;
+4158-          ctx.strokeRect(cartX, cartY, cartiglioW, cartiglioH);
+4159-          
+4160-          // Partition lines of Title Block
+4161-          ctx.beginPath();
+4162-          ctx.strokeStyle = '#2563eb';
+4163:          ctx.lineWidth = 0.7 / view.zoom;
+4164-          // Horizontal lines
+4165-          ctx.moveTo(cartX, cartY + cartiglioH * 0.4);
+4166-          ctx.lineTo(cartX + cartiglioW, cartY + cartiglioH * 0.4);
+4167-          ctx.moveTo(cartX, cartY + cartiglioH * 0.7);
+4168-          ctx.lineTo(cartX + cartiglioW, cartY + cartiglioH * 0.7);
+--
+4263-            ctx.closePath();
+4264-            ctx.fill();
+4265-
+4266-            // Outline
+4267-            ctx.strokeStyle = 'rgba(16, 185, 129, 0.6)';
+4268:            ctx.lineWidth = 1.5 / view.zoom;
+4269-            ctx.stroke();
+4270-
+4271-            // Calculate Centroid (average points)
+4272-            let cx = 0, cy = 0;
+4273-            roomPoints.forEach((p: Point) => {
+--
+4312-            const boxH = lineCount * textSz + 2 * padding;
+4313-            const boxW = maxW + 2 * padding;
+4314-
+4315-            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+4316-            ctx.strokeStyle = '#10b981';
+4317:            ctx.lineWidth = 1 / view.zoom;
+4318-            
+4319-            ctx.fillRect(cx - boxW/2, cy - boxH/2, boxW, boxH);
+4320-            ctx.strokeRect(cx - boxW/2, cy - boxH/2, boxW, boxH);
+4321-
+4322-            ctx.fillStyle = '#065f46';
+--
+4341-          const start = (entity as any).start;
+4342-          const end = (entity as any).end;
+4343-          if (start && end) {
+4344-            ctx.save();
+4345-            ctx.strokeStyle = '#9ca3af';
+4346:            ctx.lineWidth = 1 / view.zoom;
+4347-            ctx.setLineDash([4 / view.zoom, 4 / view.zoom]);
+4348-            ctx.beginPath();
+4349-            ctx.moveTo(start.x, start.y);
+4350-            ctx.lineTo(end.x, end.y);
+4351-            ctx.stroke();
+--
+4365-              y: start.y + py * doorWidth
+4366-            };
+4367-
+4368-            ctx.setLineDash([]);
+4369-            ctx.strokeStyle = '#dc2626';
+4370:            ctx.lineWidth = 2 / view.zoom;
+4371-            ctx.beginPath();
+4372-            ctx.moveTo(start.x, start.y);
+4373-            ctx.lineTo(leafEnd.x, leafEnd.y);
+4374-            ctx.stroke();
+4375-
+4376-            ctx.strokeStyle = 'rgba(220, 38, 38, 0.4)';
+4377:            ctx.lineWidth = 1 / view.zoom;
+4378-            ctx.beginPath();
+4379-            const baseAngle = Math.atan2(end.y - start.y, end.x - start.x);
+4380-            const leafAngle = Math.atan2(leafEnd.y - start.y, leafEnd.x - start.x);
+4381-            
+4382-            // Draw arc in correct direction based on flip
+--
+4405-            const nx = len > 0 ? -dy / len : 0;
+4406-            const ny = len > 0 ? dx / len : 0;
+4407-            const wWidth = 10;
+4408-
+4409-            ctx.strokeStyle = '#2563eb';
+4410:            ctx.lineWidth = 1.5 / view.zoom;
+4411-            ctx.beginPath();
+4412-            ctx.moveTo(start.x, start.y);
+4413-            ctx.lineTo(end.x, end.y);
+4414-            ctx.moveTo(start.x + nx * wWidth/2, start.y + ny * wWidth/2);
+4415-            ctx.lineTo(end.x + nx * wWidth/2, end.y + ny * wWidth/2);
+--
+4459-               ctx.fillStyle = 'rgba(191, 219, 254, 0.2)';
+4460-               ctx.strokeStyle = '#3b82f6';
+4461-          }
+4462-
+4463-          ctx.setLineDash([5 / view.zoom, 5 / view.zoom]);
+4464:          ctx.lineWidth = 1 / view.zoom;
+4465-          ctx.beginPath();
+4466-          ctx.rect(rectX, rectY, rectW, rectH);
+4467-          ctx.fill();
+4468-          ctx.stroke();
+4469-          ctx.restore();
+--
+4488-          ctx.save();
+4489-          ctx.translate(view.pan.x, view.pan.y);
+4490-          ctx.scale(view.zoom, view.zoom);
+4491-          ctx.setLineDash([5 / view.zoom, 5 / view.zoom]);
+4492-          ctx.strokeStyle = '#f59e0b'; // Amber 500
+4493:          ctx.lineWidth = 1.5 / view.zoom;
+4494-          
+4495-          const line = selectedParallelLine as LineEntity;
+4496-          const dxLine = line.end.x - line.start.x;
+4497-          const dyLine = line.end.y - line.start.y;
+4498-          const L = Math.sqrt(dxLine * dxLine + dyLine * dyLine);
+--
+4541-              ctx.beginPath();
+4542-              ctx.roundRect(posX, posY, bgW, bgH, 4 / view.zoom);
+4543-              ctx.fill();
+4544-              
+4545-              ctx.strokeStyle = isParallelWheelActive ? '#10b981' : '#f59e0b';
+4546:              ctx.lineWidth = 1 / view.zoom;
+4547-              ctx.stroke();
+4548-              
+4549-              ctx.fillStyle = isParallelWheelActive ? '#34d399' : '#ffffff';
+4550-              ctx.fillText(distLabel, posX + pad, posY + 13 / view.zoom);
+4551-          }
+--
+4557-      if (lockedFocalPoint) {
+4558-        const screenPos = canvasToScreen(lockedFocalPoint.x, lockedFocalPoint.y);
+4559-        ctx.save();
+4560-        ctx.setTransform(1, 0, 0, 1, 0, 0); // Absolute screen pixels
+4561-        ctx.strokeStyle = '#f87171'; // Red-400
+4562:        ctx.lineWidth = 1.5;
+4563-        
+4564-        const size = 12;
+4565-        ctx.beginPath();
+4566-        // Crosshair
+4567-        ctx.moveTo(screenPos.x - size, screenPos.y);
+--
+4589-          // Draw the hovering axis if not yet set
+4590-          if (specchioState === 'axis_start' && specchioHoverAxisLine && specchioHoverAxisLine.type === 'line') {
+4591-              const line = specchioHoverAxisLine as LineEntity;
+4592-              ctx.save();
+4593-              ctx.strokeStyle = '#10b981'; // Green hover
+4594:              ctx.lineWidth = 2 / view.zoom;
+4595-              ctx.setLineDash([6 / view.zoom, 6 / view.zoom]);
+4596-              ctx.beginPath();
+4597-              ctx.moveTo(line.start.x, line.start.y);
+4598-              ctx.lineTo(line.end.x, line.end.y);
+4599-              ctx.stroke();
+--
+4608-                  else finalPt2.x = specchioAxisPt1.x;
+4609-              }
+4610-              ctx.save();
+4611-              ctx.setLineDash([10 / view.zoom, 10 / view.zoom]);
+4612-              ctx.strokeStyle = '#10b981'; 
+4613:              ctx.lineWidth = 1.5 / view.zoom;
+4614-              ctx.beginPath();
+4615-              ctx.moveTo(specchioAxisPt1.x, specchioAxisPt1.y);
+4616-              ctx.lineTo(finalPt2.x, finalPt2.y);
+4617-              ctx.stroke();
+4618-              ctx.restore();
+--
+4621-          // If axis is finalized, highlight it with the extensions
+4622-          if (specchioFinalAxis) {
+4623-              ctx.save();
+4624-              ctx.setLineDash([5 / view.zoom, 5 / view.zoom]);
+4625-              ctx.strokeStyle = '#10b981'; 
+4626:              ctx.lineWidth = 1.5 / view.zoom;
+4627-
+4628-              if (specchioFinalAxis.isExisting) {
+4629-                  // Draw small extensions for existing lines
+4630-                  const p1 = specchioFinalAxis.start;
+4631-                  const p2 = specchioFinalAxis.end;
+--
+4656-                          if (specchioMode === 'move') {
+4657-                              ctx.globalAlpha = 0.2;
+4658-                          }
+4659-                          ctx.setLineDash([4 / view.zoom, 4 / view.zoom]);
+4660-                          ctx.strokeStyle = '#3b82f6';
+4661:                          ctx.lineWidth = 1.5 / view.zoom;
+4662-                          drawTempEntityPreview(ctx, ent);
+4663-                          ctx.restore();
+4664-
+4665-                          // draw mirror preview
+4666-                          const previewEnt = mirrorEntity(ent, specchioFinalAxis.start, specchioFinalAxis.end);
+4667-                          ctx.save();
+4668-                          ctx.setLineDash([2 / view.zoom, 2 / view.zoom]);
+4669-                          ctx.strokeStyle = '#8b5cf6cc';
+4670:                          ctx.lineWidth = 1.2 / view.zoom;
+4671-                          drawTempEntityPreview(ctx, previewEnt);
+4672-                          ctx.restore();
+4673-                      }
+4674-                  });
+4675-              }
+--
+4718-          ctx.beginPath();
+4719-          ctx.arc(targetScreenPoint.x, targetScreenPoint.y, 4, 0, Math.PI * 2);
+4720-          ctx.fillStyle = '#10b981';
+4721-          ctx.fill();
+4722-          ctx.strokeStyle = '#ffffff';
+4723:          ctx.lineWidth = 1.5;
+4724-          ctx.stroke();
+4725-
+4726-          // TANGET CONE - "due segmenti tangenti alla circonferenza così da impressione del ingrandimento"
+4727-          const dxP = targetScreenPoint.x - bubbleCx;
+4728-          const dyP = targetScreenPoint.y - bubbleCy;
+--
+4755-              ctx.moveTo(targetScreenPoint.x, targetScreenPoint.y);
+4756-              ctx.lineTo(t1X, t1Y);
+4757-              ctx.moveTo(targetScreenPoint.x, targetScreenPoint.y);
+4758-              ctx.lineTo(t2X, t2Y);
+4759-              ctx.strokeStyle = 'rgba(16, 185, 129, 0.4)';
+4760:              ctx.lineWidth = 1;
+4761-              ctx.setLineDash([5, 5]);
+4762-              ctx.stroke();
+4763-              ctx.setLineDash([]);
+4764-          }
+4765-
+--
+4794-          ctx.clip();
+4795-          ctx.beginPath();
+4796-          ctx.moveTo(bubbleCx - bubbleRadius, bubbleCy - bubbleRadius);
+4797-          ctx.lineTo(bubbleCx + bubbleRadius, bubbleCy + bubbleRadius);
+4798-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+4799:          ctx.lineWidth = bubbleRadius;
+4800-          ctx.stroke();
+4801-          ctx.restore();
+4802-          
+4803-          // Outer bezel
+4804-          ctx.beginPath();
+4805-          ctx.arc(bubbleCx, bubbleCy, bubbleRadius, 0, Math.PI * 2);
+4806-          ctx.strokeStyle = '#10b981';
+4807:          ctx.lineWidth = 5;
+4808-          ctx.stroke();
+4809-          
+4810-          // Internal highlights
+4811-          ctx.beginPath();
+4812-          ctx.arc(bubbleCx, bubbleCy, bubbleRadius - 4, 0, Math.PI * 2);
+4813-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+4814:          ctx.lineWidth = 1;
+4815-          ctx.stroke();
+4816-          
+4817-          // Content Label inside the glass
+4818-          let valueText = '';
+4819-          let subText = 'MISURA';

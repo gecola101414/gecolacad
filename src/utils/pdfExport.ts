@@ -153,7 +153,13 @@ export const exportNativePDF = (
       pdf.setDrawColor(0, 0, 0); 
       
       let baseLw = entity.lineWidth && typeof entity.lineWidth === 'number' ? entity.lineWidth : 1;
-      let lw = Math.max(0.1, baseLw * 0.2); // Rough mapping from screen units to mm for line width
+      let lw = Math.max(0.1, baseLw * 0.2); // Standard mapping for CAD lines
+      
+      if (entity.mode === 'ink') {
+          // Special mapping for Kina pens to guarantee visible solid black
+          lw = baseLw <= 0.25 ? 0.3 : baseLw <= 0.5 ? 0.5 : baseLw <= 1.0 ? 1.0 : baseLw <= 2.0 ? 2.0 : baseLw;
+      }
+      
       if (entity.type === 'dimension') lw = 0.1;
       pdf.setLineWidth(lw);
 
@@ -164,22 +170,38 @@ export const exportNativePDF = (
       }
 
       if (entity.type === 'line') {
-          if (entity.inkPoints && entity.inkPoints.length > 1) {
-              let lastX = entity.start.x;
-              let lastY = entity.start.y;
-              for(let i=0; i<entity.inkPoints.length; i++) {
-                  const pt = entity.inkPoints[i];
-                  const t = i / (entity.inkPoints.length - 1);
-                  const bx = entity.start.x + (entity.end.x - entity.start.x) * t;
-                  const by = entity.start.y + (entity.end.y - entity.start.y) * t;
-                  const px = entity.isFreehand ? pt.x : bx + pt.x;
-                  const py = entity.isFreehand ? pt.y : by + pt.y;
+          const lEnt = entity as LineEntity;
+          if (lEnt.inkPoints && lEnt.inkPoints.length > 1) {
+              let lastX = lEnt.start.x;
+              let lastY = lEnt.start.y;
+              for(let i=0; i<lEnt.inkPoints.length; i++) {
+                  const pt = lEnt.inkPoints[i];
+                  const t = i / (lEnt.inkPoints.length - 1);
+                  const bx = lEnt.start.x + (lEnt.end.x - lEnt.start.x) * t;
+                  const by = lEnt.start.y + (lEnt.end.y - lEnt.start.y) * t;
+                  const px = lEnt.isFreehand ? pt.x : bx + pt.x;
+                  const py = lEnt.isFreehand ? pt.y : by + pt.y;
                   
                   // Apply width and alpha from inkPoint
-                  const lw = Math.max(0.05, pt.width * scale * 0.5);
-                  pdf.setLineWidth(lw);
-                  const gray = Math.round((1 - Math.min(1, pt.alpha)) * 255);
-                  pdf.setDrawColor(gray, gray, gray);
+                  const isInk = lEnt.mode === 'ink';
+                  const baseLw = typeof lEnt.lineWidth === 'number' ? lEnt.lineWidth : 1.0;
+                  
+                  // For ink, we ensure a slightly thicker base on PDF so it presents solidly, mapping the nominal thickness
+                  const effectiveInkPDFWidth = isInk
+                        ? (baseLw === 0.25 ? 0.3 : baseLw === 0.5 ? 0.5 : baseLw === 1.0 ? 1.0 : baseLw === 2.0 ? 2.0 : baseLw)
+                        : baseLw * 0.4; // Pencil / standard freehand fallback
+
+                  const lw_current = isInk 
+                      ? Math.max(0.1, (0.8 + pt.width * 0.4) * effectiveInkPDFWidth)
+                      : Math.max(0.1, pt.width * effectiveInkPDFWidth);
+                      
+                  pdf.setLineWidth(lw_current);
+                  if (isInk) {
+                      pdf.setDrawColor(0, 0, 0); // Pure black
+                  } else {
+                      const gray = Math.round((1 - Math.min(1, pt.alpha)) * 255);
+                      pdf.setDrawColor(gray, gray, gray);
+                  }
                   
                   pdf.line(tx(lastX), ty(lastY), tx(px), ty(py));
                   lastX = px;

@@ -13,6 +13,7 @@ import { DimensionStyleDialog } from "./components/DimensionStyleDialog";
 import { RaccordoDialog } from "./components/RaccordoDialog";
 import { DXFTextReaderDialog } from "./components/DXFTextReaderDialog";
 import { TemplatePreview } from "./components/TemplatePreview";
+import { BIMWorkspacePanel } from "./components/BIMWorkspacePanel";
 import { TEMPLATES } from './data/templates';
 import { GUIDE_DATABASE, GuideItem } from './data/guides';
 import { Entity, Point, Layer, Measurement, Tavola } from "./types";
@@ -41,6 +42,8 @@ import {
   Copy,
   Layers,
   Pen,
+  PenTool,
+  Pencil,
   Lightbulb,
   LightbulbOff,
   Snowflake,
@@ -54,7 +57,9 @@ import {
   BookOpen,
   Grid,
   ExternalLink,
-  X
+  X,
+  Building,
+  Lock
 } from "lucide-react";
 
 const ParallelIcon = ({ size = 16 }: { size?: number }) => (
@@ -126,42 +131,57 @@ const OrthoIcon = ({ size = 16 }: { size?: number }) => (
 );
 
 export default function App() {
-  const [selectedTool, setSelectedTool] = useState<string | null>(null);
+  const [selectedTool, setSelectedTool] = useState<string | null>(() => localStorage.getItem('selectedTool') || 'Select');
   const [entities, setEntities] = useState<Entity[]>([]);
-  const [layers, setLayers] = useState<Layer[]>([
-    { id: "0", name: "0", visible: true, frozen: false },
-    { id: "p1", name: "p1", visible: true, frozen: false },
-    { id: "p2", name: "p2", visible: true, frozen: false },
-    { id: "p4", name: "p4", visible: true, frozen: false },
-    { id: "Maschere", name: "Maschere", visible: true, frozen: false },
-    { id: "Misure", name: "Misure", visible: true, frozen: false },
-    { id: "Spessori", name: "Spessori", visible: true, frozen: false },
-    { id: "Hatch", name: "Hatch", visible: true, frozen: false },
-  ]);
-  const [activeLayerId, setActiveLayerId] = useState<string>("0");
-  const [defaultLineStyle, setDefaultLineStyle] = useState({
-    color: "#000000",
-    lineWidth: 1,
-    dashed: false,
-    mode: "pencil" as "ink" | "pencil",
+  const [layers, setLayers] = useState<Layer[]>(() => {
+    const saved = localStorage.getItem('layers');
+    return saved ? JSON.parse(saved) : [
+      { id: "0", name: "0", visible: true, frozen: false },
+      { id: "p1", name: "p1", visible: true, frozen: false },
+      { id: "p2", name: "p2", visible: true, frozen: false },
+      { id: "p4", name: "p4", visible: true, frozen: false },
+      { id: "Maschere", name: "Maschere", visible: true, frozen: false },
+      { id: "Misure", name: "Misure", visible: true, frozen: false },
+      { id: "Spessori", name: "Spessori", visible: true, frozen: false },
+      { id: "Hatch", name: "Hatch", visible: true, frozen: false },
+    ];
   });
-  const [defaultHatchStyle, setDefaultHatchStyle] = useState({
-    pattern: 'ANSI31',
-    scale: 30,
-    angle: 0,
-    color: '#000000',
-    sfumatura: 0,
+  const [activeLayerId, setActiveLayerId] = useState<string>(() => localStorage.getItem('activeLayerId') || "0");
+  const [defaultLineStyle, setDefaultLineStyle] = useState(() => {
+    const saved = localStorage.getItem('defaultLineStyle');
+    return saved ? JSON.parse(saved) : {
+      color: "#444444",
+      lineWidth: 2,
+      dashed: false,
+      mode: "HB" as "2H" | "HB" | "CAD",
+    };
   });
-  const [defaultTextStyle, setDefaultTextStyle] = useState({
-    fontFamily: 'sans-serif',
-    fontSize: 14,
-    fontWeight: 'normal',
-    textAlign: 'left' as 'left' | 'center' | 'right' | 'justify',
+  const [defaultHatchStyle, setDefaultHatchStyle] = useState(() => {
+    const saved = localStorage.getItem('defaultHatchStyle');
+    return saved ? JSON.parse(saved) : {
+      pattern: 'ANSI31',
+      scale: 30,
+      angle: 0,
+      color: '#000000',
+      sfumatura: 0,
+    };
   });
-  const [eraserRadius, setEraserRadius] = useState(20);
-  const [favoritePanels, setFavoritePanels] = useState<Array<{ id: string; tools: string[]; x: number; y: number; isDocked: 'left' | 'right' | null }>>([
-    { id: "fav-1", tools: ["Line", "Circle", "Hatch", "Eraser"], x: 180, y: 120, isDocked: null }
-  ]);
+  const [defaultTextStyle, setDefaultTextStyle] = useState(() => {
+    const saved = localStorage.getItem('defaultTextStyle');
+    return saved ? JSON.parse(saved) : {
+      fontFamily: 'sans-serif',
+      fontSize: 14,
+      fontWeight: 'normal',
+      textAlign: 'left' as 'left' | 'center' | 'right' | 'justify',
+    };
+  });
+  const [eraserRadius, setEraserRadius] = useState(() => Number(localStorage.getItem('eraserRadius')) || 20);
+  const [favoritePanels, setFavoritePanels] = useState<Array<{ id: string; tools: string[]; x: number; y: number; isDocked: 'left' | 'right' | null }>>(() => {
+    const saved = localStorage.getItem('favoritePanels');
+    return saved ? JSON.parse(saved) : [
+      { id: "fav-1", tools: ["Line", "Circle", "Hatch", "Eraser"], x: 180, y: 120, isDocked: null }
+    ];
+  });
   const [activeDraggingId, setActiveDraggingId] = useState<string | null>(null);
   const favoritesDragRef = useRef<{ isDragging: boolean; panelId: string; startX: number; startY: number; posX: number; posY: number } | null>(null);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
@@ -187,7 +207,7 @@ export default function App() {
     { id: "tav4", name: "Tavola n. 4", format: "A1", scale: 500, unit: "cm", position: { x: 40, y: 30 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 4", autore: "Ing. Domenico Gimondo", data: "2026" } },
     { id: "tav5", name: "Tavola n. 5", format: "A0", scale: 1000, unit: "cm", position: { x: 0, y: 0 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 5", autore: "Ing. Domenico Gimondo", data: "2026" } },
   ]);
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere' | 'testo' | 'gemini' | 'manuale'>('penne');
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere' | 'testo' | 'gemini' | 'manuale' | 'bim'>(() => (localStorage.getItem('activeSidebarTab') as any) || 'penne');
   const [hoveredGuide, setHoveredGuide] = useState<GuideItem | null>(null);
   const [guideLockedBy, setGuideLockedBy] = useState<string | null>(null);
   const [showFloatingManual, setShowFloatingManual] = useState(false);
@@ -209,10 +229,13 @@ export default function App() {
   const [doubleClickedTavolaId, setDoubleClickedTavolaId] = useState<string | null>(null);
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const [activePreviewTavolaId, setActivePreviewTavolaId] = useState<string | null>(null);
-  const [rulerStyle, setRulerStyle] = useState<"tecnigrafo" | "crosshair">(
-    "crosshair",
-  );
-  const [orthoMode, setOrthoMode] = useState(true);
+  const [rulerStyle, setRulerStyle] = useState<"tecnigrafo" | "crosshair">(() => (localStorage.getItem('rulerStyle') as any) || "crosshair");
+  const [orthoMode, setOrthoMode] = useState(() => localStorage.getItem('orthoMode') === 'true');
+  const [isTecnigrafoActive, setIsTecnigrafoActive] = useState(false);
+  const [isContinuousMode, setIsContinuousMode] = useState(false);
+  const [cancelTrigger, setCancelTrigger] = useState(0);
+  const [showProperties, setShowProperties] = useState(() => localStorage.getItem('showProperties') === 'true');
+  const [selectedCategory, setSelectedCategory] = useState(() => localStorage.getItem('selectedCategory') || "Disegno");
 
   // File System State
   const [fileHandle, setFileHandle] = useState<any>(null);
@@ -249,6 +272,59 @@ export default function App() {
     }, 1000);
     return () => clearTimeout(timeoutId);
   }, [entities, fileHandle, layers, tavole, measurements]);
+
+  // UI Persistence Effects
+  useEffect(() => {
+    localStorage.setItem('selectedTool', selectedTool || '');
+  }, [selectedTool]);
+
+  useEffect(() => {
+    localStorage.setItem('layers', JSON.stringify(layers));
+  }, [layers]);
+
+  useEffect(() => {
+    localStorage.setItem('activeLayerId', activeLayerId);
+  }, [activeLayerId]);
+
+  useEffect(() => {
+    localStorage.setItem('defaultLineStyle', JSON.stringify(defaultLineStyle));
+  }, [defaultLineStyle]);
+
+  useEffect(() => {
+    localStorage.setItem('defaultHatchStyle', JSON.stringify(defaultHatchStyle));
+  }, [defaultHatchStyle]);
+
+  useEffect(() => {
+    localStorage.setItem('defaultTextStyle', JSON.stringify(defaultTextStyle));
+  }, [defaultTextStyle]);
+
+  useEffect(() => {
+    localStorage.setItem('eraserRadius', eraserRadius.toString());
+  }, [eraserRadius]);
+
+  useEffect(() => {
+    localStorage.setItem('favoritePanels', JSON.stringify(favoritePanels));
+  }, [favoritePanels]);
+
+  useEffect(() => {
+    localStorage.setItem('activeSidebarTab', activeSidebarTab);
+  }, [activeSidebarTab]);
+
+  useEffect(() => {
+    localStorage.setItem('rulerStyle', rulerStyle);
+  }, [rulerStyle]);
+
+  useEffect(() => {
+    localStorage.setItem('orthoMode', orthoMode.toString());
+  }, [orthoMode]);
+
+  useEffect(() => {
+    localStorage.setItem('showProperties', showProperties.toString());
+  }, [showProperties]);
+
+  useEffect(() => {
+    localStorage.setItem('selectedCategory', selectedCategory);
+  }, [selectedCategory]);
 
   const handleOpenFile = async () => {
     try {
@@ -373,17 +449,17 @@ export default function App() {
   const cadCanvasRef = useRef<any>(null);
 
   // Automatic Layer Selection based on style/pen
-  // Matita (Sketch) -> Layer 0
-  // Kina (Technical) -> p1, p2, p4
+  // Matita 2H -> Layer 0
+  // HB, CAD -> p1, p2, p4
   useEffect(() => {
-    if (defaultLineStyle.mode === 'ink') {
-      setActiveLayerId("0"); // Schizzo
-    } else {
-      if (defaultLineStyle.lineWidth === 1) setActiveLayerId("p1");
-      else if (defaultLineStyle.lineWidth === 2.5) setActiveLayerId("p2");
-      else if (defaultLineStyle.lineWidth === 4) setActiveLayerId("p4");
+    if (defaultLineStyle.mode === 'pencil' && defaultLineStyle.color === '#bbbbbb') {
+      setActiveLayerId("0"); // Schizzo / Costruzione
+    } else if (defaultLineStyle.mode === 'ink') {
+      if (defaultLineStyle.lineWidth === 0.25) setActiveLayerId("p1");
+      else if (defaultLineStyle.lineWidth === 0.35) setActiveLayerId("p2");
+      else if (defaultLineStyle.lineWidth >= 0.5) setActiveLayerId("p4");
     }
-  }, [defaultLineStyle.mode, defaultLineStyle.lineWidth]);
+  }, [defaultLineStyle.mode, defaultLineStyle.lineWidth, defaultLineStyle.color]);
 
   const [toolboxPos, setToolboxPos] = useState(() => {
     const saved = localStorage.getItem('toolboxPos');
@@ -556,8 +632,6 @@ export default function App() {
       ],
     },
   ];
-  const [showProperties, setShowProperties] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState("Disegno");
 
   const handleFavoritesMouseDown = (e: React.MouseEvent, panelId: string) => {
     if ((e.target as HTMLElement).closest('button')) return;
@@ -712,6 +786,11 @@ export default function App() {
             key={cat.name}
             onClick={() => {
               setSelectedCategory(cat.name);
+              // If clicking "Seleziona", immediately activate the Select tool and show properties
+              if (cat.name === "Seleziona") {
+                setSelectedTool("Select");
+                setShowProperties(true);
+              }
             }}
             className={`px-4 flex flex-col items-center justify-center gap-0.5 ${selectedCategory === cat.name ? "bg-neutral-100" : "hover:bg-neutral-200"}`}
           >
@@ -841,6 +920,22 @@ export default function App() {
         >
           <Sparkles size={16} className={showProperties && activeSidebarTab === 'gemini' ? "text-amber-500 animate-pulse" : "text-amber-500"} />
           <span className="text-[10px]">Gemini AI</span>
+        </button>
+        <button
+          onClick={() => {
+            handleGuideClick('BIM');
+            if (activeSidebarTab === 'bim' && showProperties) {
+              setShowProperties(false);
+            } else {
+              setActiveSidebarTab('bim');
+              setShowProperties(true);
+            }
+          }}
+          onMouseEnter={() => handleGuideHover('BIM')}
+          className={`px-4 flex flex-col items-center justify-center gap-0.5 border-l border-neutral-300 ${showProperties && activeSidebarTab === 'bim' ? "bg-cyan-50 text-cyan-800 font-bold border-x border-cyan-200" : "hover:bg-neutral-200 text-neutral-600"}`}
+        >
+          <Building size={16} className={showProperties && activeSidebarTab === 'bim' ? "text-cyan-600 animate-pulse" : "text-cyan-600"} />
+          <span className="text-[10px] font-bold">BIM</span>
         </button>
         <div className="flex-1"></div>
         <button
@@ -993,31 +1088,96 @@ export default function App() {
             <OrthoIcon size={12} />
             <span>Ortho</span>
           </button>
+          <button
+            onClick={() => {
+              const next = !isTecnigrafoActive;
+              setIsTecnigrafoActive(next);
+              if (next) {
+                const event = new KeyboardEvent('keydown', { key: 'q', bubbles: true });
+                document.dispatchEvent(event);
+              } else {
+                const event = new KeyboardEvent('keyup', { key: 'q', bubbles: true });
+                document.dispatchEvent(event);
+              }
+            }}
+            className={`px-2 py-0.5 rounded flex items-center gap-1 text-xs transition ${
+              isTecnigrafoActive 
+                ? "bg-amber-100 text-amber-900 border border-amber-300" 
+                : "hover:bg-neutral-200"
+            }`}
+          >
+            <DraftingCompass size={12} />
+            <span>Tecnigrafo</span>
+          </button>
+          
+          <button
+            onClick={() => {
+              const next = !isContinuousMode;
+              setIsContinuousMode(next);
+              if (next) {
+                setOrthoMode(true);
+                setSelectedTool('Line');
+              }
+              setCancelTrigger(prev => prev + 1);
+            }}
+            className={`px-2 py-0.5 rounded flex items-center gap-1 text-xs transition-all ${
+              isContinuousMode 
+                ? "bg-amber-100 text-amber-950 border border-amber-300 font-bold shadow-[0_0_8px_rgba(245,158,11,0.2)]" 
+                : "hover:bg-neutral-200"
+            }`}
+          >
+            <Lock size={12} className={isContinuousMode ? "text-amber-600" : ""} />
+            <span>Segm. Continui</span>
+          </button>
           <div className="flex gap-1 rounded bg-neutral-200 p-0.5">
             <button
               onClick={() => {
                 handleGuideClick("Penne");
-                setDefaultLineStyle({...defaultLineStyle, mode: 'ink'});
+                setDefaultLineStyle({ mode: 'CAD', color: '#000000', lineWidth: 1, dashed: false });
                 setActiveSidebarTab('penne');
                 setShowProperties(true);
               }}
               onMouseEnter={() => handleGuideHover("Penne")}
-              className={`px-3 py-1 rounded text-[10px] font-bold ${defaultLineStyle.mode === 'ink' ? 'bg-white shadow-sm font-extrabold text-neutral-900' : 'text-neutral-500 hover:text-neutral-700'}`}
+              className={`px-3 py-1 rounded text-[10px] font-bold ${defaultLineStyle.mode === 'CAD' ? 'bg-white shadow-sm font-extrabold text-neutral-900' : 'text-neutral-500 hover:text-neutral-700'}`}
             >
-              Kina (Standard)
+              CAD
             </button>
-            <button
-              onClick={() => {
-                handleGuideClick("Penne");
-                setDefaultLineStyle({...defaultLineStyle, mode: 'pencil'});
-                setActiveSidebarTab('penne');
-                setShowProperties(true);
-              }}
-              onMouseEnter={() => handleGuideHover("Penne")}
-              className={`px-3 py-1 rounded text-[10px] font-bold ${defaultLineStyle.mode === 'pencil' ? 'bg-white shadow-sm font-extrabold text-neutral-900' : 'text-neutral-500 hover:text-neutral-700'}`}
-            >
-              Schizzo (Matita)
-            </button>
+            <div className="flex items-center gap-1 border-l border-neutral-300 pl-2 ml-1">
+              <span className="text-[9px] font-bold text-neutral-400 mr-1">Kina:</span>
+              {[0.25, 0.5, 1, 2].map(w => (
+                <button
+                  key={w}
+                  onClick={() => {
+                    handleGuideClick("Penne");
+                    setDefaultLineStyle({ mode: 'ink', color: '#000000', lineWidth: w, dashed: false });
+                    setActiveSidebarTab('penne');
+                    setShowProperties(true);
+                  }}
+                  className={`w-7 h-6 rounded flex items-center justify-center text-[9px] font-black transition-all ${defaultLineStyle.mode === 'ink' && defaultLineStyle.lineWidth === w ? 'bg-indigo-600 text-white shadow-md scale-110' : 'bg-neutral-200 text-neutral-600 hover:bg-neutral-300'}`}
+                >
+                  {w}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1 border-l border-neutral-300 pl-2 ml-1">
+              <span className="text-[9px] font-bold text-neutral-400 mr-1">Matita:</span>
+              {['2H', 'HB', '2B'].map(m => (
+                <button
+                  key={m}
+                  onClick={() => {
+                    handleGuideClick("Penne");
+                    const color = m === '2H' ? '#bbbbbb' : (m === 'HB' ? '#444444' : '#111111');
+                    const width = m === '2H' ? 1 : (m === 'HB' ? 2 : 3);
+                    setDefaultLineStyle({ mode: 'pencil', color, lineWidth: width, dashed: false });
+                    setActiveSidebarTab('penne');
+                    setShowProperties(true);
+                  }}
+                  className={`px-1.5 h-6 rounded flex items-center justify-center text-[9px] font-black transition-all ${defaultLineStyle.mode === 'pencil' && (m === '2H' ? defaultLineStyle.color === '#bbbbbb' : (m === 'HB' ? defaultLineStyle.color === '#444444' : defaultLineStyle.color === '#111111')) ? 'bg-amber-500 text-white shadow-md scale-110' : 'bg-neutral-200 text-neutral-600 hover:bg-neutral-300'}`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -1108,6 +1268,8 @@ export default function App() {
             rulerStyle={rulerStyle}
             orthoMode={orthoMode}
             setOrthoMode={setOrthoMode}
+            isContinuousMode={isContinuousMode}
+            cancelTrigger={cancelTrigger}
             tavole={tavole}
             onUpdateTavole={setTavole}
             onDoubleClickTavola={setDoubleClickedTavolaId}
@@ -1518,6 +1680,7 @@ export default function App() {
                   : activeSidebarTab === "maschere" ? "Archivio Maschere" 
                   : activeSidebarTab === "testo" ? "Impostazioni Testo"
                   : activeSidebarTab === "gemini" ? "Disegno Gemini AI"
+                  : activeSidebarTab === "bim" ? "Tecnologia BIM / I.A."
                   : "Mazzo Penne & Stili"}
               </span>
               <button 
@@ -1529,7 +1692,18 @@ export default function App() {
             </h3>
 
             <div className="space-y-4 flex-1">
-              {activeSidebarTab === "maschere" ? (
+              {activeSidebarTab === "bim" ? (
+                <BIMWorkspacePanel
+                  entities={entities}
+                  selectedTool={selectedTool}
+                  setSelectedTool={setSelectedTool}
+                  setEntities={setEntities}
+                  onCommitHistory={commitToHistory}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                  cadCanvasRef={cadCanvasRef}
+                />
+              ) : activeSidebarTab === "maschere" ? (
                 <div className="space-y-6">
                   <div className="bg-amber-100/50 border border-amber-200 p-3 rounded-lg shadow-sm">
                     <p className="text-[10px] text-amber-800 leading-relaxed font-serif italic">
@@ -1919,8 +2093,9 @@ export default function App() {
                   </div>
                 </div>
               ) : activeSidebarTab === "penne" ? (
-                selectedEntity ? (
-                  selectedEntity.type === "hatch" ? (
+                <div className="space-y-6">
+                  {selectedEntity ? (
+                    selectedEntity.type === "hatch" ? (
                     <div className="space-y-4 font-sans">
                       <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 p-3 rounded-lg shadow-sm">
                         <p className="text-[10px] leading-tight font-mono font-bold uppercase">
@@ -2055,19 +2230,27 @@ export default function App() {
                         <div className="flex gap-2 mt-1">
                           <button
                             onClick={() =>
+                              updateEntity(selectedEntity.id, { mode: "pencil" })
+                            }
+                            className={`p-2 rounded flex-1 text-xs font-bold transition-all ${selectedEntity.mode === "pencil" ? "bg-amber-600 text-white" : "bg-neutral-200"}`}
+                          >
+                            Matita
+                          </button>
+                          <button
+                            onClick={() =>
                               updateEntity(selectedEntity.id, { mode: "ink" })
                             }
                             className={`p-2 rounded flex-1 text-xs font-bold transition-all ${selectedEntity.mode === "ink" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
                           >
-                            Schizzo
+                            Kina
                           </button>
                           <button
                             onClick={() =>
-                              updateEntity(selectedEntity.id, { mode: "pencil" })
+                              updateEntity(selectedEntity.id, { mode: "CAD" })
                             }
-                            className={`p-2 rounded flex-1 text-xs font-bold transition-all ${selectedEntity.mode === "pencil" ? "bg-indigo-600 text-white" : "bg-neutral-200"}`}
+                            className={`p-2 rounded flex-1 text-xs font-bold transition-all ${selectedEntity.mode === "CAD" ? "bg-emerald-600 text-white" : "bg-neutral-200"}`}
                           >
-                            Kina
+                            CAD
                           </button>
                         </div>
                       </label>
@@ -2126,10 +2309,9 @@ export default function App() {
                         </>
                       )}
                     </>
-                  )
-                ) : (
-                  <div className="space-y-6">
-                    {selectedTool === 'Hatch' ? (
+                  )) : (
+                    <>
+                      {selectedTool === 'Hatch' ? (
                       <div className="space-y-4">
                         <div className="bg-emerald-950 border border-emerald-800 text-emerald-100 p-4 rounded-xl shadow-lg">
                           <p className="text-xs leading-normal font-sans">
@@ -2225,93 +2407,108 @@ export default function App() {
                         </p>
                       </div>
                     ) : (
-                      <div className="bg-neutral-800 text-neutral-100 p-3 rounded-lg shadow-lg border border-neutral-700">
-                        <p className="text-[10px] leading-tight font-mono opacity-80">
-                          <span className="text-amber-400 font-bold">PENNE TECNICHE:</span><br/>
-                          Scegli lo spessore del pennino. Il layer viene aggiornato automaticamente in base alla selezione.
-                        </p>
+                      <div className="space-y-4">
+                        <div className="bg-neutral-800 text-neutral-100 p-3 rounded-lg shadow-lg border border-neutral-700">
+                          <p className="text-[10px] leading-tight font-mono opacity-80">
+                            <span className="text-amber-400 font-bold">PENNE TECNICHE:</span><br/>
+                            Scegli lo spessore del pennino. Il layer viene aggiornato automaticamente in base alla selezione.
+                          </p>
+                        </div>
+
+                        <div className="space-y-4">
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest flex items-center gap-2">
+                               <Sparkles size={10} /> Stile Tecnico CAD
+                            </label>
+                            <div className="grid grid-cols-4 gap-2">
+                              {[0.25, 0.5, 1, 2].map(w => (
+                                <button
+                                  key={w}
+                                  onClick={() =>
+                                    setDefaultLineStyle({ mode: "CAD", color: '#000000', lineWidth: w, dashed: false })
+                                  }
+                                  className={`p-2 rounded-lg border transition-all flex flex-col items-center justify-center gap-1 ${defaultLineStyle.mode === "CAD" && defaultLineStyle.lineWidth === w ? "bg-emerald-900 border-emerald-700 ring-4 ring-emerald-200 shadow-md transform -translate-y-0.5" : "bg-neutral-50 border-neutral-200 hover:bg-white"}`}
+                                >
+                                  <span className={`text-[10px] font-black ${defaultLineStyle.mode === "CAD" && defaultLineStyle.lineWidth === w ? "text-white" : "text-neutral-500"}`}>
+                                    {w}
+                                  </span>
+                                  <span className="text-[8px] text-neutral-400">mm</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest flex items-center gap-2">
+                               <PenTool size={10} /> Pennini Kina
+                            </label>
+                            <div className="grid grid-cols-4 gap-2">
+                              {[0.25, 0.5, 1, 2].map(w => (
+                                <button
+                                  key={w}
+                                  onClick={() =>
+                                    setDefaultLineStyle({ mode: "ink", color: '#000000', lineWidth: w, dashed: false })
+                                  }
+                                  className={`p-2 rounded-lg border transition-all flex flex-col items-center justify-center gap-1 ${defaultLineStyle.mode === "ink" && defaultLineStyle.lineWidth === w ? "bg-indigo-900 border-neutral-700 ring-4 ring-neutral-200 shadow-md transform -translate-y-0.5" : "bg-neutral-50 border-neutral-200 hover:bg-white"}`}
+                                >
+                                  <span className={`text-[10px] font-black ${defaultLineStyle.mode === "ink" && defaultLineStyle.lineWidth === w ? "text-white" : "text-neutral-500"}`}>
+                                    {w}
+                                  </span>
+                                  <span className="text-[8px] text-neutral-400">mm</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest flex items-center gap-2">
+                               <Pencil size={10} /> Matite di Grafite
+                            </label>
+                            <div className="grid grid-cols-3 gap-2">
+                              {['2H', 'HB', '2B'].map(m => {
+                                const color = m === '2H' ? '#bbbbbb' : (m === 'HB' ? '#444444' : '#111111');
+                                const width = m === '2H' ? 1 : (m === 'HB' ? 2 : 3);
+                                const isSelected = defaultLineStyle.mode === 'pencil' && defaultLineStyle.color === color;
+                                return (
+                                  <button
+                                    key={m}
+                                    onClick={() =>
+                                      setDefaultLineStyle({ mode: "pencil", color, lineWidth: width, dashed: false })
+                                    }
+                                    className={`p-2.5 rounded-lg border transition-all flex flex-col items-center justify-center gap-1 ${isSelected ? "bg-amber-50 border-amber-300 ring-4 ring-amber-100 shadow-md transform -translate-y-0.5" : "bg-neutral-50 border-neutral-200 hover:bg-white"}`}
+                                  >
+                                    <span className={`text-[10px] font-black ${isSelected ? "text-amber-800" : "text-neutral-500"}`}>{m}</span>
+                                    <span className="text-[8px] text-neutral-400">{m === '2H' ? 'Dura' : (m === 'HB' ? 'Media' : 'Morb.')}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          <div className="space-y-2 mt-4">
+                            <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest flex items-center gap-2">
+                               <Crosshair size={10} /> Colore Matita
+                            </label>
+                            <div className="grid grid-cols-5 gap-2">
+                              {['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#64748b'].map((c) => (
+                                <button
+                                  key={c}
+                                  onClick={() => setDefaultLineStyle(prev => ({ ...prev, color: c }))}
+                                  className={`w-full aspect-square rounded-full flex items-center justify-center transition-transform ${defaultLineStyle.color === c ? "ring-2 ring-offset-2 ring-indigo-500 scale-110 shadow-md" : "hover:scale-105 border border-black/10"}`}
+                                  style={{ backgroundColor: c }}
+                                >
+                                  {defaultLineStyle.color === c && <Check size={10} className="text-white drop-shadow-md" />}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     )}
-
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest flex items-center gap-2">
-                           <Sparkles size={10} /> Stile Tratto
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            onClick={() =>
-                              setDefaultLineStyle(prev => ({ ...prev, mode: "pencil" }))
-                            }
-                            className={`p-3 rounded-lg border text-left transition-all ${defaultLineStyle.mode === "pencil" ? "bg-amber-50 border-amber-300 ring-4 ring-amber-100" : "bg-neutral-50 border-neutral-200 hover:border-neutral-300"}`}
-                          >
-                            <span className={`block text-xs font-black ${defaultLineStyle.mode === "pencil" ? "text-amber-800" : "text-neutral-500"}`}>Schizzo</span>
-                            <span className="text-[9px] text-neutral-400 font-medium">Matita morbida</span>
-                          </button>
-                          <button
-                            onClick={() =>
-                              setDefaultLineStyle(prev => ({ ...prev, mode: "ink" }))
-                            }
-                            className={`p-3 rounded-lg border text-left transition-all ${defaultLineStyle.mode === "ink" ? "bg-indigo-900 border-neutral-700 ring-4 ring-neutral-200" : "bg-neutral-50 border-neutral-200 hover:border-neutral-300"}`}
-                          >
-                            <span className={`block text-xs font-black ${defaultLineStyle.mode === "ink" ? "text-white" : "text-neutral-500"}`}>Kina</span>
-                            <span className="text-[9px] text-neutral-400 font-medium">Tratto tecnico</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest flex items-center gap-2">
-                           <Pen size={10} /> Spessore Pennino
-                        </label>
-                        <div className="grid grid-cols-3 gap-2">
-                          {[1, 2.5, 4].map((w) => (
-                            <button
-                              key={w}
-                              onClick={() =>
-                                setDefaultLineStyle(prev => ({ ...prev, lineWidth: w }))
-                              }
-                              className={`p-2.5 rounded-lg border transition-all flex flex-col items-center justify-center gap-1 ${defaultLineStyle.lineWidth === w ? "bg-white border-indigo-500 ring-4 ring-indigo-50 shadow-md transform -translate-y-0.5" : "bg-neutral-50 border-neutral-200 hover:bg-white"}`}
-                            >
-                              <div 
-                                className="w-full h-1 bg-neutral-800 rounded-full mb-1" 
-                                style={{ height: `${w * 0.7}px`, opacity: defaultLineStyle.lineWidth === w ? 1 : 0.3 }} 
-                              />
-                              <span className={`text-[10px] font-bold ${defaultLineStyle.lineWidth === w ? "text-indigo-600" : "text-neutral-500"}`}>
-                                p{w === 1 ? '1' : w === 2.5 ? '2' : '4'}
-                              </span>
-                              <span className="text-[8px] text-neutral-400">{w}mm</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="space-y-2 mt-4">
-                        <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest flex items-center gap-2">
-                           <Crosshair size={10} /> Colore Matita
-                        </label>
-                        <div className="grid grid-cols-5 gap-2">
-                          {['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#64748b'].map((c) => (
-                            <button
-                              key={c}
-                              onClick={() => setDefaultLineStyle(prev => ({ ...prev, color: c }))}
-                              className={`w-full aspect-square rounded-full flex items-center justify-center transition-transform ${defaultLineStyle.color === c ? "ring-2 ring-offset-2 ring-indigo-500 scale-110 shadow-md" : "hover:scale-105 border border-black/10"}`}
-                              style={{ backgroundColor: c }}
-                            >
-                              {defaultLineStyle.color === c && <Check size={10} className="text-white drop-shadow-md" />}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="pt-4 border-t border-neutral-100 italic">
-                      <p className="text-[9px] text-neutral-400 leading-relaxed text-center">
-                        Usa il tasto destro sul foglio per alternare velocemente tra Schizzo e Kina.
-                      </p>
-                    </div>
-                  </div>
-                )
-              ) : activeSidebarTab === 'layers' ? (
+                  </>
+                )}
+              </div>
+            ) : activeSidebarTab === "layers" ? (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between mb-2 pb-2 border-b border-neutral-200">
                         <h4 className="text-[10px] font-black text-neutral-800 uppercase tracking-wider font-mono">
