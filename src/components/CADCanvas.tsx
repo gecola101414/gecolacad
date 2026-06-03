@@ -4595,24 +4595,21 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         if (drawing.isFreehand && drawing.freehandPoints && drawing.freehandPoints.length > 1) {
             ctx.save();
             ctx.setLineDash([]);
-            let lastPt = drawing.freehandPoints[0];
+            const baseWidth = defaultLineStyle.mode === 'ink'
+                ? getEffectiveCADRenderWidth(defaultLineStyle.lineWidth, defaultLineStyle.mode, view.zoom)
+                : Math.max(0.4, 0.7 * (defaultLineStyle.lineWidth / view.zoom));
+            
+            ctx.lineWidth = baseWidth;
+            ctx.strokeStyle = defaultLineStyle.mode === 'ink' 
+                ? '#000000' 
+                : getAlphaColor(defaultLineStyle.color, 0.6);
+            
+            ctx.beginPath();
+            ctx.moveTo(drawing.freehandPoints[0].x, drawing.freehandPoints[0].y);
             for (let i = 1; i < drawing.freehandPoints.length; i++) {
-                const pt = drawing.freehandPoints[i];
-                // Pseudo-random but stable stroke thickness & opacity based on index
-                const widthSeed = (0.5 + ((i % 5) * 0.1)); // values from 0.5 to 0.9
-                const alphaSeed = (0.5 + ((i % 3) * 0.1)); // values from 0.5 to 0.7
-                ctx.beginPath();
-                ctx.lineWidth = defaultLineStyle.mode === 'ink'
-                    ? getEffectiveCADRenderWidth(defaultLineStyle.lineWidth, defaultLineStyle.mode, view.zoom) * (0.8 + widthSeed * 0.2)
-                    : Math.max(0.4, widthSeed * (defaultLineStyle.lineWidth / view.zoom));
-                ctx.strokeStyle = defaultLineStyle.mode === 'ink' 
-                    ? '#000000' 
-                    : getAlphaColor(defaultLineStyle.color, alphaSeed);
-                ctx.moveTo(lastPt.x, lastPt.y);
-                ctx.lineTo(pt.x, pt.y);
-                ctx.stroke();
-                lastPt = pt;
+                ctx.lineTo(drawing.freehandPoints[i].x, drawing.freehandPoints[i].y);
             }
+            ctx.stroke();
             ctx.restore();
         } else {
             ctx.strokeStyle = drawing.isVirtual
@@ -5680,7 +5677,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   }, [entities, layers, view, flashIds, flashIntensity, selectedParallelLine, blink, selectedEntityId, 
       positioningGroupId, positioningEntityId, selectedRaccordoLineIds, dragEntityIds, highlightedTrimLine, 
       highlightedTrimSegment, activeTool, specchioMode, specchioSelectedIds, copySourceEntityIds, eraserPos, 
-      tecnigrafoOrigin, tecnigrafoLock, manualRoomPoints]);
+      tecnigrafoOrigin, tecnigrafoLock, manualRoomPoints, drawing]);
 
   // Basic pan/zoom handling
   const handleWheel = (e: React.WheelEvent) => {
@@ -8586,7 +8583,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             holdTimerRef.current = null;
         }
     }
-    console.log("handleMouseMove: entered, tool:", activeTool, "dragId:", dragEntityIdRef.current);
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -8888,7 +8884,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
               freehandOrthoAnchorRef.current = null;
           }
 
-          if (distToLast > 0.5) { // 0.5 in canvas units
+          // Use pixel distance to capture points more efficiently
+          const distInPixels = distToLast * view.zoom;
+          if (distInPixels > 1.5) { 
               nextPoints = [...prevPoints, newPt];
           }
           setDrawing({
@@ -8959,38 +8957,14 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
               activeConstraint: undefined
           });
       } else {
-          const isTempOrtho = false;
+          // 1. Check for Snaps around raw mouse position
+          let snapRes = getSnappedPoint(rawPoint, entities, activeTool, drawing);
           
-          let rawSnapped = getSnappedPoint(rawPoint, entities, activeTool, drawing);
-          if (isTempOrtho) {
-              rawSnapped = { point: rawPoint, snapped: false, type: 'CAD' as const };
-          }
+          const isOrthoTool = activeTool === 'Line' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra' || activeTool === 'BIM_Muro' || activeTool === 'Rectangle' || activeTool === 'Circle' || activeTool === 'Arc' || activeTool === 'Dimension' || activeTool === 'Parallel';
+          const effectiveOrthoMode = isOrthoTool && (orthoMode ? !isShiftPressedRef.current : isShiftPressedRef.current);
 
-          const isBothSnappedException = false;
-
-          if (isBothSnappedException) {
-            setDrawing({ 
-                ...drawing, 
-                current: rawSnapped.point, 
-                snapType: rawSnapped.type, 
-                refPoint: rawSnapped.refPoint,
-                refEntityId: rawSnapped.refEntityId,
-                constraintAxis: rawSnapped.constraintAxis,
-                refPoint2: rawSnapped.refPoint2,
-                constraintAxis2: rawSnapped.constraintAxis2,
-                hasDoubleSmart: rawSnapped.hasDoubleSmart || false,
-                activeConstraint: undefined,
-                isVirtual: drawing.isVirtual
-            });
-          } else {
-            // 1. Check for Snaps around raw mouse position
-            let snapRes = getSnappedPoint(rawPoint, entities, activeTool, drawing);
-            
-            const isOrthoTool = activeTool === 'Line' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra' || activeTool === 'BIM_Muro' || activeTool === 'Rectangle' || activeTool === 'Circle' || activeTool === 'Arc' || activeTool === 'Dimension' || activeTool === 'Parallel';
-            const effectiveOrthoMode = isOrthoTool && (orthoMode ? !isShiftPressedRef.current : isShiftPressedRef.current);
-
-            // 2. If we have a standard strong snap (Endpoint, Midpoint, etc.), it WINS over Ortho
-            if (snapRes.snapped && snapRes.type === 'CAD') {
+          // 2. If we have a standard strong snap (Endpoint, Midpoint, etc.), it WINS over Ortho
+          if (snapRes.snapped && snapRes.type === 'CAD') {
                 setDrawing({ 
                     ...drawing, 
                     current: snapRes.point, 
@@ -9053,7 +9027,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                     }
                     
                     if (activeTool === 'Line' || activeTool === 'Parallel') {
-                        if (!e.shiftKey && !isTempOrtho) {
+                        if (!e.shiftKey) {
                             finalPoint = applyAngleSnapping(drawing.start, finalPoint);
                         }
                     }
@@ -9073,10 +9047,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                     });
                 }
             }
-
-      }
-    }
-} else if ((activeTool === 'Move' || activeTool === 'Copy') && dragEntityIdRef.current) {
+        }
+    } else if ((activeTool === 'Move' || activeTool === 'Copy') && dragEntityIdRef.current) {
     const targetIds = dragEntityIds.length > 0 ? dragEntityIds : [dragEntityIdRef.current!];
     
     // 1. Nominal movement from cursor
@@ -9085,7 +9057,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     if (Math.abs(deltaX) > 1e-4 || Math.abs(deltaY) > 1e-4) {
         dragHasMovedRef.current = true;
     }
-    console.log("Move debug: delta", deltaX, deltaY, "previousMouse", previousMouseRef.current, "rawPoint", rawPoint);
 
     // 2. Multi-point Snap Challenge
     const threshold = 15 / view.zoom;
