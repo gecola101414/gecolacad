@@ -1936,6 +1936,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   }, [cancelTrigger]);
 
   const [isJollyActive, setIsJollyActive] = useState(false);
+  const isSKeyPressedRef = useRef(false);
   const [parallelSign, setParallelSign] = useState<number>(1);
   const [specchioState, setSpecchioState] = useState<'axis_start' | 'axis_end' | 'objects' | 'dialog'>('axis_start');
   const [specchioAxisPt1, setSpecchioAxisPt1] = useState<Point | null>(null);
@@ -2610,6 +2611,20 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
   const getDampenedCoordinate = (actualRawPoint: Point, e?: React.MouseEvent | MouseEvent | KeyboardEvent): Point => {
     actualMousePosRef.current = actualRawPoint;
+    
+    // Rallentiamo il movimento solo se il tasto "S" è premuto
+    if (isSKeyPressedRef.current) {
+      // Precision movement: only move a small fraction of the way to the real mouse
+      const last = lastControlledPointRef.current || actualRawPoint;
+      const dampedFactor = 0.03; // Molto più lento per massima precisione
+      const dampenedPoint = {
+        x: last.x + (actualRawPoint.x - last.x) * dampedFactor,
+        y: last.y + (actualRawPoint.y - last.y) * dampedFactor
+      };
+      lastControlledPointRef.current = dampenedPoint;
+      return dampenedPoint;
+    }
+    
     lastControlledPointRef.current = actualRawPoint;
     return actualRawPoint;
   };
@@ -5253,6 +5268,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           if (activeTool === 'Trim') {
               ctx.fillStyle = 'rgba(239, 68, 68, 0.15)';
               ctx.strokeStyle = '#f97316';
+          } else if (activeTool === 'CopiaVideo') {
+              ctx.fillStyle = 'rgba(234, 179, 8, 0.15)';
+              ctx.strokeStyle = '#eab308';
           } else if (isCrossing) {
                ctx.fillStyle = 'rgba(187, 247, 187, 0.2)';
                ctx.strokeStyle = '#22c55e';
@@ -5480,6 +5498,43 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       }
 
       // Removed LENTE INGRANDIMENTO HUD FOR PRECISION MODE as per instructions
+      
+      // Precision Crosshair Rendering (Solo con tasto S attivo)
+      if (isSKeyPressedRef.current) {
+          const screenPos = canvasToScreen(lastControlledPointRef.current.x, lastControlledPointRef.current.y);
+          const actualPos = canvasToScreen(actualMousePosRef.current.x, actualMousePosRef.current.y);
+          
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0); // Absolute screen pixels
+          
+          // Draw trail to actual mouse position
+          ctx.beginPath();
+          ctx.setLineDash([2, 4]);
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+          ctx.lineWidth = 1;
+          ctx.moveTo(screenPos.x, screenPos.y);
+          ctx.lineTo(actualPos.x, actualPos.y);
+          ctx.stroke();
+          
+          // Draw dampened crosshair (Emerald precision cursor)
+          ctx.setLineDash([]);
+          ctx.strokeStyle = '#10b981';
+          ctx.lineWidth = 2;
+          const size = 18;
+          ctx.beginPath();
+          ctx.moveTo(screenPos.x - size, screenPos.y);
+          ctx.lineTo(screenPos.x + size, screenPos.y);
+          ctx.moveTo(screenPos.x, screenPos.y - size);
+          ctx.lineTo(screenPos.x, screenPos.y + size);
+          ctx.stroke();
+          
+          // Circle focus indicator
+          ctx.beginPath();
+          ctx.arc(screenPos.x, screenPos.y, 7, 0, Math.PI * 2);
+          ctx.stroke();
+          
+          ctx.restore();
+      }
     };
 
     renderRef.current = render;
@@ -6714,6 +6769,67 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     });
   };
 
+  const captureSelection = (start: Point, end: Point) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    // Bounds in canvas space
+    const x1 = Math.min(start.x, end.x);
+    const y1 = Math.min(start.y, end.y);
+    const x2 = Math.max(start.x, end.x);
+    const y2 = Math.max(start.y, end.y);
+    
+    const w = x2 - x1;
+    const h = y2 - y1;
+    if (w < 0.1 || h < 0.1) return;
+    
+    // Convert canvas bounds to screen pixels (to extract from the DOM canvas)
+    const pMin = canvasToScreen(x1, y1);
+    const pMax = canvasToScreen(x2, y2);
+    
+    const sx = pMin.x;
+    const sy = pMin.y;
+    const sw = pMax.x - pMin.x;
+    const sh = pMax.y - pMin.y;
+    
+    // Create temp canvas to extract
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = sw;
+    tempCanvas.height = sh;
+    const tempCtx = tempCanvas.getContext('2d');
+    if (!tempCtx) return;
+    
+    // Render the current canvas to the temp canvas (cropped)
+    // IMPORTANT: Draw original canvas into the temp one.
+    tempCtx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+    
+    const dataUrl = tempCanvas.toDataURL('image/png');
+    
+    // Create new image entity
+    const newId = Date.now().toString() + "-captured-" + Math.floor(Math.random()*1000);
+    const newEntity: ImageEntity = {
+      id: newId,
+      type: 'image',
+      point: { x: x1, y: y1 },
+      width: w,
+      height: h,
+      src: dataUrl,
+      color: '#ffffff',
+      lineWidth: 0,
+      layer: activeLayerId,
+      opacity: 1,
+      aspectRatio: w / h
+    };
+    
+    setEntities(prev => {
+      onCommitHistory?.(prev);
+      return [...prev, newEntity];
+    });
+    
+    // Switch tool back to Select after capture
+    setActiveTool?.('Select');
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (isZoomModeRef.current) {
         if (e.button === 0) {
@@ -7086,6 +7202,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     const snapped = shouldSkipSnap
         ? { point: rawPoint, snapped: false, type: 'CAD' as const, refPoint: undefined, constraintAxis: undefined, refPoint2: undefined, constraintAxis2: undefined, hasDoubleSmart: false }
         : getSnappedPoint(rawPoint, entities, activeTool, drawing);
+
+    if (activeTool === 'CopiaVideo') {
+        setSelectionWindow({ start: rawPoint, current: rawPoint });
+        return;
+    }
 
     if (activeTool === 'Select') {
         const found = getEntityAtPoint(rawPoint);
@@ -9037,6 +9158,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         setHoverSnap(null);
     }
     lastMouseRef.current = rawPoint;
+    if (isSKeyPressedRef.current) {
+        renderRef.current?.();
+    }
   };
 
   const handleMouseUp = (e: React.MouseEvent) => {
@@ -9088,6 +9212,15 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         return;
     }
     if (selectionWindow) {
+        if (activeTool === 'CopiaVideo') {
+            const start = selectionWindow.start;
+            const end = selectionWindow.current;
+            setSelectionWindow(null);
+            // Forza render immediato per togliere la cornice gialla prima dello screenshot
+            renderRef.current?.();
+            captureSelection(start, end);
+            return;
+        }
         const rawIds = getEntitiesInWindow(selectionWindow.start, selectionWindow.current, entities);
         const ids = resolveGroups(rawIds, entities);
         if (activeTool === 'Trim') {
@@ -9299,12 +9432,23 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             scrollLock = !!e.getModifierState('ScrollLock');
             numLock = !!e.getModifierState('NumLock');
         }
-        const isActive = hardwareCaps || scrollLock || numLock || e.shiftKey;
+        
+        if (e.key.toLowerCase() === 's') {
+            isSKeyPressedRef.current = e.type === 'keydown';
+        }
+        
+        // Se Shift è premuto aggiorniamo anche il ref dedicato per coerenza
+        if (e.key === 'Shift') {
+            isShiftPressedRef.current = e.type === 'keydown';
+        }
+
+        const isActive = hardwareCaps || scrollLock || numLock || e.shiftKey || e.altKey;
         setIsJollyActive(isActive);
         return isActive;
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
         const isJollyNow = updateJolly(e);
         
         // Frecce per muovere il punto
@@ -9440,6 +9584,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     
     const handleKeyUp = (e: KeyboardEvent) => {
         updateJolly(e);
+        if (e.key === 'Shift') isShiftPressedRef.current = false;
 
         if (e.key.toLowerCase() === 'q') {
             setTecnigrafoLock(null);
@@ -9934,7 +10079,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     <div 
       ref={containerRef} 
       className="w-full h-full relative" 
-      style={{ cursor: hoveredTavolaPart ? 'pointer' : isMovingTecnigrafo ? 'grabbing' : hoverMoveTecnigrafo ? 'grab' : dragTavolaId ? 'grabbing' : hoverTavolaEdge ? 'grab' : activeTool === 'Testo' ? 'text' : (activeTool === 'Eraser' || (activeTool === 'Parallel' && selectedParallelLine)) ? 'none' : activeTool === 'Trim' ? `url("${scissorsSvg}") 16 16, crosshair` : defaultLineStyle.mode === 'CAD' ? 'crosshair' : defaultLineStyle.mode === 'ink' ? getKinaCursor(kinaLabel) : defaultLineStyle.mode === 'pencil' ? getPencilCursor(pencilLabel) : rulerStyle === 'crosshair' ? `url("${crosshairSvg}") 48 48, crosshair` : `url("${tecnigrafoSvg}") 20 108, crosshair` }}
+      style={{ cursor: isSKeyPressedRef.current ? 'none' : hoveredTavolaPart ? 'pointer' : isMovingTecnigrafo ? 'grabbing' : hoverMoveTecnigrafo ? 'grab' : dragTavolaId ? 'grabbing' : hoverTavolaEdge ? 'grab' : activeTool === 'Testo' ? 'text' : (activeTool === 'Eraser' || (activeTool === 'Parallel' && selectedParallelLine)) ? 'none' : activeTool === 'Trim' ? `url("${scissorsSvg}") 16 16, crosshair` : defaultLineStyle.mode === 'CAD' ? 'crosshair' : defaultLineStyle.mode === 'ink' ? getKinaCursor(kinaLabel) : defaultLineStyle.mode === 'pencil' ? getPencilCursor(pencilLabel) : rulerStyle === 'crosshair' ? `url("${crosshairSvg}") 48 48, crosshair` : `url("${tecnigrafoSvg}") 20 108, crosshair` }}
       onWheel={handleWheel} 
       onMouseDown={handleMouseDown} 
       onMouseMove={handleMouseMove} 
