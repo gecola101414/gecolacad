@@ -265,6 +265,7 @@ export default function App() {
   const [isTecnigrafoActive, setIsTecnigrafoActive] = useState(false);
   const [isContinuousMode, setIsContinuousMode] = useState(false);
   const [cancelTrigger, setCancelTrigger] = useState(0);
+  const [parallelTrigger, setParallelTrigger] = useState(0);
   const [showProperties, setShowProperties] = useState(() => localStorage.getItem('showProperties') === 'true');
   const [selectedCategory, setSelectedCategory] = useState(() => localStorage.getItem('selectedCategory') || "Disegno");
 
@@ -786,6 +787,15 @@ export default function App() {
   }, [isDragging, toolboxPos]);
 
   const handleRightClickShortcut = (e: React.MouseEvent) => {
+    // Se c'è il dialogo del raccordo aperto, il tasto destro applica
+    if (isRaccordoDialogOpen) {
+        // Simuliamo un invio al form del dialogo
+        const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
+        window.dispatchEvent(ev);
+        e.preventDefault();
+        return;
+    }
+
     // If in Template tool, try rotating first
     if (selectedTool === 'Template' || selectedTool === 'Select') {
         const rotated = cadCanvasRef.current?.rotateMaskAtPoint(e);
@@ -829,6 +839,12 @@ export default function App() {
     if (tool === "Raccordo") {
       setIsRaccordoDialogOpen(true);
       setShowProperties(false);
+    } else if (tool === "Parallel") {
+      setSelectedTool("Parallel");
+      setCancelTrigger(prev => prev + 1);
+      setParallelTrigger(prev => prev + 1);
+      setShowProperties(false);
+      setIsRaccordoDialogOpen(false);
     } else if (tool === "Penne") {
       setActiveSidebarTab('penne');
       setShowProperties(true);
@@ -1015,6 +1031,31 @@ export default function App() {
   const [history, setHistory] = useState<Entity[][]>([[]]);
   const [historyIndex, setHistoryIndex] = useState(0);
 
+  const historyIndexRef = useRef(historyIndex);
+  const historyRef = useRef(history);
+
+  useEffect(() => {
+    historyIndexRef.current = historyIndex;
+  }, [historyIndex]);
+
+  useEffect(() => {
+    historyRef.current = history;
+  }, [history]);
+
+  const areEntitiesEqual = (list1: Entity[], list2: Entity[]) => {
+    if (list1 === list2) return true;
+    if (!list1 || !list2) return list1 === list2;
+    if (list1.length !== list2.length) return false;
+    for (let i = 0; i < list1.length; i++) {
+      if (list1[i] !== list2[i]) {
+        if (JSON.stringify(list1[i]) !== JSON.stringify(list2[i])) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+
   const undo = () => {
     if (historyIndex > 0) {
       setHistoryIndex((prev) => prev - 1);
@@ -1036,12 +1077,21 @@ export default function App() {
   };
 
   const commitToHistory = (snapshotToSave?: Entity[]) => {
+    const targetSnapshot = snapshotToSave || entities;
+    const currentIdx = historyIndexRef.current;
+    const currentHistory = historyRef.current;
+    const lastState = currentHistory[currentIdx];
+
+    if (lastState && areEntitiesEqual(lastState, targetSnapshot)) {
+      return; // Do not commit duplicates
+    }
+
     setHistory((prevHistory) => {
-      const newHistory = prevHistory.slice(0, historyIndex + 1);
-      newHistory.push(snapshotToSave || entities);
-      setHistoryIndex(newHistory.length - 1);
+      const newHistory = prevHistory.slice(0, currentIdx + 1);
+      newHistory.push(targetSnapshot);
       return newHistory;
     });
+    setHistoryIndex((prevIndex) => prevIndex + 1);
   };
 
   const updateEntitiesWithHistory = (
@@ -1049,11 +1099,26 @@ export default function App() {
   ) => {
     setEntities((prev) => {
       const next =
-        typeof newEntities === "function" ? newEntities(prev) : newEntities;
-      const newHistory = history.slice(0, historyIndex + 1);
-      newHistory.push(next);
-      setHistory(newHistory);
-      setHistoryIndex(newHistory.length - 1);
+        typeof newEntities === "function" ? (newEntities as Function)(prev) : newEntities;
+      
+      // Postpone history state side-effects safely to avoid React render queue issues
+      setTimeout(() => {
+        const currentIdx = historyIndexRef.current;
+        const currentHistory = historyRef.current;
+        const lastState = currentHistory[currentIdx];
+
+        if (lastState && areEntitiesEqual(lastState, next)) {
+          return; // Do not commit duplicates
+        }
+
+        setHistory((prevHistory) => {
+          const newHistory = prevHistory.slice(0, currentIdx + 1);
+          newHistory.push(next);
+          return newHistory;
+        });
+        setHistoryIndex((prevIndex) => prevIndex + 1);
+      }, 0);
+
       return next;
     });
   };
@@ -1065,6 +1130,50 @@ export default function App() {
 
   const selectedCategoryTools =
     categories.find((c) => c.name === selectedCategory)?.tools || [];
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Shortcuts only if not in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      const key = e.key.toLowerCase();
+      
+      // Undo/Redo
+      if ((e.ctrlKey || e.metaKey) && key === 'z') {
+        e.preventDefault();
+        undo();
+      } else if ((e.ctrlKey || e.metaKey) && key === 'y') {
+        e.preventDefault();
+        redo();
+      }
+
+      // Escape to reset
+      if (e.key === 'Escape') {
+        setSelectedTool('Select');
+        setSelectedId(null);
+        setCancelTrigger(prev => prev + 1);
+      }
+
+      // Shift or F for Bloc Fn (Hold to activate)
+      if (e.key === 'Shift' || key === 'f') {
+        setIsContinuousMode(true);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      if (e.key === 'Shift' || key === 'f') {
+        setIsContinuousMode(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [historyIndex, history, entities]); // Dependencies for shortcuts
 
   return (
     <div className="flex flex-col h-screen bg-neutral-100 text-neutral-900">
@@ -1481,7 +1590,7 @@ export default function App() {
             onClick={() => {
               const next = !isContinuousMode;
               setIsContinuousMode(next);
-              if (next) {
+              if (next && selectedTool === 'Select') {
                 setOrthoMode(true);
                 setSelectedTool('Line');
               }
@@ -1494,7 +1603,7 @@ export default function App() {
             }`}
           >
             <Lock size={12} className={isContinuousMode ? "text-amber-600" : ""} />
-            <span>Segm. Continui</span>
+            <span>Bloc Fn</span>
           </button>
           <div className="flex gap-1 rounded bg-neutral-200 p-0.5">
             <button
@@ -1637,6 +1746,7 @@ export default function App() {
             setOrthoMode={setOrthoMode}
             isContinuousMode={isContinuousMode}
             cancelTrigger={cancelTrigger}
+            parallelTrigger={parallelTrigger}
             tavole={tavole}
             onUpdateTavole={setTavole}
             onDoubleClickTavola={setDoubleClickedTavolaId}

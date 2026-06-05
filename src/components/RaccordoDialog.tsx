@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 
+// Aggiunto 'taglia' ai tipi possibili
 interface RaccordoDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  initialConfig: { type: 'curvo' | 'rettilineo'; value: number };
-  onSave: (config: { type: 'curvo' | 'rettilineo'; value: number }) => void;
-  onChange?: (config: { type: 'curvo' | 'rettilineo'; value: number }) => void;
+  initialConfig: { type: 'curvo' | 'rettilineo' | 'taglia'; value: number };
+  onSave: (config: { type: 'curvo' | 'rettilineo' | 'taglia'; value: number }) => void;
+  onChange?: (config: { type: 'curvo' | 'rettilineo' | 'taglia'; value: number }) => void;
 }
 
 export const RaccordoDialog: React.FC<RaccordoDialogProps> = ({
@@ -15,7 +16,9 @@ export const RaccordoDialog: React.FC<RaccordoDialogProps> = ({
   onSave,
   onChange,
 }) => {
-  const [type, setType] = useState<'curvo' | 'rettilineo'>(initialConfig.type);
+  // Se il valore iniziale è 0, forza il tipo a 'taglia'
+  const initialType = initialConfig.value === 0 ? 'taglia' : initialConfig.type;
+  const [type, setType] = useState<'curvo' | 'rettilineo' | 'taglia'>(initialType);
   const [value, setValue] = useState<number>(initialConfig.value);
 
   // Floating draggable position
@@ -23,16 +26,20 @@ export const RaccordoDialog: React.FC<RaccordoDialogProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
 
-  // Move to the right side on mount based on window width to avoid central overlap
+  // Sincronizza lo stato interno se cambiano le prop esterne
   useEffect(() => {
     if (isOpen) {
+      const actualType = initialConfig.value === 0 ? 'taglia' : initialConfig.type;
+      setType(actualType);
+      setValue(initialConfig.value);
+      
       const w = window.innerWidth;
       setPosition({
         x: Math.max(20, Math.floor(w - 380)), // 380px from right
         y: 120
       });
     }
-  }, [isOpen]);
+  }, [isOpen, initialConfig]);
 
   // Handle pointer drag
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -67,22 +74,32 @@ export const RaccordoDialog: React.FC<RaccordoDialogProps> = ({
 
   if (!isOpen) return null;
 
-  const handleTypeChange = (newType: 'curvo' | 'rettilineo') => {
+  const handleTypeChange = (newType: 'curvo' | 'rettilineo' | 'taglia') => {
+    let newValue = value;
+    if (newType === 'taglia') {
+      newValue = 0;
+    } else if (value === 0) {
+      newValue = 1; // Valore di default se si passa da taglia a un altro tipo
+    }
+    
     setType(newType);
-    onChange?.({ type: newType, value });
+    setValue(newValue);
+    onChange?.({ type: newType, value: newValue });
   };
 
   const handleValueChange = (newValue: number) => {
     setValue(newValue);
-    if (!isNaN(newValue) && newValue > 0) {
-      onChange?.({ type, value: newValue });
+    if (!isNaN(newValue)) {
+      const currentType = newValue === 0 ? 'taglia' : (type === 'taglia' ? 'curvo' : type);
+      setType(currentType);
+      onChange?.({ type: currentType, value: newValue });
     }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (value <= 0) {
-      alert("Il valore del parametro deve essere maggiore di 0!");
+    if (value < 0 || isNaN(value)) {
+      alert("Il valore del parametro deve essere maggiore o uguale a 0!");
       return;
     }
     onSave({ type, value });
@@ -121,49 +138,63 @@ export const RaccordoDialog: React.FC<RaccordoDialogProps> = ({
           <label className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1.5">
             Tipo di Raccordo
           </label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-1.5">
             <button
               type="button"
               onClick={() => handleTypeChange('curvo')}
-              className={`py-2 px-3 rounded-md text-xs font-bold transition border cursor-pointer ${
+              className={`py-2 px-1.5 rounded-md text-[11px] font-bold transition border cursor-pointer text-center ${
                 type === 'curvo'
                   ? 'bg-amber-500/10 text-amber-400 border-amber-500/40'
                   : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
               }`}
             >
-              Curvo (Raccordo)
+              Curvo
             </button>
             <button
               type="button"
               onClick={() => handleTypeChange('rettilineo')}
-              className={`py-2 px-3 rounded-md text-xs font-bold transition border cursor-pointer ${
+              className={`py-2 px-1.5 rounded-md text-[11px] font-bold transition border cursor-pointer text-center ${
                 type === 'rettilineo'
                   ? 'bg-amber-500/10 text-amber-400 border-amber-500/40'
                   : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
               }`}
             >
-              Rettilineo (Smusso)
+              Smusso
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTypeChange('taglia')}
+              className={`py-2 px-1.5 rounded-md text-[11px] font-bold transition border cursor-pointer text-center ${
+                type === 'taglia'
+                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/40'
+                  : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
+              }`}
+            >
+              Taglia (0)
             </button>
           </div>
         </div>
 
         <div>
           <label className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1.5">
-            {type === 'curvo' ? 'Raggio del Raccordo (cm)' : 'Distanza / Smusso (cm)'}
+            {type === 'curvo' && 'Raggio del Raccordo (cm)'}
+            {type === 'rettilineo' && 'Distanza / Smusso (cm)'}
+            {type === 'taglia' && 'Nessun raccordo (Taglia)'}
           </label>
           <input
             type="number"
-            min="0.1"
+            min="0"
             step="any"
             value={isNaN(value) ? '' : value}
-            onChange={(e) => handleValueChange(parseFloat(e.target.value) || 0)}
-            className="w-full bg-slate-900 border border-slate-800 text-white rounded p-2 text-xs font-mono font-semibold focus:outline-none focus:border-amber-400"
+            onChange={(e) => handleValueChange(parseFloat(e.target.value) ?? 0)}
+            disabled={type === 'taglia'}
+            className="w-full bg-slate-900 border border-slate-800 text-white rounded p-2 text-xs font-mono font-semibold focus:outline-none focus:border-amber-400 disabled:opacity-50 disabled:cursor-not-allowed"
             required
           />
         </div>
 
         <div className="pt-2 text-[10px] text-slate-400 font-mono leading-relaxed bg-slate-900/50 p-2.5 rounded border border-slate-900 select-text">
-          💡 <span className="font-bold text-slate-300">Tip:</span> Trascina questa finestra per spostarla. I parametri si aggiornano sul disegno in diretta mentre modifichi i valori.
+          💡 <span className="font-bold text-slate-300">Tip:</span> Impostando il valore a 0 o selezionando "Taglia", i segmenti verranno tagliati/estesi fino all'intersezione senza curve o smussi.
         </div>
 
         <div className="flex justify-end gap-2.5 pt-2">

@@ -19,6 +19,7 @@ export interface CADEntity {
   mode?: 'ink' | 'pencil' | 'CAD';
   groupId?: string;
   templateId?: string;
+  parentLineId?: string;
   opacity?: number;
   raccordoMetadata?: {
     id1: string;
