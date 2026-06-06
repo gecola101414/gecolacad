@@ -1,7 +1,9 @@
-import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 'react';
+import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { Entity, Point, Layer, LineEntity, CircleEntity, ArcEntity, RectEntity, InkPoint, Tavola, DimensionEntity, PointEntity, ImageEntity } from '../types';
 import { ManualInputOverlay } from './ManualInputOverlay';
 import { TEMPLATES, Template } from '../data/templates';
+import { PdfRenderer } from './PdfRenderer';
+import { ImageEditorOverlay } from './ImageEditorOverlay';
 
 const getEffectiveCADRenderWidth = (lw: number, mode: string | undefined, zoom: number): number => {
     if (mode === 'ink') {
@@ -494,6 +496,10 @@ const drawTempEntityPreview = (ctx: CanvasRenderingContext2D, entity: Entity) =>
       ctx.stroke();
     }
   } else if (entity.type === 'image') {
+    if (entity.mediaType && entity.mediaType !== 'image') {
+      ctx.rect(entity.point.x, entity.point.y, entity.width, entity.height);
+      return;
+    }
     const imgElement = document.createElement('img');
     imgElement.src = entity.src;
     imgElement.crossOrigin = 'anonymous';
@@ -3309,9 +3315,42 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       }
       
       if (hit) {
-          if (dist < minDistance || (Math.abs(dist - minDistance) < 1e-4 && (ent.lineWidth || 1) > (bestEntity?.lineWidth || 1))) {
-              minDistance = dist;
+          if (!bestEntity) {
               bestEntity = ent;
+              minDistance = dist;
+          } else {
+              // Priority 1: China (kina) vs Pencil (matita)
+              // Any mode that is NOT 'pencil' is counted as China/Kina (e.g. 'ink', 'CAD', or undefined)
+              const isKinaA = ent.mode !== 'pencil';
+              const isKinaB = bestEntity.mode !== 'pencil';
+              
+              let isBetter = false;
+              if (isKinaA && !isKinaB) {
+                  isBetter = true;
+              } else if (!isKinaA && isKinaB) {
+                  isBetter = false;
+              } else {
+                  // Same category (both Kina or both Matita), prioritize thickness
+                  const getEntityThickness = (e: Entity): number => {
+                      if (e.isBIM && e.bimWidth) return e.bimWidth;
+                      if (e.lineWidth) return e.lineWidth;
+                      return 1;
+                  };
+                  const thickA = getEntityThickness(ent);
+                  const thickB = getEntityThickness(bestEntity);
+                  
+                  if (Math.abs(thickA - thickB) > 0.01) {
+                      isBetter = thickA > thickB;
+                  } else {
+                      // Same thickness, choose the closer one
+                      isBetter = dist < minDistance;
+                  }
+              }
+              
+              if (isBetter) {
+                  bestEntity = ent;
+                  minDistance = dist;
+              }
           }
       }
     }
@@ -4316,6 +4355,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           }
         } else if (entity.type === 'image') {
           const img = entity as any;
+          if (img.mediaType && img.mediaType !== 'image') {
+              // It is handled by the multimedia HTML overlay
+              return;
+          }
           const imgElement = document.createElement('img');
           imgElement.src = img.src;
           imgElement.crossOrigin = 'anonymous';
@@ -4812,7 +4855,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       // --- BIM LIVE PREVIEWS (ENDS) ---
 
       // Draw current drawing preview
-      if (drawing && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle' || activeTool === 'Arc')) {
+      if (drawing && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle' || activeTool === 'Arc' || activeTool === 'Dimension')) {
         let isKnownAngle = false;
         let matchedAngle = 0;
         if (activeTool === 'Line') {
@@ -4866,7 +4909,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                     : (defaultLineStyle.mode === 'CAD' ? defaultLineStyle.lineWidth / view.zoom : 2 / view.zoom));
             ctx.setLineDash((defaultLineStyle.mode === 'CAD') ? [] : [5, 5]);
             ctx.beginPath();
-            if (activeTool === 'Line') {
+            if (activeTool === 'Line' || activeTool === 'Dimension') {
                 if (drawing.wheelLength !== undefined) {
                     const steps = 20;
                     const dx = drawing.current.x - drawing.start.x;
@@ -4971,7 +5014,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         };
 
         let label = '';
-        if (activeTool === 'Line') {
+        if (activeTool === 'Line' || activeTool === 'Dimension') {
             label = `L = ${formatPrecision(tooltipLength)}`;
         } else if (activeTool === 'Circle') {
             label = `R = ${formatPrecision(tooltipLength)}`;
@@ -7481,6 +7524,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
             const clickedText = getEntityAtPoint(rawPoint);
             if (clickedText && clickedText.type === 'text') {
+                setDragEntityId(null);
+                dragEntityIdRef.current = null;
                 setTextDialog({
                     id: clickedText.id,
                     point: clickedText.point,
@@ -7503,6 +7548,28 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     }
     lastClickTimeRef.current = now;
     lastClickPosRef.current = rawPoint;
+
+    if (activeTool === 'Testo') {
+        if (dragEntityId) {
+            // Drop/release the text entity we are moving
+            setDragEntityId(null);
+            dragEntityIdRef.current = null;
+            setActiveMoveSnapPoint(null);
+            setEntities(prev => { onCommitHistory?.(prev); return [...prev]; });
+            return;
+        }
+
+        const clickedText = getEntityAtPoint(rawPoint);
+        if (clickedText && clickedText.type === 'text') {
+            // Single-click on existing text -> start dragging!
+            setDragEntityId(clickedText.id);
+            dragEntityIdRef.current = clickedText.id;
+            lastMouseRef.current = rawPoint;
+            previousMouseRef.current = rawPoint;
+            setActiveMoveSnapPoint(null);
+            return;
+        }
+    }
 
     // --- TAVOLA GESTURE DRAG INTERCEPT ---
     let hitTavolaId: string | null = null;
@@ -8737,31 +8804,74 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         if (clickedEntity && clickedEntity.type === 'dimension') {
             setPositioningDimId(clickedEntity.id);
         } else {
-            const found = getLineAtPoint(rawPoint);
-            if (found && found.type === 'line') {
-                const existingDim = entities.find(e => 
-                    e.type === 'dimension' && 
-                    ((e.start.x === found.start.x && e.start.y === found.start.y && e.end.x === found.end.x && e.end.y === found.end.y) ||
-                     (e.start.x === found.end.x && e.start.y === found.end.y && e.end.x === found.start.x && e.end.y === found.start.y))
-                );
-
-                if (existingDim) {
-                    setPositioningDimId(existingDim.id);
+            if (isContinuousMode) {
+                if (!drawing) {
+                    setDrawing({
+                        start: snapped.point,
+                        current: snapped.point,
+                        snapType: snapped.type,
+                        startSnapped: snapped.snapped,
+                        refPoint: snapped.refPoint,
+                        constraintAxis: snapped.constraintAxis,
+                        refPoint2: snapped.refPoint2,
+                        constraintAxis2: snapped.constraintAxis2,
+                        hasDoubleSmart: snapped.hasDoubleSmart,
+                        activeConstraint: undefined,
+                        isVirtual: false
+                    });
                 } else {
+                    const snappedResult = getSnappedPoint(rawPoint, entities, activeTool, drawing);
+                    let finalEndPoint = snappedResult.point;
+
                     const newDim: Entity = {
                         id: Date.now().toString(),
                         type: 'dimension',
-                        color: found.color || defaultLineStyle.color,
+                        color: defaultLineStyle.color || '#3b82f6',
                         lineWidth: 1,
                         mode: 'ink',
-                        start: found.start,
-                        end: found.end,
+                        start: drawing.start,
+                        end: finalEndPoint,
                         offset: 0,
                         style: 1,
                         layer: 'Misure'
                     };
-                    setEntities(prev => [...prev, newDim]);
+                    setEntities(prev => {
+                        onCommitHistory?.(prev);
+                        return [...prev, newDim];
+                    });
                     setPositioningDimId(newDim.id);
+                    setDrawing(null);
+                }
+            } else {
+                const found = getLineAtPoint(rawPoint);
+                if (found && found.type === 'line') {
+                    const existingDim = entities.find(e => 
+                        e.type === 'dimension' && 
+                        ((e.start.x === found.start.x && e.start.y === found.start.y && e.end.x === found.end.x && e.end.y === found.end.y) ||
+                         (e.start.x === found.end.x && e.start.y === found.end.y && e.end.x === found.start.x && e.end.y === found.start.y))
+                    );
+
+                    if (existingDim) {
+                        setPositioningDimId(existingDim.id);
+                    } else {
+                        const newDim: Entity = {
+                            id: Date.now().toString(),
+                            type: 'dimension',
+                            color: found.color || defaultLineStyle.color,
+                            lineWidth: 1,
+                            mode: 'ink',
+                            start: found.start,
+                            end: found.end,
+                            offset: 0,
+                            style: 1,
+                            layer: 'Misure'
+                        };
+                        setEntities(prev => {
+                            onCommitHistory?.(prev);
+                            return [...prev, newDim];
+                        });
+                        setPositioningDimId(newDim.id);
+                    }
                 }
             }
         }
@@ -9224,7 +9334,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           // 1. Check for Snaps around raw mouse position
           let snapRes = getSnappedPoint(rawPoint, entities, activeTool, drawing);
           
-          const isOrthoTool = activeTool === 'Line' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra' || activeTool === 'BIM_Muro' || activeTool === 'Rectangle' || activeTool === 'Circle' || activeTool === 'Arc' || activeTool === 'Dimension' || activeTool === 'Parallel';
+          const isOrthoTool = activeTool === 'Line' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra' || activeTool === 'BIM_Muro' || activeTool === 'Rectangle' || activeTool === 'Circle' || activeTool === 'Arc' || activeTool === 'Parallel';
           const effectiveOrthoMode = isOrthoTool && (orthoMode ? !isShiftPressedRef.current : isShiftPressedRef.current);
 
           // 2. If we have a standard strong snap (Endpoint, Midpoint, etc.), it WINS over Ortho
@@ -9312,7 +9422,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 }
             }
         }
-    } else if ((activeTool === 'Move' || activeTool === 'Copy') && dragEntityIdRef.current) {
+    } else if ((activeTool === 'Move' || activeTool === 'Copy' || activeTool === 'Testo') && dragEntityIdRef.current) {
     const targetIds = dragEntityIds.length > 0 ? dragEntityIds : [dragEntityIdRef.current!];
     
     // 1. Nominal movement from cursor
@@ -9607,7 +9717,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         return;
     }
 
-    if ((activeTool === 'Move' || activeTool === 'Copy') && dragEntityIdRef.current) {
+    if ((activeTool === 'Move' || activeTool === 'Copy' || activeTool === 'Testo') && dragEntityIdRef.current) {
         if (activeTool === 'Copy' && isStickyCopyRef.current) {
             if (!dragHasMovedRef.current) {
                 isStickyCopyRef.current = false;
@@ -10340,8 +10450,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             });
         } else {
             // Inserisci nuovo testo
+            const newId = Date.now().toString();
             const newEntity: Entity = {
-                id: Date.now().toString(),
+                id: newId,
                 type: 'text',
                 color: textDialog.color,
                 lineWidth: defaultLineStyle.lineWidth,
@@ -10359,6 +10470,13 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 onCommitHistory?.(next);
                 return next;
             });
+            // Immediately start dragging the newly created text entity!
+            setDragEntityId(newId);
+            dragEntityIdRef.current = newId;
+            if (actualMousePosRef.current) {
+                lastMouseRef.current = actualMousePosRef.current;
+                previousMouseRef.current = actualMousePosRef.current;
+            }
         }
     }
     setTextDialog(null);
@@ -10482,7 +10600,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   return (
     <div 
       ref={containerRef} 
-      className="w-full h-full relative" 
+      className="w-full h-full relative overflow-hidden" 
       style={{ cursor: isSKeyPressedRef.current ? 'none' : hoveredTavolaPart ? 'pointer' : isMovingTecnigrafo ? 'grabbing' : hoverMoveTecnigrafo ? 'grab' : dragTavolaId ? 'grabbing' : hoverTavolaEdge ? 'grab' : activeTool === 'Testo' ? 'text' : activeTool === 'Eraser' ? 'none' : activeTool === 'Trim' ? `url("${scissorsSvg}") 16 16, crosshair` : defaultLineStyle.mode === 'CAD' ? 'crosshair' : defaultLineStyle.mode === 'ink' ? getKinaCursor(kinaLabel) : defaultLineStyle.mode === 'pencil' ? getPencilCursor(pencilLabel) : rulerStyle === 'crosshair' ? `url("${crosshairSvg}") 48 48, crosshair` : `url("${tecnigrafoSvg}") 20 108, crosshair` }}
       onWheel={handleWheel} 
       onMouseDown={handleMouseDown} 
@@ -10494,6 +10612,67 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       onMouseLeave={() => setHoveredTavolaPart(null)}
     >
       <canvas ref={canvasRef} />
+      
+      {/* Multimedia Overlay */}
+      <div 
+        className="absolute inset-0 pointer-events-none"
+        style={{ 
+          transform: `translate(${view.pan.x}px, ${view.pan.y}px) scale(${view.zoom})`,
+          transformOrigin: '0 0'
+        }}
+      >
+        {entities.map(ent => {
+          if (ent.type !== 'image') return null;
+
+          const layer = layers.find(l => l.id === ent.layer);
+          if (layer && !layer.visible) return null;
+
+          const isSelected = selectedEntityId === ent.id || dragEntityIds.includes(ent.id);
+          const isInteractive = activeTool === 'Select';
+
+          return (
+            <React.Fragment key={ent.id}>
+              {ent.mediaType && ent.mediaType !== 'image' && (
+                <div 
+                  style={{
+                    position: 'absolute',
+                    left: ent.point.x,
+                    top: ent.point.y,
+                    width: ent.width,
+                    height: ent.height,
+                    pointerEvents: isInteractive ? 'auto' : 'none',
+                    outline: isSelected ? `${2 / view.zoom}px dashed blue` : 'none',
+                    opacity: ent.opacity ?? 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: ent.mediaType === 'audio' ? 'rgba(255,255,255,0.5)' : 'transparent',
+                    borderRadius: ent.mediaType === 'audio' ? `${8/view.zoom}px` : '0',
+                    transform: ent.angle ? `rotate(${ent.angle}deg)` : 'none',
+                    transformOrigin: '50% 50%',
+                    userSelect: 'none'
+                  }}
+                >
+                   {ent.mediaType === 'video' && <video src={ent.src} controls className="w-full h-full object-contain bg-black/10" />}
+                   {ent.mediaType === 'audio' && <audio src={ent.src} controls className="w-full h-full" />}
+                   {ent.mediaType === 'pdf' && <PdfRenderer dataUri={ent.src} width={ent.width} height={ent.height} className="rounded-md" />}
+                </div>
+              )}
+              {isSelected && isInteractive && (!ent.mediaType || ent.mediaType === 'image' || ent.mediaType === 'pdf') && (
+                  <ImageEditorOverlay
+                      entity={ent as ImageEntity}
+                      zoom={view.zoom}
+                      pan={view.pan}
+                      onUpdate={(id, updates) => {
+                          setEntities(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
+                      }}
+                      isActive={true}
+                  />
+              )}
+            </React.Fragment>
+          );
+        })}
+      </div>
       {isZoomActive && (
         <div className="absolute top-4 left-4 bg-white/90 p-4 rounded shadow-lg border border-gray-200 pointer-events-none z-10">
           <h3 className="font-bold mb-2">Modalità Zoom/Pan (Tasto Z premuto)</h3>

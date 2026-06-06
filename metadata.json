@@ -1,5 +1,5 @@
 {
-  "name": "gecolacad 8.3 perfezionamento snap",
+  "name": "gecolacad 8.4 perfezionamento misure punto a punto",
   "description": "parallele funzionano perfettamnete e con il tasto shfr    diventano multiple....adesso proviamo a perfezionare automatismo de i tagli degli spigoli o allumanti",
   "requestFramePermissions": [
     "microphone"

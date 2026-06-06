@@ -343,6 +343,13 @@ export default function App() {
   }, [activeSidebarTab]);
 
   useEffect(() => {
+    if (selectedTool === 'Line' || selectedTool === 'Circle') {
+      setActiveSidebarTab('penne');
+      setShowProperties(true);
+    }
+  }, [selectedTool]);
+
+  useEffect(() => {
     const requiredLayers = [
       { id: "BIM_Muri", name: "BIM_Muri", visible: true, frozen: false },
       { id: "BIM_Porte", name: "BIM_Porte", visible: true, frozen: false },
@@ -463,8 +470,152 @@ export default function App() {
     } else if (extension === 'dwg') {
       setDwgFileName(file.name);
       setShowDwgModal(true);
+    } else if (
+      file.type.startsWith('image/') || 
+      file.type.startsWith('video/') || 
+      file.type.startsWith('audio/') || 
+      file.type === 'application/pdf' ||
+      ['png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4', 'webm', 'ogg', 'mp3', 'wav', 'pdf'].includes(extension || '')
+    ) {
+      let mediaType: 'image' | 'video' | 'audio' | 'pdf' = 'image';
+      if (file.type.startsWith('video/') || ['mp4', 'webm'].includes(extension || '')) mediaType = 'video';
+      else if (file.type.startsWith('audio/') || ['mp3', 'wav', 'ogg'].includes(extension || '')) mediaType = 'audio';
+      else if (file.type === 'application/pdf' || extension === 'pdf') mediaType = 'pdf';
+
+      if (mediaType === 'pdf') {
+         // Use pdf To image parser
+         import("./utils/pdfToImage").then(async ({ renderPdfToImage }) => {
+            const result = await renderPdfToImage(file);
+            if (result && result.isSinglePage) {
+               // Treat single page PDF as Image
+               mediaType = 'image';
+               const img = new Image();
+               img.onload = () => {
+                 const newEntity: any = {
+                   id: Date.now().toString(),
+                   type: 'image',
+                   point: { x: 0, y: 0 },
+                   width: img.width,
+                   height: img.height,
+                   src: result.src,
+                   mediaType,
+                   name: file.name,
+                   layer: activeLayerId,
+                   color: '#000000',
+                   lineWidth: 1,
+                   dashed: false,
+                   mode: 'CAD'
+                 };
+                 const maxD = 600;
+                 if (img.width > maxD || img.height > maxD) {
+                    const scale = maxD / Math.max(img.width, img.height);
+                    newEntity.width = img.width * scale;
+                    newEntity.height = img.height * scale;
+                 }
+                 updateEntitiesWithHistory(prev => [...prev, newEntity]);
+                 setShortcutToast(`${file.name} (1 pagina) importato come immagine!`);
+                 setTimeout(() => setShortcutToast(null), 3000);
+               };
+               img.src = result.src;
+            } else {
+               // Multipage or failed to render: fallback to PDF reader or use DataURL
+               const reader = new FileReader();
+               reader.onload = (e) => {
+                 const src = e.target?.result as string;
+                 const newEntity: any = {
+                   id: Date.now().toString(),
+                   type: 'image',
+                   point: { x: 0, y: 0 },
+                   width: 500,
+                   height: 700,
+                   src,
+                   mediaType: 'pdf',
+                   name: file.name,
+                   layer: activeLayerId,
+                   color: '#000000',
+                   lineWidth: 1,
+                   dashed: false,
+                   mode: 'CAD'
+                 };
+                 updateEntitiesWithHistory(prev => [...prev, newEntity]);
+                 setShortcutToast(`${file.name} importato!`);
+                 setTimeout(() => setShortcutToast(null), 3000);
+               };
+               reader.readAsDataURL(file);
+            }
+         }).catch(err => {
+            console.error("Failed to load pdfToImage utility", err);
+         });
+         event.target.value = '';
+         return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const src = e.target?.result as string;
+        
+        let width = 200;
+        let height = 200;
+        
+        if (mediaType === 'image') {
+           const img = new Image();
+           img.onload = () => {
+             const newEntity: any = {
+               id: Date.now().toString(),
+               type: 'image',
+               point: { x: 0, y: 0 },
+               width: img.width,
+               height: img.height,
+               src,
+               mediaType,
+               name: file.name,
+               layer: activeLayerId,
+               color: '#000000',
+               lineWidth: 1,
+               dashed: false,
+               mode: 'CAD'
+             };
+             // Calculate a reasonable scaled size
+             const maxD = 600;
+             if (img.width > maxD || img.height > maxD) {
+                const scale = maxD / Math.max(img.width, img.height);
+                newEntity.width = img.width * scale;
+                newEntity.height = img.height * scale;
+             }
+             updateEntitiesWithHistory(prev => [...prev, newEntity]);
+             setShortcutToast(`${file.name} importato!`);
+             setTimeout(() => setShortcutToast(null), 3000);
+           };
+           img.src = src;
+        } else {
+           // For PDF, Video, Audio
+           if (mediaType === 'pdf') { width = 500; height = 700; }
+           else if (mediaType === 'video') { width = 640; height = 360; }
+           else if (mediaType === 'audio') { width = 300; height = 50; }
+           
+           const newEntity: any = {
+             id: Date.now().toString(),
+             type: 'image',
+             point: { x: 0, y: 0 },
+             width,
+             height,
+             src,
+             mediaType,
+             name: file.name,
+             layer: activeLayerId,
+             color: '#000000',
+             lineWidth: 1,
+             dashed: false,
+             mode: 'CAD'
+           };
+           updateEntitiesWithHistory(prev => [...prev, newEntity]);
+           setShortcutToast(`${file.name} importato!`);
+           setTimeout(() => setShortcutToast(null), 3000);
+        }
+      };
+      reader.readAsDataURL(file);
     } else {
-      alert("Formato non supportato. Selezionare un file .dxf o .dwg.");
+      alert("Formato non supportato. Selezionare .dxf, .dwg, Immagini, Video, Audio o PDF.");
     }
     
     // reset input so the same file can be imported again
@@ -817,7 +968,7 @@ export default function App() {
     // If not in a drawing tool, switch to Line
     if (!["Line", "Circle", "Arc", "Hatch", "Dimension"].includes(selectedTool || '')) {
       setSelectedCategory("Disegno");
-      setSelectedTool("Line");
+      handleToolClick("Line");
       setShortcutToast("Strumento: Linea");
       setTimeout(() => setShortcutToast(null), 1500);
     }
@@ -860,7 +1011,7 @@ export default function App() {
     } else {
       setSelectedTool(tool);
       // Ensure the correct sidebar tab opens for specific tools as requested
-      if (tool === 'Hatch') {
+      if (tool === 'Hatch' || tool === 'Line' || tool === 'Circle') {
         setActiveSidebarTab('penne');
         setShowProperties(true);
       } else if (tool === 'Testo') {
@@ -1612,6 +1763,7 @@ export default function App() {
                 setDefaultLineStyle({ mode: 'CAD', color: '#000000', lineWidth: 1, dashed: false });
                 setActiveSidebarTab('penne');
                 setShowProperties(true);
+                handleToolClick("Line");
               }}
               onMouseEnter={() => handleGuideHover("Penne")}
               className={`px-3 py-1 rounded text-[10px] font-bold ${defaultLineStyle.mode === 'CAD' ? 'bg-white shadow-sm font-extrabold text-neutral-900' : 'text-neutral-500 hover:text-neutral-700'}`}
@@ -1628,6 +1780,7 @@ export default function App() {
                     setDefaultLineStyle({ mode: 'ink', color: '#000000', lineWidth: w, dashed: false });
                     setActiveSidebarTab('penne');
                     setShowProperties(true);
+                    handleToolClick("Line");
                   }}
                   className={`w-7 h-6 rounded flex items-center justify-center text-[9px] font-black transition-all ${defaultLineStyle.mode === 'ink' && defaultLineStyle.lineWidth === w ? 'bg-indigo-600 text-white shadow-md scale-110' : 'bg-neutral-200 text-neutral-600 hover:bg-neutral-300'}`}
                 >
@@ -1647,6 +1800,7 @@ export default function App() {
                     setDefaultLineStyle({ mode: 'pencil', color, lineWidth: width, dashed: false });
                     setActiveSidebarTab('penne');
                     setShowProperties(true);
+                    handleToolClick("Line");
                   }}
                   className={`px-1.5 h-6 rounded flex items-center justify-center text-[9px] font-black transition-all ${defaultLineStyle.mode === 'pencil' && (m === '2H' ? defaultLineStyle.color === '#bbbbbb' : (m === 'HB' ? defaultLineStyle.color === '#444444' : defaultLineStyle.color === '#111111')) ? 'bg-amber-500 text-white shadow-md scale-110' : 'bg-neutral-200 text-neutral-600 hover:bg-neutral-300'}`}
                 >
@@ -3262,9 +3416,10 @@ export default function App() {
                               {[0.25, 0.5, 1, 2].map(w => (
                                 <button
                                   key={w}
-                                  onClick={() =>
-                                    setDefaultLineStyle({ mode: "CAD", color: '#000000', lineWidth: w, dashed: false })
-                                  }
+                                  onClick={() => {
+                                    setDefaultLineStyle({ mode: "CAD", color: '#000000', lineWidth: w, dashed: false });
+                                    handleToolClick("Line");
+                                  }}
                                   className={`p-2 rounded-lg border transition-all flex flex-col items-center justify-center gap-1 ${defaultLineStyle.mode === "CAD" && defaultLineStyle.lineWidth === w ? "bg-emerald-900 border-emerald-700 ring-4 ring-emerald-200 shadow-md transform -translate-y-0.5" : "bg-neutral-50 border-neutral-200 hover:bg-white"}`}
                                 >
                                   <span className={`text-[10px] font-black ${defaultLineStyle.mode === "CAD" && defaultLineStyle.lineWidth === w ? "text-white" : "text-neutral-500"}`}>
@@ -3284,9 +3439,10 @@ export default function App() {
                               {[0.25, 0.5, 1, 2].map(w => (
                                 <button
                                   key={w}
-                                  onClick={() =>
-                                    setDefaultLineStyle({ mode: "ink", color: '#000000', lineWidth: w, dashed: false })
-                                  }
+                                  onClick={() => {
+                                    setDefaultLineStyle({ mode: "ink", color: '#000000', lineWidth: w, dashed: false });
+                                    handleToolClick("Line");
+                                  }}
                                   className={`p-2 rounded-lg border transition-all flex flex-col items-center justify-center gap-1 ${defaultLineStyle.mode === "ink" && defaultLineStyle.lineWidth === w ? "bg-indigo-900 border-neutral-700 ring-4 ring-neutral-200 shadow-md transform -translate-y-0.5" : "bg-neutral-50 border-neutral-200 hover:bg-white"}`}
                                 >
                                   <span className={`text-[10px] font-black ${defaultLineStyle.mode === "ink" && defaultLineStyle.lineWidth === w ? "text-white" : "text-neutral-500"}`}>
@@ -3310,9 +3466,10 @@ export default function App() {
                                 return (
                                   <button
                                     key={m}
-                                    onClick={() =>
-                                      setDefaultLineStyle({ mode: "pencil", color, lineWidth: width, dashed: false })
-                                    }
+                                    onClick={() => {
+                                      setDefaultLineStyle({ mode: "pencil", color, lineWidth: width, dashed: false });
+                                      handleToolClick("Line");
+                                    }}
                                     className={`p-2.5 rounded-lg border transition-all flex flex-col items-center justify-center gap-1 ${isSelected ? "bg-amber-50 border-amber-300 ring-4 ring-amber-100 shadow-md transform -translate-y-0.5" : "bg-neutral-50 border-neutral-200 hover:bg-white"}`}
                                   >
                                     <span className={`text-[10px] font-black ${isSelected ? "text-amber-800" : "text-neutral-500"}`}>{m}</span>
@@ -3331,7 +3488,10 @@ export default function App() {
                               {['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#64748b'].map((c) => (
                                 <button
                                   key={c}
-                                  onClick={() => setDefaultLineStyle(prev => ({ ...prev, color: c }))}
+                                  onClick={() => {
+                                    setDefaultLineStyle(prev => ({ ...prev, color: c }));
+                                    handleToolClick("Line");
+                                  }}
                                   className={`w-full aspect-square rounded-full flex items-center justify-center transition-transform ${defaultLineStyle.color === c ? "ring-2 ring-offset-2 ring-indigo-500 scale-110 shadow-md" : "hover:scale-105 border border-black/10"}`}
                                   style={{ backgroundColor: c }}
                                 >
@@ -3676,11 +3836,11 @@ export default function App() {
         />
       </footer>
 
-      {/* Hidden file input for DXF/DWG uploader */}
+      {/* Hidden file input for DXF/DWG/Images/Video/Audio/PDF uploader */}
       <input
         ref={importInputRef}
         type="file"
-        accept=".dxf,.dwg"
+        accept=".dxf,.dwg,image/*,video/*,audio/*,.pdf"
         onChange={handleImportFile}
         className="hidden"
         style={{ display: 'none' }}

@@ -108,6 +108,7 @@ export interface ImageEntity extends CADEntity {
   width: number;
   height: number;
   src: string;
+  mediaType?: 'image' | 'video' | 'audio' | 'pdf';
   name?: string;
   angle?: number;
   aspectRatio?: number;
