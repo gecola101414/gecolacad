@@ -111,18 +111,7 @@ const getWallCorners = (l: LineEntity, bimWalls: LineEntity[]): Point[] => {
   let endPlus = { x: l.end.x + nx * thickness / 2, y: l.end.y + ny * thickness / 2 };
   let endMinus = { x: l.end.x - nx * thickness / 2, y: l.end.y - ny * thickness / 2 };
 
-  const startConns = bimWalls.filter(e => {
-    if (e.id === l.id) return false;
-    const startX = e.start.x;
-    const startY = e.start.y;
-    const endX = e.end.x;
-    const endY = e.end.y;
-    const minX = (startX < endX ? startX : endX) - 15;
-    const maxX = (startX > endX ? startX : endX) + 15;
-    const minY = (startY < endY ? startY : endY) - 15;
-    const maxY = (startY > endY ? startY : endY) + 15;
-    return l.start.x >= minX && l.start.x <= maxX && l.start.y >= minY && l.start.y <= maxY;
-  });
+  const startConns = bimWalls.filter(e => e.id !== l.id);
   let bestStartConn: LineEntity | null = null;
   let isStartCorner = false;
   let bestStartDist = 15.0;
@@ -212,18 +201,7 @@ const getWallCorners = (l: LineEntity, bimWalls: LineEntity[]): Point[] => {
       }
   }
 
-  const endConns = bimWalls.filter(e => {
-    if (e.id === l.id) return false;
-    const startX = e.start.x;
-    const startY = e.start.y;
-    const endX = e.end.x;
-    const endY = e.end.y;
-    const minX = (startX < endX ? startX : endX) - 15;
-    const maxX = (startX > endX ? startX : endX) + 15;
-    const minY = (startY < endY ? startY : endY) - 15;
-    const maxY = (startY > endY ? startY : endY) + 15;
-    return l.end.x >= minX && l.end.x <= maxX && l.end.y >= minY && l.end.y <= maxY;
-  });
+  const endConns = bimWalls.filter(e => e.id !== l.id);
   let bestEndConn: LineEntity | null = null;
   let isEndCorner = false;
   let bestEndDist = 15.0;
@@ -2086,7 +2064,7 @@ interface CADCanvasProps {
   setEntities: React.Dispatch<React.SetStateAction<Entity[]>>;
   setEntitiesSilent?: React.Dispatch<React.SetStateAction<Entity[]>>;
   onCommitHistory?: (entities: Entity[]) => void;
-  onSelect: (id: string | null) => void;
+  onSelect: (id: string | null, entity?: Entity) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
   activeLayerId: string;
   layers: Layer[];
@@ -3034,8 +3012,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     });
 
     // Pre-calculate wall connections for snapping
-    const allWallsFull = entities.filter(e => e.type === 'line' && e.isBIM && e.bimType === 'wall') as LineEntity[];
-    const snapSearchRadius = Math.max(30, 25 / view.zoom);
+    const allWallsFull = entities.filter(e => e.type === 'line' && e.isBIM && e.bimType === 'wall') as LineEntity[];    const snapSearchRadius = 150 / view.zoom;
     const nearEntities = visibleEntities.filter(ent => {
         if (ent.type === 'line' || ent.type === 'dimension') {
             const minX = Math.min(ent.start.x, ent.end.x) - snapSearchRadius;
@@ -3116,31 +3093,16 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     });
 
     // 5. Add intersection points for lines (Optimized with spatial culling)
-    const intersectionThreshold = Math.max(25, 20 / view.zoom);
-    let nearEntitiesForIntersections = visibleEntities.filter(ent => {
+    const intersectionThreshold = 100 / view.zoom;
+    const nearEntitiesForIntersections = visibleEntities.filter(ent => {
       if (ent.type !== 'line') return false;
-      const minX = ent.start.x < ent.end.x ? ent.start.x : ent.end.x;
-      const maxX = ent.start.x > ent.end.x ? ent.start.x : ent.end.x;
-      const minY = ent.start.y < ent.end.y ? ent.start.y : ent.end.y;
-      const maxY = ent.start.y > ent.end.y ? ent.start.y : ent.end.y;
+      const minX = Math.min(ent.start.x, ent.end.x);
+      const maxX = Math.max(ent.start.x, ent.end.x);
+      const minY = Math.min(ent.start.y, ent.end.y);
+      const maxY = Math.max(ent.start.y, ent.end.y);
       return !(maxX < point.x - intersectionThreshold || minX > point.x + intersectionThreshold || 
                maxY < point.y - intersectionThreshold || minY > point.y + intersectionThreshold);
     }) as LineEntity[];
-
-    // Guard against performance explosions by capping potential intersection candidates
-    // sorted by proximity to the pointer
-    if (nearEntitiesForIntersections.length > 25) {
-      nearEntitiesForIntersections = nearEntitiesForIntersections
-        .map(ent => {
-          const midX = (ent.start.x + ent.end.x) / 2;
-          const midY = (ent.start.y + ent.end.y) / 2;
-          const distSq = (midX - point.x) ** 2 + (midY - point.y) ** 2;
-          return { ent, distSq };
-        })
-        .sort((a, b) => a.distSq - b.distSq)
-        .slice(0, 25)
-        .map(item => item.ent);
-    }
 
     for (let i = 0; i < nearEntitiesForIntersections.length; i++) {
         for (let j = i + 1; j < nearEntitiesForIntersections.length; j++) {
@@ -3190,41 +3152,33 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         });
 
         // 2. Line Extension Snaps (Specific to inclined lines or existing orientations)
-        // Optimization: Pre-filter lines using Manhattan distance to avoid slow trig calculations on far-away entities
-        const extensionDistanceLimit = Math.max(300, 250 / view.zoom);
-        const nearEntitiesForExtensions = visibleEntities.filter(ent => {
-            if (ent.type !== 'line') return false;
-            const line = ent as LineEntity;
-            const midX = (line.start.x + line.end.x) / 2;
-            const midY = (line.start.y + line.end.y) / 2;
-            const approxDist = Math.abs(point.x - midX) + Math.abs(point.y - midY);
-            return approxDist < extensionDistanceLimit;
-        }) as LineEntity[];
+        visibleEntities.forEach(entity => {
+            if (entity.type === 'line') {
+                const line = entity as LineEntity;
+                const dx = line.end.x - line.start.x;
+                const dy = line.end.y - line.start.y;
+                const L = Math.sqrt(dx * dx + dy * dy);
+                if (L < 0.1) return;
 
-        nearEntitiesForExtensions.forEach(line => {
-            const dx = line.end.x - line.start.x;
-            const dy = line.end.y - line.start.y;
-            const L = Math.sqrt(dx * dx + dy * dy);
-            if (L < 0.1) return;
+                const nx = -dy / L;
+                const ny = dx / L;
+                
+                const dist = (point.x - line.start.x) * nx + (point.y - line.start.y) * ny;
+                if (Math.abs(dist) < threshold) {
+                    const snapPt = { x: point.x - nx * dist, y: point.y - ny * dist };
+                    const dStart = Math.sqrt((snapPt.x - line.start.x) ** 2 + (snapPt.y - line.end.x) ** 2);
+                    const dEnd = Math.sqrt((snapPt.x - line.end.x) ** 2 + (snapPt.y - line.end.y) ** 2);
+                    const refPoint = dStart < dEnd ? line.start : line.end;
 
-            const nx = -dy / L;
-            const ny = dx / L;
-            
-            const dist = (point.x - line.start.x) * nx + (point.y - line.start.y) * ny;
-            if (Math.abs(dist) < threshold) {
-                const snapPt = { x: point.x - nx * dist, y: point.y - ny * dist };
-                const dStart = Math.sqrt((snapPt.x - line.start.x) ** 2 + (snapPt.y - line.start.y) ** 2);
-                const dEnd = Math.sqrt((snapPt.x - line.end.x) ** 2 + (snapPt.y - line.end.y) ** 2);
-                const refPoint = dStart < dEnd ? line.start : line.end;
-
-                const ang = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 180;
-                if (Math.abs(ang - 0) > 0.5 && Math.abs(ang - 90) > 0.5 && Math.abs(ang - 180) > 0.5) {
-                    snaps.push({
-                        point: snapPt,
-                        type: 'smart',
-                        refPoint: refPoint,
-                        refEntityId: line.id
-                    });
+                    const ang = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 180;
+                    if (Math.abs(ang - 0) > 0.5 && Math.abs(ang - 90) > 0.5 && Math.abs(ang - 180) > 0.5) {
+                        snaps.push({
+                            point: snapPt,
+                            type: 'smart',
+                            refPoint: refPoint,
+                            refEntityId: line.id
+                        });
+                    }
                 }
             }
         });
@@ -3911,19 +3865,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       // --- Performance Optimization: Pre-calculate Data for the loop ---
       const layerMap = new Map<string, Layer>(layers.map(l => [l.id, l]));
       const bimWalls = entities.filter(e => e.type === 'line' && e.isBIM && e.bimType === 'wall') as LineEntity[];
-      const bimWallsWithBounds = bimWalls.map(e => {
-          const startX = e.start.x;
-          const startY = e.start.y;
-          const endX = e.end.x;
-          const endY = e.end.y;
-          return {
-              wall: e,
-              minX: (startX < endX ? startX : endX) - 15,
-              maxX: (startX > endX ? startX : endX) + 15,
-              minY: (startY < endY ? startY : endY) - 15,
-              maxY: (startY > endY ? startY : endY) + 15
-          };
-      });
       
       // Viewport bounds in canvas space
       const vOffsetX = 50 / view.zoom; // padding
@@ -4058,10 +3999,15 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                   let hasStartConn = false;
                   let startPlus = { x: l.start.x + nx * thickness / 2, y: l.start.y + ny * thickness / 2 };
                   let startMinus = { x: l.start.x - nx * thickness / 2, y: l.start.y - ny * thickness / 2 };
-                  const startConns = bimWallsWithBounds.filter(b => {
-                      if (b.wall.id === l.id) return false;
-                      return l.start.x >= b.minX && l.start.x <= b.maxX && l.start.y >= b.minY && l.start.y <= b.maxY;
-                  }).map(b => b.wall);
+                  const startConns = bimWalls.filter(e => {
+                      if (e.id === l.id) return false;
+                      // Proximity check: other wall must be near l.start
+                      const minXO = Math.min(e.start.x, e.end.x) - 15;
+                      const maxXO = Math.max(e.start.x, e.end.x) + 15;
+                      const minYO = Math.min(e.start.y, e.end.y) - 15;
+                      const maxYO = Math.max(e.start.y, e.end.y) + 15;
+                      return l.start.x >= minXO && l.start.x <= maxXO && l.start.y >= minYO && l.start.y <= maxYO;
+                  });
                   let bestStartConn: LineEntity | null = null;
                   let isStartCorner = false;
                   let bestStartDist = 15.0; // wider tolerance for snaps (15 cm)
@@ -4173,10 +4119,15 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                   let endPlus = { x: l.end.x + nx * thickness / 2, y: l.end.y + ny * thickness / 2 };
                   let endMinus = { x: l.end.x - nx * thickness / 2, y: l.end.y - ny * thickness / 2 };
 
-                  const endConns = bimWallsWithBounds.filter(b => {
-                      if (b.wall.id === l.id) return false;
-                      return l.end.x >= b.minX && l.end.x <= b.maxX && l.end.y >= b.minY && l.end.y <= b.maxY;
-                  }).map(b => b.wall);
+                  const endConns = bimWalls.filter(e => {
+                      if (e.id === l.id) return false;
+                      // Proximity check: other wall must be near l.end
+                      const minXO = Math.min(e.start.x, e.end.x) - 15;
+                      const maxXO = Math.max(e.start.x, e.end.x) + 15;
+                      const minYO = Math.min(e.start.y, e.end.y) - 15;
+                      const maxYO = Math.max(e.start.y, e.end.y) + 15;
+                      return l.end.x >= minXO && l.end.x <= maxXO && l.end.y >= minYO && l.end.y <= maxYO;
+                  });
                   let bestEndConn: LineEntity | null = null;
                   let isEndCorner = false;
                   let bestEndDist = 15.0; // wider tolerance for snaps (15 cm)
@@ -8301,7 +8252,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 onCommitHistory?.(next);
                 return next;
             });
-            onSelect(newRoom.id);
+            onSelect(newRoom.id, newRoom);
         }
     } else if (activeTool === 'BIM_DisegnaStanza') {
         const clickedPoint = snapped.point;
@@ -9819,7 +9770,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     
     // If we're freehand drawing, commit the stroke on mouseup
     if (activeTool === 'Line' && (defaultLineStyle.mode === 'ink' || defaultLineStyle.mode === 'pencil') && !orthoMode && drawing && drawing.isFreehand && drawing.freehandPoints && drawing.freehandPoints.length > 1) {
-        const pts = simplifyPolygon(drawing.freehandPoints, 0.2);
+        const pts = drawing.freehandPoints;
         const newEntity: Entity = {
             id: Date.now().toString(),
             type: 'line',

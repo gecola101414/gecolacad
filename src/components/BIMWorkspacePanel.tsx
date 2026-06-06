@@ -705,139 +705,54 @@ export function BIMWorkspacePanel({
         </p>
       </div>
 
-      {/* Scansione Automatica Solver */}
-      <div className="bg-cyan-50 shadow-sm border border-cyan-200 p-4 rounded-xl space-y-2.5">
+      {/* Rilevamento e Tracciamento Locali */}
+      <div className="bg-gradient-to-br from-slate-50 to-cyan-50 border border-cyan-200/80 p-4 rounded-xl space-y-3 shadow-sm">
         <span className="text-[10px] font-black uppercase tracking-wider text-cyan-800 block font-mono">
-          Scansione Automatica ⚡
+          Rilevamento & Tracciamento Vani 📐
         </span>
-        <button
-          onClick={() => cadCanvasRef?.current?.autoScanBIM()}
-          className="w-full bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-700 hover:to-cyan-600 text-white font-bold py-2 px-4 rounded-lg text-xs flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer"
-        >
-          <Sparkles size={14} className="animate-pulse" />
-          Scansione Geometrica Planimetria 🤖
-        </button>
-      </div>
-
-      {/* BIM SOTTOMENU PORTAL */}
-      <div className="space-y-2.5">
-        <span className="text-[10.5px] font-black uppercase tracking-wider text-slate-400 block border-b border-slate-100 pb-1 font-mono">
-          🗂️ Sottomenu BIM di Struttura
-        </span>
-
-        <div className="grid grid-cols-2 gap-2">
-          {/* MURI SUBMENU */}
-          <button
-            onClick={onOpenMuri}
-            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-cyan-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
-          >
-            <Building className="text-slate-600 group-hover:text-cyan-600 transition duration-300 mb-1" size={20} />
-            <span className="text-[11px] font-black text-slate-800">🧱 Muri BIM</span>
-            <span className="text-[8px] opacity-60 font-mono text-slate-500">spessore/altezza</span>
-            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-cyan-500"></span>
-          </button>
-
-          {/* PORTE SUBMENU */}
-          <button
-            onClick={onOpenPorte}
-            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-rose-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
-          >
-            <div className="w-5.5 h-5.5 flex items-center justify-center border border-dashed border-rose-500 rounded text-rose-500 font-black text-[10px] mb-1 group-hover:bg-rose-50 transition duration-300">D</div>
-            <span className="text-[11px] font-black text-slate-800">🚪 Porte BIM</span>
-            <span className="text-[8px] opacity-60 font-mono text-slate-500">larghezz./swing</span>
-            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-rose-500"></span>
-          </button>
-
-          {/* FINESTRE SUBMENU */}
-          <button
-            onClick={onOpenFinestre}
-            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-blue-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
-          >
-            <Maximize2 className="text-slate-600 group-hover:text-blue-600 transition mb-1" size={18} />
-            <span className="text-[11px] font-black text-slate-800">🪟 Finestre</span>
-            <span className="text-[8px] opacity-60 font-mono text-slate-500 font-semibold text-slate-400">luce/aerazione</span>
-            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-          </button>
-
-          {/* ARREDI SUBMENU */}
-          <button
-            onClick={onOpenArredi}
-            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-indigo-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
-          >
-            <Home className="text-slate-600 group-hover:text-indigo-600 transition mb-1" size={18} />
-            <span className="text-[11px] font-black text-slate-800">🛋️ Arredi</span>
-            <span className="text-[8px] opacity-60 font-mono text-slate-500">mobili di pianta</span>
-            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
-          </button>
-
-          {/* SANITARI SUBMENU */}
-          <button
-            onClick={onOpenSanitari}
-            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-emerald-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
-          >
-            <Droplet className="text-slate-600 group-hover:text-emerald-600 transition mb-1" size={18} />
-            <span className="text-[11px] font-black text-slate-800">🚿 Sanitari</span>
-            <span className="text-[8px] opacity-60 font-mono text-slate-500">disegno bagno</span>
-            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-          </button>
-
-          {/* IMPIANTI ELETTRICI SUBMENU */}
-          <button
-            onClick={onOpenElettrico}
-            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-amber-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
-          >
-            <Zap className="text-slate-600 group-hover:text-amber-500 transition mb-1" size={18} />
-            <span className="text-[11px] font-black text-slate-800">⚡ Elettrico</span>
-            <span className="text-[8px] opacity-60 font-mono text-slate-500">prese, luci, QE</span>
-            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-          </button>
-
-          {/* IMPIANTI IDRAULICI SUBMENU */}
-          <button
-            onClick={onOpenIdraulico}
-            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-blue-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
-          >
-            <Droplet className="text-slate-600 group-hover:text-blue-500 transition mb-1" size={18} />
-            <span className="text-[11px] font-black text-slate-800">🚰 Idraulico</span>
-            <span className="text-[8px] opacity-60 font-mono text-slate-500">tubi, caldaie</span>
-            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-          </button>
-
-          {/* FINITURE SUBMENU */}
-          <button
-            onClick={onOpenFiniture}
-            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-rose-400 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
-          >
-            <Grid className="text-slate-600 group-hover:text-rose-500 transition mb-1" size={18} />
-            <span className="text-[11px] font-black text-slate-800">🎨 Finiture</span>
-            <span className="text-[8px] opacity-60 font-mono text-slate-500 font-semibold">pavimentazione</span>
-            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-rose-400"></span>
-          </button>
-        </div>
-
-        {/* AREA TRACING GENERAL TOOLS */}
-        <div className="grid grid-cols-2 gap-2 mt-2">
+        <div className="space-y-2">
+          {/* Button 1: Rilievo locale con punto interno */}
           <button
             onClick={() => setSelectedTool("BIM_RilevaStanza")}
-            className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border text-[10.5px] font-bold tracking-tight transition duration-150 cursor-pointer ${
+            className={`w-full flex items-start gap-3 p-3 rounded-lg border text-left transition duration-150 cursor-pointer ${
               selectedTool === "BIM_RilevaStanza"
-                ? "bg-cyan-50 border-cyan-500 text-cyan-950 font-black shadow-inner"
-                : "bg-white border-slate-250 text-slate-700 hover:bg-slate-100"
+                ? "bg-cyan-500 border-cyan-600 text-white shadow-md font-medium"
+                : "bg-white border-slate-200 text-slate-800 hover:border-cyan-300 hover:bg-slate-50/50"
             }`}
           >
-            <Sparkles size={13} className="text-cyan-600" />
-            Rileva Locale
+            <div className={`mt-0.5 p-1 rounded-md ${selectedTool === 'BIM_RilevaStanza' ? 'bg-cyan-600/50 text-white' : 'bg-cyan-50 text-cyan-600 border border-cyan-100'}`}>
+              <Sparkles size={16} className={selectedTool === 'BIM_RilevaStanza' ? 'animate-pulse' : ''} />
+            </div>
+            <div className="flex-1">
+              <div className={`text-xs font-bold leading-tight ${selectedTool === 'BIM_RilevaStanza' ? 'text-white' : 'text-slate-900'}`}>
+                Rilievo locale con punto interno
+              </div>
+              <div className={`text-[10px] mt-0.5 leading-tight ${selectedTool === 'BIM_RilevaStanza' ? 'text-cyan-100' : 'text-slate-500 font-medium'}`}>
+                Rileva le pareti della stanza cliccando in un punto interno
+              </div>
+            </div>
           </button>
+
+          {/* Button 2: Rilievo locale per punti esterni */}
           <button
             onClick={() => setSelectedTool("BIM_DisegnaStanza")}
-            className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border text-[10.5px] font-bold tracking-tight transition duration-150 cursor-pointer ${
+            className={`w-full flex items-start gap-3 p-3 rounded-lg border text-left transition duration-150 cursor-pointer ${
               selectedTool === "BIM_DisegnaStanza"
-                ? "bg-emerald-50 border-emerald-500 text-emerald-950 font-black shadow-inner"
-                : "bg-white border-slate-250 text-slate-700 hover:bg-slate-100"
+                ? "bg-indigo-550 border-indigo-650 text-white shadow-md font-medium"
+                : "bg-white border-slate-200 text-slate-800 hover:border-indigo-300 hover:bg-slate-50/50"
             }`}
           >
-            <Square size={13} className="text-emerald-600" />
-            Traccia Locale
+            <div className={`mt-0.5 p-1 rounded-md ${selectedTool === 'BIM_DisegnaStanza' ? 'bg-indigo-600/50 text-white' : 'bg-indigo-50 text-indigo-600 border border-indigo-100'}`}>
+              <Square size={16} />
+            </div>
+            <div className="flex-1">
+              <div className={`text-xs font-bold leading-tight ${selectedTool === 'BIM_DisegnaStanza' ? 'text-white' : 'text-slate-900'}`}>
+                Rilievo locale per punti esterni
+              </div>
+              <div className={`text-[10px] mt-0.5 leading-tight ${selectedTool === 'BIM_DisegnaStanza' ? 'text-indigo-100' : 'text-slate-500 font-medium'}`}>
+                Definisci il locale cliccando manualmente sui vertici esterni
+              </div>
+            </div>
           </button>
         </div>
       </div>

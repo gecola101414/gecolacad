@@ -1764,8 +1764,8 @@ export default function App() {
                 : "hover:bg-neutral-200"
             }`}
           >
-            <Lock size={12} className={isContinuousMode ? "text-amber-600" : ""} />
-            <span>Bloc Fn</span>
+            <PenTool size={12} className={isContinuousMode ? "text-amber-600" : ""} />
+            <span>Polilinea</span>
           </button>
           <div className="flex gap-1 rounded bg-neutral-200 p-0.5">
             <button
@@ -1887,13 +1887,15 @@ export default function App() {
             setEntitiesSilent={updateEntitiesSilent}
             defaultTextStyle={defaultTextStyle}
             onCommitHistory={commitToHistory}
-            onSelect={(id) => {
+            onSelect={(id, entity) => {
               setSelectedId(id);
               if (id) {
                 setShowProperties(true);
-                const ent = entities.find(e => e.id === id);
+                const ent = entity || entities.find(e => e.id === id);
                 if (ent && ent.type === 'text') {
                   setActiveSidebarTab('testo');
+                } else if (ent && ent.isBIM) {
+                  setActiveSidebarTab('bim');
                 } else {
                   setActiveSidebarTab('penne');
                 }
