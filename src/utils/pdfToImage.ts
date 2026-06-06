@@ -30,6 +30,7 @@ export async function renderPdfToImage(file: File): Promise<{ src: string; isSin
       viewport: viewport
     };
 
+    // @ts-ignore
     await page.render(renderContext).promise;
     
     return {

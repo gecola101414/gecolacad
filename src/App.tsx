@@ -219,6 +219,7 @@ export default function App() {
   const [bimDoorHeight, setBimDoorHeight] = useState<number>(() => parseFloat(localStorage.getItem('lastDoorHeight') || '210'));
   const [bimWindowWidth, setBimWindowWidth] = useState<number>(() => parseFloat(localStorage.getItem('lastWindowWidth') || '120'));
   const [bimWindowHeight, setBimWindowHeight] = useState<number>(() => parseFloat(localStorage.getItem('lastWindowHeight') || '140'));
+  const [bimSymbolScale, setBimSymbolScale] = useState<number>(() => parseFloat(localStorage.getItem('lastBIMSymbolScale') || '1'));
 
   const [editingRaccordo, setEditingRaccordo] = useState<Entity | null>(null);
   const [raccordoConfig, setRaccordoConfig] = useState<{ type: 'curvo' | 'rettilineo'; value: number }>({
@@ -359,6 +360,7 @@ export default function App() {
       { id: "BIM_Impianti_Elettrici", name: "BIM_Impianti_Elettrici", visible: true, frozen: false },
       { id: "BIM_Impianti_Idraulici", name: "BIM_Impianti_Idraulici", visible: true, frozen: false },
       { id: "BIM_Finiture", name: "BIM_Finiture", visible: true, frozen: false },
+      { id: "BIM_Legenda", name: "BIM_Legenda", visible: true, frozen: false },
     ];
     setLayers(prev => {
       const updated = [...prev];
@@ -1349,6 +1351,10 @@ export default function App() {
                 setSelectedTool("Select");
                 setShowProperties(true);
               }
+              if (cat.name === "BIM") {
+                setActiveSidebarTab("bim");
+                setShowProperties(true);
+              }
             }}
             className={`px-4 flex flex-col items-center justify-center gap-0.5 ${selectedCategory === cat.name ? "bg-neutral-100" : "hover:bg-neutral-200"}`}
           >
@@ -1586,6 +1592,11 @@ export default function App() {
             setBimWindowWidth={setBimWindowWidth}
             bimWindowHeight={bimWindowHeight}
             setBimWindowHeight={setBimWindowHeight}
+            bimSymbolScale={bimSymbolScale}
+            setBimSymbolScale={(val) => {
+              setBimSymbolScale(val);
+              localStorage.setItem('lastBIMSymbolScale', val.toString());
+            }}
           />
         ) : (
           selectedCategoryTools.map((tool) => (
@@ -1908,6 +1919,7 @@ export default function App() {
             selectedEntityId={selectedId}
             selectedBIMSymbolType={selectedBIMSymbolType}
             setSelectedBIMSymbolType={setSelectedBIMSymbolType}
+            bimSymbolScale={bimSymbolScale}
             defaultHatchStyle={defaultHatchStyle}
             onActionStart={() => {
               setHoveredGuide(null);

@@ -11,7 +11,27 @@ import {
   Droplet, 
   Grid,
   ChevronRight,
-  Maximize2
+  Maximize2,
+  Lightbulb,
+  Plug,
+  Power,
+  Repeat,
+  Server,
+  Tv,
+  Wifi,
+  ToggleRight,
+  Shuffle,
+  CircleDot,
+  ArrowDownToLine,
+  Box,
+  Bell,
+  Volume2,
+  Thermometer,
+  Flashlight,
+  Siren,
+  Sun,
+  Phone,
+  Video
 } from "lucide-react";
 import { Point, Entity } from '../types';
 import { TEMPLATES, Template } from '../data/templates';
@@ -604,11 +624,27 @@ export const ElettricoDialog: React.FC<ElettricoDialogProps> = ({
   if (!isOpen) return null;
 
   const symbols = [
-    { type: 'punto_luce', name: '💡 Punto Luce standard', desc: 'Punto luce a soffitto (Rosone)', color: '#fbbf24' },
-    { type: 'presa_standard', name: '🔌 Presa Bipasso 10A/16A', desc: 'Presa di corrente standard CEI', color: '#60a5fa' },
-    { type: 'interruttore', name: '🔘 Interruttore unipolare', desc: 'Comando luce singolo', color: '#34d399' },
-    { type: 'deviatore', name: '🎛️ Deviatore di flusso', desc: 'Doppio comando incrociato', color: '#a78bfa' },
-    { type: 'quadro', name: '⏹️ Quadro Generale (Q.E.G)', desc: 'Interruttore magnetotermico salvavita', color: '#f87171' },
+    { type: 'punto_luce', name: 'Punto Luce', desc: 'Punto luce a soffitto/rosone CEI', color: '#64748b', icon: Lightbulb },
+    { type: 'presa_standard', name: 'Presa Bipasso 10/16A', desc: 'Presa standard universale CEI', color: '#64748b', icon: Plug },
+    { type: 'presa_schuko', name: 'Presa Schuko', desc: 'Presa universale tedesca', color: '#64748b', icon: Zap },
+    { type: 'presa_tv', name: 'Presa TV', desc: 'Presa antenna TV', color: '#64748b', icon: Tv },
+    { type: 'presa_dati', name: 'Presa Dati LAN', desc: 'Presa rete RJ45 / LAN', color: '#64748b', icon: Wifi },
+    { type: 'interruttore', name: 'Interruttore', desc: 'Comando singolo polo', color: '#64748b', icon: Power },
+    { type: 'interruttore_bipolare', name: 'Int. Bipolare', desc: 'Comando doppio polo', color: '#64748b', icon: ToggleRight },
+    { type: 'deviatore', name: 'Deviatore', desc: 'Comando incrociato 2 vie', color: '#64748b', icon: Repeat },
+    { type: 'invertitore', name: 'Invertitore', desc: 'Comando incrociato 3+ vie', color: '#64748b', icon: Shuffle },
+    { type: 'pulsante', name: 'Pulsante', desc: 'Comando a impulso', color: '#64748b', icon: CircleDot },
+    { type: 'pulsante_tirante', name: 'Tirante', desc: 'Pulsante a tirante bagno', color: '#64748b', icon: ArrowDownToLine },
+    { type: 'quadro', name: 'Quadro Generale', desc: 'Quadro elettrico (Q.E.G)', color: '#64748b', icon: Server },
+    { type: 'scatola_derivazione', name: 'Scatola Deriv.', desc: 'Scatola di derivazione', color: '#64748b', icon: Box },
+    { type: 'suoneria', name: 'Suoneria', desc: 'Campanello o ronzatore principale', color: '#64748b', icon: Bell },
+    { type: 'ronzatore', name: 'Ronzatore', desc: 'Segnalatore acustico', color: '#64748b', icon: Volume2 },
+    { type: 'termostato', name: 'Termostato', desc: 'Controllo termico ambientale', color: '#64748b', icon: Thermometer },
+    { type: 'faretto', name: 'Faretto Incasso', desc: 'Punto luce a faretto', color: '#64748b', icon: Flashlight },
+    { type: 'lampada_emergenza', name: 'Lamp. Emergenza', desc: 'Luce di emergenza autonoma', color: '#64748b', icon: Siren },
+    { type: 'applique', name: 'Applique', desc: 'Punto luce a parete', color: '#64748b', icon: Sun },
+    { type: 'citofono', name: 'Citofono', desc: 'Unità interna citofonica', color: '#64748b', icon: Phone },
+    { type: 'videocitofono', name: 'Videocitofono', desc: 'Unità interna videocitofonica', color: '#64748b', icon: Video },
   ];
 
   return (
@@ -637,12 +673,17 @@ export const ElettricoDialog: React.FC<ElettricoDialogProps> = ({
             <button
               type="button"
               key={sym.type}
-              onClick={() => onAddElectricSymbol(sym.type, sym.name.substring(2))}
+              onClick={() => onAddElectricSymbol(sym.type, sym.name)}
               className="w-full text-left p-2 rounded-lg bg-slate-900 border border-slate-850 hover:bg-slate-900/50 hover:border-slate-700 transition flex items-center justify-between"
             >
-              <div>
-                <span className="text-[10.5px] font-bold block text-slate-200">{sym.name}</span>
-                <span className="text-[8px] text-slate-500 leading-none">{sym.desc}</span>
+              <div className="flex items-center gap-3">
+                <div className="p-1.5 rounded-lg border border-slate-800 bg-slate-950 flex items-center justify-center">
+                  <sym.icon size={16} style={{ color: sym.color }} />
+                </div>
+                <div>
+                  <span className="text-[10.5px] font-bold block text-slate-200">{sym.name}</span>
+                  <span className="text-[8px] text-slate-500 leading-none">{sym.desc}</span>
+                </div>
               </div>
               <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: sym.color }}></span>
             </button>

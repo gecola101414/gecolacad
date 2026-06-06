@@ -1678,40 +1678,152 @@ export const getTavolaDimensions = (tavola: { format: string; scale: number; uni
   return { w, h };
 };
 
-const getBIMSymbolEntities = (type: string): { type: 'line' | 'circle' | 'arc' | 'text'; start?: Point; end?: Point; center?: Point; radius?: number; startAngle?: number; endAngle?: number; text?: string; color?: string }[] => {
-  switch (type) {
-    case 'punto_luce':
+export const getBIMSymbolEntities = (type: string, scale: number = 1): { type: 'line' | 'circle' | 'arc' | 'text'; start?: Point; end?: Point; center?: Point; radius?: number; startAngle?: number; endAngle?: number; text?: string; color?: string }[] => {
+  const scaled = (val: number) => val * scale;
+  const scaledPoint = (p?: Point) => p ? { x: scaled(p.x), y: scaled(p.y) } : undefined;
+
+  const getBaseEntities = (): { type: 'line' | 'circle' | 'arc' | 'text'; start?: Point; end?: Point; center?: Point; radius?: number; startAngle?: number; endAngle?: number; text?: string; color?: string }[] => {
+    switch (type) {
+    case 'punto_luce': // X inside a circle
       return [
         { type: 'circle', center: { x: 0, y: 0 }, radius: 10 },
-        { type: 'line', start: { x: -7, y: -7 }, end: { x: 7, y: 7 } },
-        { type: 'line', start: { x: -7, y: 7 }, end: { x: 7, y: -7 } }
+        { type: 'line', start: { x: -7.07, y: -7.07 }, end: { x: 7.07, y: 7.07 } },
+        { type: 'line', start: { x: -7.07, y: 7.07 }, end: { x: 7.07, y: -7.07 } }
       ];
-    case 'presa_standard':
+    case 'presa_standard': // semi circle with line
       return [
-        { type: 'arc', center: { x: 0, y: 0 }, radius: 8, startAngle: 180, endAngle: 360 },
-        { type: 'line', start: { x: -8, y: 0 }, end: { x: 8, y: 0 } },
-        { type: 'line', start: { x: -3, y: 0 }, end: { x: -3, y: -6 } },
-        { type: 'line', start: { x: 0, y: 0 }, end: { x: 0, y: -6 } },
-        { type: 'line', start: { x: 3, y: 0 }, end: { x: 3, y: -6 } }
+        { type: 'arc', center: { x: 0, y: 0 }, radius: 10, startAngle: 180, endAngle: 360 },
+        { type: 'line', start: { x: -10, y: 0 }, end: { x: 10, y: 0 } },
+        { type: 'line', start: { x: 0, y: 0 }, end: { x: 0, y: 10 } }
       ];
-    case 'interruttore':
+    case 'presa_schuko': // semi circle with line and double small lines
       return [
-        { type: 'line', start: { x: 0, y: 0 }, end: { x: 8, y: -8 } },
-        { type: 'line', start: { x: 8, y: -8 }, end: { x: 11, y: -5 } }
+        { type: 'arc', center: { x: 0, y: 0 }, radius: 10, startAngle: 180, endAngle: 360 },
+        { type: 'line', start: { x: -10, y: 0 }, end: { x: 10, y: 0 } },
+        { type: 'line', start: { x: 0, y: 0 }, end: { x: 0, y: 10 } },
+        { type: 'line', start: { x: -4, y: 0 }, end: { x: -4, y: -10 } },
+        { type: 'line', start: { x: 4, y: 0 }, end: { x: 4, y: -10 } }
       ];
-    case 'deviatore':
-      return [
-        { type: 'line', start: { x: 0, y: 0 }, end: { x: 8, y: -8 } },
-        { type: 'line', start: { x: 8, y: -8 }, end: { x: 11, y: -5 } },
-        { type: 'line', start: { x: 0, y: 0 }, end: { x: -3, y: -3 } }
-      ];
-    case 'quadro':
+    case 'presa_tv': // Square with TV
       return [
         { type: 'line', start: { x: -10, y: -10 }, end: { x: 10, y: -10 } },
         { type: 'line', start: { x: 10, y: -10 }, end: { x: 10, y: 10 } },
         { type: 'line', start: { x: 10, y: 10 }, end: { x: -10, y: 10 } },
         { type: 'line', start: { x: -10, y: 10 }, end: { x: -10, y: -10 } },
-        { type: 'line', start: { x: -10, y: -10 }, end: { x: 10, y: 10 } }
+        { type: 'text', text: 'TV', center: { x: 0, y: -2 } }
+      ];
+    case 'presa_dati': // Square with LAN
+      return [
+        { type: 'line', start: { x: -10, y: -10 }, end: { x: 10, y: -10 } },
+        { type: 'line', start: { x: 10, y: -10 }, end: { x: 10, y: 10 } },
+        { type: 'line', start: { x: 10, y: 10 }, end: { x: -10, y: 10 } },
+        { type: 'line', start: { x: -10, y: 10 }, end: { x: -10, y: -10 } },
+        { type: 'text', text: 'LAN', center: { x: 0, y: -2 } }
+      ];
+    case 'interruttore': // circle with one 45 deg line
+      return [
+        { type: 'circle', center: { x: 0, y: 0 }, radius: 4 },
+        { type: 'line', start: { x: 2.83, y: -2.83 }, end: { x: 12, y: -12 } }
+      ];
+    case 'interruttore_bipolare': // circle with 45 line and 2 ticks
+      return [
+        { type: 'circle', center: { x: 0, y: 0 }, radius: 4 },
+        { type: 'line', start: { x: 2.83, y: -2.83 }, end: { x: 12, y: -12 } },
+        { type: 'line', start: { x: 6, y: -10 }, end: { x: 10, y: -6 } },
+        { type: 'line', start: { x: 8, y: -12 }, end: { x: 12, y: -8 } }
+      ];
+    case 'deviatore': // circle with two 45 deg lines
+      return [
+        { type: 'circle', center: { x: 0, y: 0 }, radius: 4 },
+        { type: 'line', start: { x: 2.83, y: -2.83 }, end: { x: 12, y: -12 } },
+        { type: 'line', start: { x: -2.83, y: 2.83 }, end: { x: -12, y: 12 } }
+      ];
+    case 'invertitore': // circle with four 45 deg lines
+      return [
+        { type: 'circle', center: { x: 0, y: 0 }, radius: 4 },
+        { type: 'line', start: { x: 2.83, y: -2.83 }, end: { x: 12, y: -12 } },
+        { type: 'line', start: { x: -2.83, y: -2.83 }, end: { x: -12, y: -12 } },
+        { type: 'line', start: { x: 2.83, y: 2.83 }, end: { x: 12, y: 12 } },
+        { type: 'line', start: { x: -2.83, y: 2.83 }, end: { x: -12, y: 12 } }
+      ];
+    case 'pulsante': // double concentric circle
+      return [
+        { type: 'circle', center: { x: 0, y: 0 }, radius: 5 },
+        { type: 'circle', center: { x: 0, y: 0 }, radius: 2 }
+      ];
+    case 'pulsante_tirante': // button with pull cord
+      return [
+        { type: 'circle', center: { x: 0, y: 0 }, radius: 5 },
+        { type: 'circle', center: { x: 0, y: 0 }, radius: 2 },
+        { type: 'line', start: { x: 0, y: 5 }, end: { x: 0, y: 16 } }
+      ];
+    case 'quadro': // square with cross inside
+      return [
+        { type: 'line', start: { x: -12, y: -16 }, end: { x: 12, y: -16 } },
+        { type: 'line', start: { x: 12, y: -16 }, end: { x: 12, y: 16 } },
+        { type: 'line', start: { x: 12, y: 16 }, end: { x: -12, y: 16 } },
+        { type: 'line', start: { x: -12, y: 16 }, end: { x: -12, y: -16 } },
+        { type: 'line', start: { x: -12, y: -16 }, end: { x: 12, y: 16 } },
+        { type: 'line', start: { x: -12, y: 16 }, end: { x: 12, y: -16 } }
+      ];
+    case 'scatola_derivazione': // empty rect
+      return [
+        { type: 'line', start: { x: -16, y: -10 }, end: { x: 16, y: -10 } },
+        { type: 'line', start: { x: 16, y: -10 }, end: { x: 16, y: 10 } },
+        { type: 'line', start: { x: 16, y: 10 }, end: { x: -16, y: 10 } },
+        { type: 'line', start: { x: -16, y: 10 }, end: { x: -16, y: -10 } }
+      ];
+    case 'suoneria': // mushroom bell
+      return [
+        { type: 'arc', center: { x: 0, y: 0 }, radius: 8, startAngle: 180, endAngle: 360 },
+        { type: 'line', start: { x: -8, y: 0 }, end: { x: 8, y: 0 } },
+        { type: 'line', start: { x: 0, y: -8 }, end: { x: 0, y: -14 } }
+      ];
+    case 'ronzatore': // inverted half circle
+      return [
+        { type: 'arc', center: { x: 0, y: 0 }, radius: 8, startAngle: 0, endAngle: 180 },
+        { type: 'line', start: { x: -8, y: 0 }, end: { x: 8, y: 0 } },
+        { type: 'line', start: { x: 0, y: 0 }, end: { x: 0, y: -6 } }
+      ];
+    case 'termostato': // circle with T
+      return [
+        { type: 'circle', center: { x: 0, y: 0 }, radius: 10 },
+        { type: 'text', text: 'T', center: { x: 0, y: -2 } }
+      ];
+    case 'faretto': // circle crossed
+      return [
+        { type: 'circle', center: { x: 0, y: 0 }, radius: 8 },
+        { type: 'line', start: { x: -8, y: -8 }, end: { x: 8, y: 8 } },
+        { type: 'line', start: { x: -8, y: 8 }, end: { x: 8, y: -8 } }
+      ];
+    case 'lampada_emergenza': // rect with E
+      return [
+        { type: 'line', start: { x: -12, y: -8 }, end: { x: 12, y: -8 } },
+        { type: 'line', start: { x: 12, y: -8 }, end: { x: 12, y: 8 } },
+        { type: 'line', start: { x: 12, y: 8 }, end: { x: -12, y: 8 } },
+        { type: 'line', start: { x: -12, y: 8 }, end: { x: -12, y: -8 } },
+        { type: 'text', text: 'E', center: { x: 0, y: -2 } }
+      ];
+    case 'applique': // circle with line
+      return [
+        { type: 'circle', center: { x: 0, y: 0 }, radius: 8 },
+        { type: 'line', start: { x: -10, y: 0 }, end: { x: -8, y: 0 } }
+      ];
+    case 'citofono': // Square with C
+      return [
+        { type: 'line', start: { x: -10, y: -10 }, end: { x: 10, y: -10 } },
+        { type: 'line', start: { x: 10, y: -10 }, end: { x: 10, y: 10 } },
+        { type: 'line', start: { x: 10, y: 10 }, end: { x: -10, y: 10 } },
+        { type: 'line', start: { x: -10, y: 10 }, end: { x: -10, y: -10 } },
+        { type: 'text', text: 'C', center: { x: 0, y: -2 } }
+      ];
+    case 'videocitofono': // Square with V
+      return [
+        { type: 'line', start: { x: -10, y: -10 }, end: { x: 10, y: -10 } },
+        { type: 'line', start: { x: 10, y: -10 }, end: { x: 10, y: 10 } },
+        { type: 'line', start: { x: 10, y: 10 }, end: { x: -10, y: 10 } },
+        { type: 'line', start: { x: -10, y: 10 }, end: { x: -10, y: -10 } },
+        { type: 'text', text: 'V', center: { x: 0, y: -2 } }
       ];
     case 'carico_af':
       return [
@@ -1747,9 +1859,18 @@ const getBIMSymbolEntities = (type: string): { type: 'line' | 'circle' | 'arc' |
         { type: 'line', start: { x: 0, y: -6 }, end: { x: 0, y: 6 } },
         { type: 'line', start: { x: 10, y: -6 }, end: { x: 10, y: 6 } }
       ];
-    default:
-      return [];
-  }
+      default:
+        return [];
+    }
+  };
+
+  return getBaseEntities().map(te => ({
+    ...te,
+    radius: te.radius !== undefined ? scaled(te.radius) : undefined,
+    start: scaledPoint(te.start),
+    end: scaledPoint(te.end),
+    center: scaledPoint(te.center),
+  }));
 };
 
 function getLinePerpendicularDistance(p: Point, root: LineEntity): number {
@@ -1965,6 +2086,7 @@ interface CADCanvasProps {
   selectedEntityId?: string | null;
   selectedBIMSymbolType?: string | null;
   setSelectedBIMSymbolType?: (val: string | null) => void;
+  bimSymbolScale?: number;
   defaultTextStyle?: { fontFamily: string, fontSize: number, fontWeight: string, textAlign: 'left' | 'center' | 'right' | 'justify' };
   raccordoConfig?: { type: 'curvo' | 'rettilineo'; value: number };
   onEditRaccordo?: (raccordoEntity: Entity) => void;
@@ -1977,7 +2099,7 @@ interface CADCanvasProps {
   };
 }
 
-export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultHatchStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, setOrthoMode, isContinuousMode = false, cancelTrigger = 0, parallelTrigger = 0, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, selectedBIMSymbolType, setSelectedBIMSymbolType, raccordoConfig, onEditRaccordo, onActionStart }, ref) => {
+export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultHatchStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, setOrthoMode, isContinuousMode = false, cancelTrigger = 0, parallelTrigger = 0, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, selectedBIMSymbolType, setSelectedBIMSymbolType, bimSymbolScale = 1, raccordoConfig, onEditRaccordo, onActionStart }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const entitiesRef = useRef(entities);
   useEffect(() => {
@@ -3798,8 +3920,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         
         const isFlashing = flashIds.includes(entity.id);
 
+        const isBIMSymbolEnt = entity.isBIM && (entity.bimType === 'electrical_symbol' || entity.bimType === 'hydraulic_symbol');
+        const baseWidth = isBIMSymbolEnt ? (0.65 / view.zoom) : getEffectiveCADRenderWidth(entity.lineWidth, entity.mode, view.zoom);
+
         ctx.strokeStyle = entity.color || ((entity.mode === 'pencil') ? '#bbbbbb' : (entity.mode === 'ink' ? '#000000' : '#000000'));
-        ctx.lineWidth = getEffectiveCADRenderWidth(entity.lineWidth, entity.mode, view.zoom);
+        ctx.lineWidth = baseWidth;
         ctx.globalAlpha = entity.opacity !== undefined ? entity.opacity : 1.0;
         if (layer && layer.frozen) {
             ctx.globalAlpha *= 0.4;
@@ -3815,7 +3940,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             const g = Math.round(0 + (197 - 0) * flashIntensity);
             const b = Math.round(0 + (94 - 0) * flashIntensity);
             ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
-            ctx.lineWidth = getEffectiveCADRenderWidth(entity.lineWidth, entity.mode, view.zoom) + (2 + 3 * flashIntensity) / view.zoom;
+            ctx.lineWidth = baseWidth + (2 + 3 * flashIntensity) / view.zoom;
             ctx.shadowColor = `rgba(34, 197, 94, ${0.6 * flashIntensity})`;
             ctx.shadowBlur = 10 * flashIntensity;
         }
@@ -3825,17 +3950,17 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             // Let the flashing styles take precedence for initial attention blink
           } else if (entity.type === 'hatch') {
             ctx.strokeStyle = '#22c55e'; // Green highlight for selected hatch
-            ctx.lineWidth = getEffectiveCADRenderWidth(entity.lineWidth, entity.mode, view.zoom) + 3 / view.zoom;
+            ctx.lineWidth = baseWidth + 3 / view.zoom;
           } else {
             ctx.strokeStyle = '#fbbf24'; // Amber highlight
-            ctx.lineWidth = getEffectiveCADRenderWidth(entity.lineWidth, entity.mode, view.zoom) + 2 / view.zoom;
+            ctx.lineWidth = baseWidth + 2 / view.zoom;
           }
         } else if ((dragEntityIds.includes(entity.id) || entity.id === highlightedTrimLine?.id) && (activeTool === 'Move' || activeTool === 'Cancella' || activeTool === 'Join' || activeTool === 'Copy')) {
             ctx.strokeStyle = activeTool === 'Cancella' ? '#ef4444' : activeTool === 'Join' ? '#22c55e' : '#3b82f6';
-            ctx.lineWidth = getEffectiveCADRenderWidth(entity.lineWidth, entity.mode, view.zoom) + 4 / view.zoom;
+            ctx.lineWidth = baseWidth + 4 / view.zoom;
         } else if (copySourceEntityIds.includes(entity.id) && activeTool === 'Copy') {
             ctx.strokeStyle = '#22c55e'; // Green highlight for original mother object(s)
-            ctx.lineWidth = getEffectiveCADRenderWidth(entity.lineWidth, entity.mode, view.zoom) + 4 / view.zoom;
+            ctx.lineWidth = baseWidth + 4 / view.zoom;
         } else if (activeTool === 'Trim' && highlightedTrimSegment && entity.id === highlightedTrimLine?.id) {
             // Eraser highlight only
         }
@@ -5110,17 +5235,17 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
 
         // --- BIM SYMBOL PREVIEW ---
-        if (activeTool === 'BIM_Symbol' && selectedBIMSymbolType && hoverSnap) {
-            const isElectrical = ['punto_luce', 'presa_standard', 'interruttore', 'deviatore', 'quadro'].includes(selectedBIMSymbolType);
-            const targetColor = isElectrical ? '#fbbf24' : '#60a5fa';
+        if (activeTool === 'BIM_Symbol' && selectedBIMSymbolType) {
+            const isElectrical = ['punto_luce', 'presa_standard', 'presa_schuko', 'presa_tv', 'presa_dati', 'interruttore', 'interruttore_bipolare', 'deviatore', 'invertitore', 'pulsante', 'pulsante_tirante', 'quadro', 'scatola_derivazione', 'suoneria', 'ronzatore', 'termostato', 'faretto', 'lampada_emergenza', 'applique', 'citofono', 'videocitofono'].includes(selectedBIMSymbolType);
+            const targetColor = '#334155'; // Using Slate 700 for a clean, consistent UI tone for all symbols
             
             ctx.save();
             ctx.strokeStyle = targetColor;
-            ctx.lineWidth = 1.5 / view.zoom;
-            ctx.globalAlpha = 0.65;
+            ctx.lineWidth = 0.8 / view.zoom; // Thin, solid line
+            ctx.globalAlpha = 0.85;
             
-            const basePos = hoverSnap.point;
-            const geomList = getBIMSymbolEntities(selectedBIMSymbolType);
+            const basePos = hoverSnap ? hoverSnap.point : actualMousePosRef.current;
+            const geomList = getBIMSymbolEntities(selectedBIMSymbolType, bimSymbolScale || 1);
             
             geomList.forEach(te => {
                 ctx.beginPath();
@@ -8036,19 +8161,19 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             }
         }
     } else if (activeTool === 'BIM_Symbol' && selectedBIMSymbolType) {
-        const isElectrical = ['punto_luce', 'presa_standard', 'interruttore', 'deviatore', 'quadro'].includes(selectedBIMSymbolType);
+        const isElectrical = ['punto_luce', 'presa_standard', 'presa_schuko', 'presa_tv', 'presa_dati', 'interruttore', 'interruttore_bipolare', 'deviatore', 'invertitore', 'pulsante', 'pulsante_tirante', 'quadro', 'scatola_derivazione', 'suoneria', 'ronzatore', 'termostato', 'faretto', 'lampada_emergenza', 'applique', 'citofono', 'videocitofono'].includes(selectedBIMSymbolType);
         const targetLayerName = isElectrical ? 'BIM_Impianti_Elettrici' : 'BIM_Impianti_Idraulici';
         const targetLayerId = layers.find(l => l.name === targetLayerName)?.id || targetLayerName;
-        const targetColor = isElectrical ? '#fbbf24' : '#60a5fa';
+        const targetColor = '#334155'; // Using Slate 700 for a single, uniform thin color
 
-        const geomList = getBIMSymbolEntities(selectedBIMSymbolType);
+        const geomList = getBIMSymbolEntities(selectedBIMSymbolType, bimSymbolScale || 1);
         const groupId = 'group_sym_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
 
         const newEntities: Entity[] = geomList.map(te => {
             const baseProps = {
                 id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5),
-                color: te.color || targetColor,
-                lineWidth: 1.5,
+                color: targetColor,
+                lineWidth: 0.8,
                 layer: targetLayerId,
                 mode: 'ink' as const,
                 groupId,
@@ -8101,7 +8226,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 onCommitHistory?.(next);
                 return next;
             });
-            onSelect(newEntities[0].id);
         }
     } else if (activeTool === 'BIM_RilevaStanza') {
         const poly = findBoundaryPolygon(screenPos, entities, view, rect.width, rect.height, screenToCanvas, layers);
@@ -9174,7 +9298,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                         ...ent,
                         points: h.points ? h.points.map((p: Point) => ({ x: p.x + dx, y: p.y + dy })) : []
                     };
-                } else if (ent.type === 'point') {
+                } else if (ent.type === 'point' || ent.type === 'text') {
                     return {
                         ...ent,
                         point: { x: ent.point.x + dx, y: ent.point.y + dy }

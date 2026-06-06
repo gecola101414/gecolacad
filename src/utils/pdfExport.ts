@@ -155,10 +155,13 @@ export const exportNativePDF = (
       // All lines black
       pdf.setDrawColor(0, 0, 0); 
       
+      const isBIMSymbol = entity.isBIM && (entity.bimType === 'electrical_symbol' || entity.bimType === 'hydraulic_symbol');
       let baseLw = entity.lineWidth && typeof entity.lineWidth === 'number' ? entity.lineWidth : 1;
       let lw = Math.max(0.1, baseLw * 0.2); // Standard mapping for CAD lines
       
-      if (entity.mode === 'ink') {
+      if (isBIMSymbol) {
+          lw = 0.08; // Super fine thin black line (0.08mm) in PDF output regardless of scale
+      } else if (entity.mode === 'ink') {
           // Special mapping for Kina pens to guarantee visible solid black
           lw = baseLw <= 0.25 ? 0.3 : baseLw <= 0.5 ? 0.5 : baseLw <= 1.0 ? 1.0 : baseLw <= 2.0 ? 2.0 : baseLw;
       }
@@ -330,7 +333,12 @@ export const exportNativePDF = (
       } else if (entity.type === 'text') {
           // Parse color
           let r = 0, g = 0, b = 0;
-          if (entity.color && entity.color.startsWith('#')) {
+          const isBIMSymbol = entity.isBIM && (entity.bimType === 'electrical_symbol' || entity.bimType === 'hydraulic_symbol');
+          if (isBIMSymbol) {
+              r = 0;
+              g = 0;
+              b = 0;
+          } else if (entity.color && entity.color.startsWith('#')) {
               const hex = entity.color.replace('#', '');
               if (hex.length === 6) {
                   r = parseInt(hex.substring(0, 2), 16);

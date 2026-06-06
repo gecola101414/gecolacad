@@ -10,7 +10,27 @@ import {
   Maximize2, 
   Crosshair, 
   Check, 
-  CornerDownRight 
+  CornerDownRight,
+  Lightbulb,
+  Plug,
+  Power,
+  Repeat,
+  Server,
+  Tv,
+  Wifi,
+  ToggleRight,
+  Shuffle,
+  CircleDot,
+  ArrowDownToLine,
+  Box,
+  Bell,
+  Volume2,
+  Thermometer,
+  Flashlight,
+  Siren,
+  Sun,
+  Phone,
+  Video
 } from 'lucide-react';
 import { TEMPLATES, Template } from '../data/templates';
 
@@ -38,6 +58,8 @@ interface BIMTopBarControlsProps {
   setBimWindowWidth: (val: number) => void;
   bimWindowHeight: number;
   setBimWindowHeight: (val: number) => void;
+  bimSymbolScale?: number;
+  setBimSymbolScale?: (val: number) => void;
 }
 
 export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
@@ -61,7 +83,9 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
   bimWindowWidth,
   setBimWindowWidth,
   bimWindowHeight,
-  setBimWindowHeight
+  setBimWindowHeight,
+  bimSymbolScale = 1,
+  setBimSymbolScale
 }) => {
   const [activeDropdown, setActiveDropdown] = useState<
     'muri' | 'porte' | 'finestre' | 'arredi' | 'sanitari' | 'elettrico' | 'idraulico' | 'finiture' | null
@@ -138,11 +162,27 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
 
   // Symbols
   const electricSymbols = [
-    { type: 'punto_luce', label: '💡 Punto Luce' },
-    { type: 'presa_standard', label: '🔌 Presa Standard' },
-    { type: 'interruttore', label: '🎛️ Interruttore' },
-    { type: 'deviatore', label: '🔄 Deviatore' },
-    { type: 'quadro', label: '🔲 Quadro Elettrico' }
+    { type: 'punto_luce', label: 'Punto Luce', icon: Lightbulb },
+    { type: 'presa_standard', label: 'Presa 10/16A', icon: Plug },
+    { type: 'presa_schuko', label: 'Presa Schuko', icon: Zap },
+    { type: 'presa_tv', label: 'Presa TV', icon: Tv },
+    { type: 'presa_dati', label: 'Presa Dati/LAN', icon: Wifi },
+    { type: 'interruttore', label: 'Interruttore', icon: Power },
+    { type: 'interruttore_bipolare', label: 'Int. Bipolare', icon: ToggleRight },
+    { type: 'deviatore', label: 'Deviatore', icon: Repeat },
+    { type: 'invertitore', label: 'Invertitore', icon: Shuffle },
+    { type: 'pulsante', label: 'Pulsante', icon: CircleDot },
+    { type: 'pulsante_tirante', label: 'Tirante', icon: ArrowDownToLine },
+    { type: 'quadro', label: 'Quadro Elet.', icon: Server },
+    { type: 'scatola_derivazione', label: 'Scatola Deriv.', icon: Box },
+    { type: 'suoneria', label: 'Suoneria', icon: Bell },
+    { type: 'ronzatore', label: 'Ronzatore', icon: Volume2 },
+    { type: 'termostato', label: 'Termostato', icon: Thermometer },
+    { type: 'faretto', label: 'Faretto Incasso', icon: Flashlight },
+    { type: 'lampada_emergenza', label: 'Lamp. Emergenza', icon: Siren },
+    { type: 'applique', label: 'Applique', icon: Sun },
+    { type: 'citofono', label: 'Citofono', icon: Phone },
+    { type: 'videocitofono', label: 'Videocitofono', icon: Video }
   ];
 
   const hydraulicSymbols = [
@@ -524,8 +564,25 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
         </button>
 
         {activeDropdown === 'elettrico' && (
-          <div className="absolute top-7 left-0 w-48 bg-white rounded-lg shadow-xl border border-neutral-200 p-2 z-50 animate-fade-in text-xs max-h-56 overflow-y-auto">
-            <span className="font-semibold text-[10px] uppercase text-neutral-400 block px-2 py-1 border-b">Impianto Elettrico</span>
+          <div className="absolute top-7 left-0 w-48 bg-white rounded-lg shadow-xl border border-neutral-200 p-2 z-50 animate-fade-in text-xs max-h-72 overflow-y-auto">
+            <span className="font-semibold text-[10px] uppercase text-neutral-400 block px-2 py-1 mb-1 border-b">Impianto Elettrico</span>
+            
+            <div className="px-2 py-2 border-b border-neutral-100 mb-1">
+              <label className="flex justify-between text-[10px] text-neutral-500 mb-1">
+                <span>Scala Simboli</span>
+                <span>{bimSymbolScale}x</span>
+              </label>
+              <input 
+                type="range" 
+                min="0.1" 
+                max="10" 
+                step="0.1"
+                value={bimSymbolScale}
+                onChange={(e) => setBimSymbolScale?.(parseFloat(e.target.value))}
+                className="w-full accent-slate-600"
+              />
+            </div>
+
             {electricSymbols.map(sym => (
               <button
                 key={sym.type}
@@ -540,8 +597,11 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
                     : 'text-neutral-700'
                 }`}
               >
-                <span>{sym.label}</span>
-                {selectedBIMSymbolType === sym.type && selectedTool === 'BIM_Symbol' && <Check size={10} className="text-yellow-600" />}
+                <span className="flex items-center gap-1.5">
+                  <sym.icon size={12} className={selectedBIMSymbolType === sym.type ? "text-slate-800" : "text-slate-500"} />
+                  {sym.label}
+                </span>
+                {selectedBIMSymbolType === sym.type && selectedTool === 'BIM_Symbol' && <Check size={10} className="text-slate-800" />}
               </button>
             ))}
           </div>
@@ -564,8 +624,25 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
         </button>
 
         {activeDropdown === 'idraulico' && (
-          <div className="absolute top-7 left-0 w-48 bg-white rounded-lg shadow-xl border border-neutral-200 p-2 z-50 animate-fade-in text-xs max-h-56 overflow-y-auto">
-            <span className="font-semibold text-[10px] uppercase text-neutral-400 block px-2 py-1 border-b">Impianto Idraulico</span>
+          <div className="absolute top-7 left-0 w-48 bg-white rounded-lg shadow-xl border border-neutral-200 p-2 z-50 animate-fade-in text-xs max-h-72 overflow-y-auto">
+            <span className="font-semibold text-[10px] uppercase text-neutral-400 block px-2 py-1 mb-1 border-b">Impianto Idraulico</span>
+            
+            <div className="px-2 py-2 border-b border-neutral-100 mb-1">
+              <label className="flex justify-between text-[10px] text-neutral-500 mb-1">
+                <span>Scala Simboli</span>
+                <span>{bimSymbolScale}x</span>
+              </label>
+              <input 
+                type="range" 
+                min="0.1" 
+                max="10" 
+                step="0.1"
+                value={bimSymbolScale}
+                onChange={(e) => setBimSymbolScale?.(parseFloat(e.target.value))}
+                className="w-full accent-slate-600"
+              />
+            </div>
+
             {hydraulicSymbols.map(sym => (
               <button
                 key={sym.type}

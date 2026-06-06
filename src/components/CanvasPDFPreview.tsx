@@ -508,12 +508,13 @@ export const CanvasPDFPreview: React.FC<CanvasPDFPreviewProps> = ({ entities, ta
       ctx.save();
 
       // Configure draw stroke colors, width, styling
-      ctx.strokeStyle = ent.color || '#000000';
-      ctx.fillStyle = ent.color || '#000000';
+      const isBIMSymbol = ent.isBIM && (ent.bimType === 'electrical_symbol' || ent.bimType === 'hydraulic_symbol');
+      ctx.strokeStyle = isBIMSymbol ? '#000000' : (ent.color || '#000000');
+      ctx.fillStyle = isBIMSymbol ? '#000000' : (ent.color || '#000000');
       
       const baseLw = typeof ent.lineWidth === 'number' ? ent.lineWidth : 1.0;
       // Convert typical screen unit thickness to proper paper millimeters scale representation
-      ctx.lineWidth = Math.max(0.1, baseLw * 0.2) / cadToMm;
+      ctx.lineWidth = isBIMSymbol ? (0.08 / cadToMm) : (Math.max(0.1, baseLw * 0.2) / cadToMm);
 
       if (ent.dashed) {
         ctx.setLineDash([5 / cadToMm, 5 / cadToMm]);
@@ -631,7 +632,8 @@ export const CanvasPDFPreview: React.FC<CanvasPDFPreviewProps> = ({ entities, ta
       } else if (ent.type === 'text') {
         const textFontSize = (ent.fontSize || 14) / cadToMm;
         ctx.font = `${ent.fontWeight || 'normal'} ${textFontSize}px ${ent.fontFamily || 'sans-serif'}`;
-        ctx.fillStyle = ent.color || '#000000';
+        const isBIMSymbol = ent.isBIM && (ent.bimType === 'electrical_symbol' || ent.bimType === 'hydraulic_symbol');
+        ctx.fillStyle = isBIMSymbol ? '#000000' : (ent.color || '#000000');
         ctx.textAlign = ent.textAlign || 'left';
         ctx.textBaseline = 'top';
 
