@@ -3190,33 +3190,41 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         });
 
         // 2. Line Extension Snaps (Specific to inclined lines or existing orientations)
-        visibleEntities.forEach(entity => {
-            if (entity.type === 'line') {
-                const line = entity as LineEntity;
-                const dx = line.end.x - line.start.x;
-                const dy = line.end.y - line.start.y;
-                const L = Math.sqrt(dx * dx + dy * dy);
-                if (L < 0.1) return;
+        // Optimization: Pre-filter lines using Manhattan distance to avoid slow trig calculations on far-away entities
+        const extensionDistanceLimit = Math.max(300, 250 / view.zoom);
+        const nearEntitiesForExtensions = visibleEntities.filter(ent => {
+            if (ent.type !== 'line') return false;
+            const line = ent as LineEntity;
+            const midX = (line.start.x + line.end.x) / 2;
+            const midY = (line.start.y + line.end.y) / 2;
+            const approxDist = Math.abs(point.x - midX) + Math.abs(point.y - midY);
+            return approxDist < extensionDistanceLimit;
+        }) as LineEntity[];
 
-                const nx = -dy / L;
-                const ny = dx / L;
-                
-                const dist = (point.x - line.start.x) * nx + (point.y - line.start.y) * ny;
-                if (Math.abs(dist) < threshold) {
-                    const snapPt = { x: point.x - nx * dist, y: point.y - ny * dist };
-                    const dStart = Math.sqrt((snapPt.x - line.start.x) ** 2 + (snapPt.y - line.end.x) ** 2);
-                    const dEnd = Math.sqrt((snapPt.x - line.end.x) ** 2 + (snapPt.y - line.end.y) ** 2);
-                    const refPoint = dStart < dEnd ? line.start : line.end;
+        nearEntitiesForExtensions.forEach(line => {
+            const dx = line.end.x - line.start.x;
+            const dy = line.end.y - line.start.y;
+            const L = Math.sqrt(dx * dx + dy * dy);
+            if (L < 0.1) return;
 
-                    const ang = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 180;
-                    if (Math.abs(ang - 0) > 0.5 && Math.abs(ang - 90) > 0.5 && Math.abs(ang - 180) > 0.5) {
-                        snaps.push({
-                            point: snapPt,
-                            type: 'smart',
-                            refPoint: refPoint,
-                            refEntityId: line.id
-                        });
-                    }
+            const nx = -dy / L;
+            const ny = dx / L;
+            
+            const dist = (point.x - line.start.x) * nx + (point.y - line.start.y) * ny;
+            if (Math.abs(dist) < threshold) {
+                const snapPt = { x: point.x - nx * dist, y: point.y - ny * dist };
+                const dStart = Math.sqrt((snapPt.x - line.start.x) ** 2 + (snapPt.y - line.start.y) ** 2);
+                const dEnd = Math.sqrt((snapPt.x - line.end.x) ** 2 + (snapPt.y - line.end.y) ** 2);
+                const refPoint = dStart < dEnd ? line.start : line.end;
+
+                const ang = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 180;
+                if (Math.abs(ang - 0) > 0.5 && Math.abs(ang - 90) > 0.5 && Math.abs(ang - 180) > 0.5) {
+                    snaps.push({
+                        point: snapPt,
+                        type: 'smart',
+                        refPoint: refPoint,
+                        refEntityId: line.id
+                    });
                 }
             }
         });
