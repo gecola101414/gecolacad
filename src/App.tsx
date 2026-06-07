@@ -13,8 +13,10 @@ import { DimensionStyleDialog } from "./components/DimensionStyleDialog";
 import { RaccordoDialog } from "./components/RaccordoDialog";
 import { DXFTextReaderDialog } from "./components/DXFTextReaderDialog";
 import { TemplatePreview } from "./components/TemplatePreview";
+import { AreaFunzionaleDialog } from "./components/BIMDialogs";
 import { BIMWorkspacePanel } from "./components/BIMWorkspacePanel";
 import { BIMTopBarControls } from "./components/BIMTopBarControls";
+import { BIM3DViewer } from "./components/BIM3DViewer";
 import { TEMPLATES } from './data/templates';
 import { GUIDE_DATABASE, GuideItem } from './data/guides';
 import { Entity, Point, Layer, Measurement, Tavola } from "./types";
@@ -186,7 +188,8 @@ export default function App() {
       textAlign: 'left' as 'left' | 'center' | 'right' | 'justify',
     };
   });
-  const [eraserRadius, setEraserRadius] = useState(() => Number(localStorage.getItem('eraserRadius')) || 20);
+  const [eraserRadius, setEraserRadius] = useState(() => Number(localStorage.getItem('eraserRadius')) || 4);
+  const [eraserType, setEraserType] = useState<'pencil' | 'all'>(() => (localStorage.getItem('eraserType') as 'pencil' | 'all') || 'pencil');
   const [favoritePanels, setFavoritePanels] = useState<Array<{ id: string; tools: string[]; x: number; y: number; isDocked: 'left' | 'right' | null }>>(() => {
     const saved = localStorage.getItem('favoritePanels');
     return saved ? JSON.parse(saved) : [
@@ -240,6 +243,10 @@ export default function App() {
     { id: "tav5", name: "Tavola n. 5", format: "A0", scale: 1000, unit: "cm", position: { x: 0, y: 0 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 5", autore: "Ing. Domenico Gimondo", data: "2026" } },
   ]);
   const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere' | 'testo' | 'gemini' | 'manuale' | 'bim'>(() => (localStorage.getItem('activeSidebarTab') as any) || 'penne');
+  const [isBIMAreaDialogOpen, setIsBIMAreaDialogOpen] = useState(false);
+  const [is3DViewOpen, setIs3DViewOpen] = useState(false);
+  const [detectedAreaPoints, setDetectedAreaPoints] = useState<Point[] | null>(null);
+  const [editingAreaId, setEditingAreaId] = useState<string | null>(null);
   const [hoveredGuide, setHoveredGuide] = useState<GuideItem | null>(null);
   const [guideLockedBy, setGuideLockedBy] = useState<string | null>(null);
   const [showFloatingManual, setShowFloatingManual] = useState(false);
@@ -334,6 +341,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('eraserRadius', eraserRadius.toString());
   }, [eraserRadius]);
+
+  useEffect(() => {
+    localStorage.setItem('eraserType', eraserType);
+  }, [eraserType]);
 
   useEffect(() => {
     localStorage.setItem('favoritePanels', JSON.stringify(favoritePanels));
@@ -435,6 +446,86 @@ export default function App() {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const handleAreaDetected = (points: Point[]) => {
+    setDetectedAreaPoints(points);
+    setEditingAreaId(null);
+    setIsBIMAreaDialogOpen(true);
+  };
+
+  const handleEditBIMArea = (areaId: string) => {
+    const area = entities.find(e => e.id === areaId);
+    if (!area) return;
+    
+    setDetectedAreaPoints((area as any).bimPoints || area.points || null);
+    setEditingAreaId(areaId);
+    setIsBIMAreaDialogOpen(true);
+  };
+
+  const handleConfirmArea = (areaData: { type: string; name: string; color: string; height: number; hatch: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE' }) => {
+    if (!detectedAreaPoints) return;
+
+    if (editingAreaId) {
+      // UPDATE EXISTING
+      updateEntitiesWithHistory(prev => prev.map(e => {
+        if (e.id === editingAreaId) {
+          return {
+            ...e,
+            bimAreaType: areaData.type as any,
+            bimName: areaData.name,
+            backgroundColor: areaData.color,
+            bimHatchPattern: areaData.hatch,
+            pattern: areaData.hatch === 'NONE' ? 'SOLID' : areaData.hatch,
+            height: areaData.height
+          };
+        }
+        return e;
+      }));
+      setShortcutToast(`Area ${areaData.name} aggiornata ✅`);
+    } else {
+      // CREATE NEW (with duplicate check)
+      const isDuplicate = entities.some(e => 
+        e.bimType === 'room' && 
+        e.points && 
+        e.points.length === detectedAreaPoints.length &&
+        e.points.every((p, i) => Math.abs(p.x - (detectedAreaPoints as Point[])[i].x) < 0.1 && Math.abs(p.y - (detectedAreaPoints as Point[])[i].y) < 0.1)
+      );
+
+      if (isDuplicate) {
+        setShortcutToast("Area già mappata in precedenza!");
+        setTimeout(() => setShortcutToast(null), 3000);
+        setIsBIMAreaDialogOpen(false);
+        setDetectedAreaPoints(null);
+        return;
+      }
+
+      const newArea: Entity = {
+        id: `bim-area-${Date.now()}`,
+        type: 'hatch', 
+        points: detectedAreaPoints,
+        color: 'rgba(0,0,0,0.5)',
+        strokeWidth: 1,
+        layer: 'BIM_Aree_Funzionali',
+        isBIM: true,
+        bimType: 'room',
+        bimAreaType: areaData.type as any,
+        bimName: areaData.name,
+        backgroundColor: areaData.color,
+        bimHatchPattern: areaData.hatch,
+        pattern: areaData.hatch === 'NONE' ? 'SOLID' : areaData.hatch,
+        height: areaData.height,
+        timestamp: Date.now()
+      } as any;
+
+      updateEntitiesWithHistory(prev => [...prev, newArea]);
+      setShortcutToast(`Rilevata ${areaData.name} (${areaData.type}) ✅`);
+    }
+    
+    setTimeout(() => setShortcutToast(null), 4000);
+    setIsBIMAreaDialogOpen(false);
+    setDetectedAreaPoints(null);
+    setEditingAreaId(null);
   };
 
   const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -947,6 +1038,15 @@ export default function App() {
         window.dispatchEvent(ev);
         e.preventDefault();
         return;
+    }
+
+    if (selectedTool === 'Eraser') {
+      const nextType = eraserType === 'pencil' ? 'all' : 'pencil';
+      setEraserType(nextType);
+      setShortcutToast(nextType === 'pencil' ? "Gomma: Matita (Bianca)" : "Gomma: China/Tutto (Gialla)");
+      setTimeout(() => setShortcutToast(null), 2000);
+      e.preventDefault();
+      return;
     }
 
     // If in Template tool, try rotating first
@@ -1908,6 +2008,8 @@ export default function App() {
             setDefaultLineStyle={setDefaultLineStyle}
             eraserRadius={eraserRadius}
             setEraserRadius={setEraserRadius}
+            eraserType={eraserType}
+            setEraserType={setEraserType}
             rulerStyle={rulerStyle}
             orthoMode={orthoMode}
             setOrthoMode={setOrthoMode}
@@ -1932,7 +2034,38 @@ export default function App() {
               setEditingRaccordo(raccordoEntity);
               setIsRaccordoDialogOpen(true);
             }}
+            onAreaDetected={handleAreaDetected}
+            highlightedPoints={detectedAreaPoints}
           />
+
+          <AreaFunzionaleDialog
+            isOpen={isBIMAreaDialogOpen}
+            onClose={() => {
+              setIsBIMAreaDialogOpen(false);
+              setDetectedAreaPoints(null);
+              setEditingAreaId(null);
+            }}
+            onConfirm={handleConfirmArea}
+            points={detectedAreaPoints || undefined}
+            initialData={editingAreaId ? (() => {
+              const e = entities.find(ent => ent.id === editingAreaId);
+              if (!e) return undefined;
+              return {
+                type: (e as any).bimAreaType || 'stanza',
+                name: (e as any).bimName || '',
+                color: (e as any).backgroundColor || e.color,
+                height: (e as any).height || 2.70,
+                hatch: (e as any).bimHatchPattern || 'SOLID'
+              };
+            })() : undefined}
+          />
+
+          {is3DViewOpen && (
+            <BIM3DViewer 
+              entities={entities} 
+              onClose={() => setIs3DViewOpen(false)} 
+            />
+          )}
           
           {doubleClickedTavolaId && !pdfPreviewUrl && (
             <div className="absolute inset-0 bg-black/20 flex items-center justify-center p-4 z-50 pointer-events-auto">
@@ -2380,6 +2513,8 @@ export default function App() {
                   onOpenElettrico={() => setIsBIMElettricoOpen(true)}
                   onOpenIdraulico={() => setIsBIMIdraulicoOpen(true)}
                   onOpenFiniture={() => setIsBIMFinitureOpen(true)}
+                  onEditArea={handleEditBIMArea}
+                  onOpen3DView={() => setIs3DViewOpen(true)}
                 />
               ) : activeSidebarTab === "gemini" ? (
                 <div className="space-y-4">
@@ -3411,6 +3546,67 @@ export default function App() {
                           <span className="text-indigo-400 font-extrabold block mb-2 text-[10px] font-mono tracking-widest uppercase">✨ SPECCHIO (MIRROR):</span>
                           Crea un asse di simmetria come un normale segmento... poi seleziona gli oggetti.
                         </p>
+                      </div>
+                    ) : selectedTool === 'Eraser' ? (
+                      <div className="space-y-4">
+                        <div className="bg-neutral-900 border border-neutral-800 text-white p-3.5 rounded-xl shadow-xs">
+                          <p className="text-xs leading-normal font-sans mb-3">
+                            <span className="text-amber-400 font-extrabold block mb-2 text-[10px] font-mono tracking-widest uppercase">✨ GOMME DI PRECISIONE:</span>
+                            Entrambe le gomme hanno una punta sagomata ideale per cancellature di precisione assoluta.
+                          </p>
+                          <div className="bg-neutral-800/80 p-2.5 rounded-lg border border-neutral-700 space-y-1 text-[10px] text-neutral-300">
+                            <div className="flex items-center gap-1.5 font-bold text-amber-300">
+                              <MousePointer2 size={10} /> CLIC DESTRO SUL FOGLIO
+                            </div>
+                            <p className="font-sans leading-relaxed text-[9px]">Clicca col tasto destro del mouse sulla tavola da disegno per scambiare al volo le due gomme!</p>
+                          </div>
+                        </div>
+
+                        {/* Switch Eraser Type Options in UI */}
+                        <div className="space-y-4 pt-2 border-t border-neutral-100">
+                          <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Tipo di Gomma Attiva</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => setEraserType('pencil')}
+                              className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex flex-col gap-1.5 ${eraserType === 'pencil' ? 'bg-neutral-100 border-neutral-400 ring-4 ring-neutral-200' : 'bg-white border-neutral-200 hover:bg-neutral-50 shadow-xs'}`}
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-3.5 h-3.5 rounded bg-neutral-200 border border-neutral-400 shadow-xs inline-block"></span>
+                                <span className={`text-[10px] font-black uppercase tracking-wider ${eraserType === 'pencil' ? 'text-neutral-800' : 'text-neutral-500'}`}>Matita</span>
+                              </div>
+                              <span className="text-[9px] text-neutral-400 leading-snug">La classica bianca-grigia. Cancella solo linee a matita dura/media/morbida. Non tocca la china.</span>
+                            </button>
+
+                            <button
+                              onClick={() => setEraserType('all')}
+                              className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex flex-col gap-1.5 ${eraserType === 'all' ? 'bg-amber-50 border-amber-400 ring-4 ring-amber-100' : 'bg-white border-neutral-200 hover:bg-neutral-50 shadow-xs'}`}
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-3.5 h-3.5 rounded bg-amber-400 border border-amber-600 shadow-xs inline-block"></span>
+                                <span className={`text-[10px] font-black uppercase tracking-wider ${eraserType === 'all' ? 'text-amber-800' : 'text-neutral-500'}`}>China/Tutto</span>
+                              </div>
+                              <span className="text-[9px] text-neutral-400 leading-snug">La classica gomma gialla. Rimuove china, matita, testi, retini e tutto il resto.</span>
+                            </button>
+                          </div>
+
+                          {/* Eraser radius slider */}
+                          <div className="space-y-2 pt-2 border-t border-neutral-100">
+                            <div className="flex justify-between items-center">
+                              <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-sans">Spessore Punta Gomma</label>
+                              <span className="text-[10px] font-mono font-bold text-neutral-600">{eraserRadius} mm (px)</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="5"
+                              max="100"
+                              step="5"
+                              value={eraserRadius}
+                              onChange={(e) => setEraserRadius(Number(e.target.value))}
+                              className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-indigo-600 font-bold"
+                            />
+                            <p className="text-[9px] text-neutral-400 leading-tight">Ottimizza la dimensione per cancellature precise.</p>
+                          </div>
+                        </div>
                       </div>
                     ) : (
                       <div className="space-y-4">

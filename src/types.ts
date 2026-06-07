@@ -31,12 +31,15 @@ export interface CADEntity {
     config: { type: 'curvo' | 'rettilineo'; value: number };
   };
   isBIM?: boolean;
-  bimType?: 'room' | 'door' | 'window' | 'wall' | 'electrical_symbol' | 'hydraulic_symbol';
+  bimType?: 'room' | 'door' | 'window' | 'wall' | 'electrical_symbol' | 'hydraulic_symbol' | 'functional_area';
+  bimAreaType?: 'stanza' | 'muro' | 'tramezzo' | 'giardino' | 'tetto' | 'altro';
   bimName?: string;
   bimHeight?: number; // e.g. 2.70
   bimWidth?: number;  // e.g. 80, 90, 120
   bimWindowHeight?: number; // e.g. 140
-  bimPoints?: Point[]; // Polygon corners For rooms
+  bimPoints?: Point[]; // Polygon corners For rooms/areas
+  backgroundColor?: string; // Fill color for functional areas
+  bimHatchPattern?: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE'; 
 }
 
 export interface LineEntity extends CADEntity {

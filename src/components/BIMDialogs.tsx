@@ -903,3 +903,221 @@ export const FinitureDialog: React.FC<FinitureDialogProps> = ({
     </div>
   );
 };
+
+// 9. --- AREA FUNZIONALE DIALOG ---
+interface AreaFunzionaleDialogProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: (areaData: { 
+    type: 'stanza' | 'muro' | 'tramezzo' | 'giardino' | 'tetto' | 'altro'; 
+    name: string; 
+    color: string; 
+    height: number;
+    hatch: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE';
+  }) => void;
+  points?: Point[];
+  initialData?: {
+    type: 'stanza' | 'muro' | 'tramezzo' | 'giardino' | 'tetto' | 'altro';
+    name: string;
+    color: string;
+    height: number;
+    hatch: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE';
+  };
+}
+
+const AREA_COLORS = [
+  'rgba(52, 211, 153, 0.4)', // Stanza (Emerald)
+  'rgba(244, 63, 94, 0.4)',  // Muro (Rose)
+  'rgba(59, 130, 246, 0.4)', // Tramezzo (Blue)
+  'rgba(132, 204, 22, 0.4)', // Giardino (Lime)
+  'rgba(168, 85, 247, 0.4)', // Tetto (Purple)
+  'rgba(249, 115, 22, 0.4)', // Altro (Orange)
+];
+
+const HATCH_PATTERNS: Array<{ id: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE', label: string }> = [
+  { id: 'SOLID', label: 'Colore Pieno' },
+  { id: 'ANSI31', label: 'Tratteggio (ANSI31)' },
+  { id: 'CROSS', label: 'Reticolo (Cross)' },
+  { id: 'NONE', label: 'Solo Contorno' },
+];
+
+const AREA_LABELS: Record<string, string> = {
+  stanza: 'Stanza / Locale',
+  muro: 'Muro Portante',
+  tramezzo: 'Tramezzo Interno',
+  giardino: 'Giardino / Esterno',
+  tetto: 'Tetto / Copertura',
+  altro: 'Altro / Funzione Specifica'
+};
+
+export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
+  isOpen,
+  onClose,
+  onConfirm,
+  points,
+  initialData
+}) => {
+  const { position, handlePointerDown, handlePointerMove, handlePointerUp } = useDraggableDialog(isOpen, { x: 300, y: 130 });
+  const [areaType, setAreaType] = useState<'stanza' | 'muro' | 'tramezzo' | 'giardino' | 'tetto' | 'altro'>('stanza');
+  const [name, setName] = useState('');
+  const [color, setColor] = useState(AREA_COLORS[0]);
+  const [height, setHeight] = useState(2.70);
+  const [hatch, setHatch] = useState<'SOLID' | 'ANSI31' | 'CROSS' | 'NONE'>('SOLID');
+
+  useEffect(() => {
+    if (isOpen) {
+      if (initialData) {
+        setAreaType(initialData.type);
+        setName(initialData.name);
+        setColor(initialData.color);
+        setHeight(initialData.height);
+        setHatch(initialData.hatch);
+      } else {
+        // Reset to defaults for new area
+        setAreaType('stanza');
+        setName(AREA_LABELS['stanza']);
+        setColor(AREA_COLORS[0]);
+        setHeight(2.70);
+        setHatch('SOLID');
+      }
+    }
+  }, [isOpen, initialData]);
+
+  // Effect only for type changes (when NOT in edit mode or when user manually changes type)
+  useEffect(() => {
+    if (isOpen && !initialData) {
+      setName(AREA_LABELS[areaType] || '');
+      const types: Array<'stanza' | 'muro' | 'tramezzo' | 'giardino' | 'tetto' | 'altro'> = ['stanza', 'muro', 'tramezzo', 'giardino', 'tetto', 'altro'];
+      const idx = types.indexOf(areaType);
+      setColor(AREA_COLORS[idx % AREA_COLORS.length]);
+      
+      if (areaType === 'muro') setHatch('ANSI31');
+      else if (areaType === 'tetto') setHatch('CROSS');
+      else setHatch('SOLID');
+    }
+  }, [isOpen, areaType, initialData]);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onConfirm({ type: areaType, name, color, height, hatch });
+  };
+
+  return (
+    <div 
+      className="fixed z-[200] bg-slate-950 border-2 border-cyan-500/50 p-5 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.6)] max-w-sm w-full text-white backdrop-blur-2xl"
+      style={{ left: `${position.x}px`, top: `${position.y}px` }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div 
+        className="flex justify-between items-center border-b border-white/10 pb-3 mb-4 cursor-grab active:cursor-grabbing"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+      >
+        <div className="flex flex-col text-left">
+          <h3 className="text-[12px] font-black uppercase text-cyan-400 tracking-widest font-mono flex items-center gap-2">
+            <Layers size={14} className="animate-pulse" />
+            <span>{initialData ? 'MODIFICA AREA BIM' : 'RILEVAMENTO AREA BIM'}</span>
+          </h3>
+          <span className="text-[9px] text-slate-500 font-bold font-mono">{initialData ? 'Aggiorna parametri area selezionata' : 'Input parametri aree funzionali'}</span>
+        </div>
+        <button type="button" onClick={onClose} className="bg-white/5 border border-white/10 text-slate-400 hover:text-white rounded-lg p-1.5 transition-colors">
+          <X size={16} />
+        </button>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="block text-[9px] text-slate-400 font-black uppercase tracking-widest mb-1.5 font-mono">Tipo di Funzione</label>
+          <div className="grid grid-cols-2 gap-1.5">
+            {(Object.keys(AREA_LABELS) as Array<keyof typeof AREA_LABELS>).map((type) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => setAreaType(type)}
+                className={`py-1.5 px-2.5 rounded-lg border transition-all text-[10px] font-bold font-sans text-left flex items-center gap-2 ${
+                  areaType === type 
+                  ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200' 
+                  : 'bg-white/5 border-white/10 text-slate-400 hover:border-white/20 hover:text-slate-200'
+                }`}
+              >
+                <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: AREA_COLORS[['stanza', 'muro', 'tramezzo', 'giardino', 'tetto', 'altro'].indexOf(type)] }}></div>
+                {AREA_LABELS[type]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2">
+            <label className="block text-[9px] text-slate-400 font-black uppercase tracking-widest mb-1.5 font-mono">Etichetta Vano</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full bg-white/5 border border-white/10 text-white rounded-lg p-2.5 text-xs font-bold focus:outline-none focus:border-cyan-500 transition-colors"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[9px] text-slate-400 font-black uppercase tracking-widest mb-1.5 font-mono">Retino (Hatch)</label>
+            <select
+              value={hatch}
+              onChange={(e) => setHatch(e.target.value as any)}
+              className="w-full bg-white/5 border border-white/10 text-white rounded-lg p-2.5 text-[10px] font-bold focus:outline-none focus:border-cyan-500"
+            >
+              {HATCH_PATTERNS.map(p => <option key={p.id} value={p.id} className="bg-slate-900">{p.label}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[9px] text-slate-400 font-black uppercase tracking-widest mb-1.5 font-mono">Altezza (m)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={height}
+              onChange={(e) => setHeight(parseFloat(e.target.value) || 2.70)}
+              className="w-full bg-white/5 border border-white/10 text-white rounded-lg p-2.5 text-xs font-mono font-bold focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <label className="block text-[9px] text-slate-400 font-black uppercase tracking-widest mb-1.5 font-mono">Colore Area</label>
+            <div className="flex items-center gap-2 h-10 bg-white/5 border border-white/10 rounded-lg px-3 overflow-hidden">
+               <input
+                type="color"
+                value={color.includes('rgba') ? '#06b6d4' : color}
+                onChange={(e) => {
+                  const r = parseInt(e.target.value.slice(1, 3), 16);
+                  const g = parseInt(e.target.value.slice(3, 5), 16);
+                  const b = parseInt(e.target.value.slice(5, 7), 16);
+                  setColor(`rgba(${r}, ${g}, ${b}, 0.4)`);
+                }}
+                className="w-6 h-6 bg-transparent border-0 cursor-pointer"
+              />
+              <span className="text-[10px] font-mono text-slate-500">{color.substring(0, 15)}...</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+          <p className="text-[9px] text-emerald-400/80 leading-relaxed italic">
+            L'area visualizzata sul CAD avrà un <span className="text-emerald-300 font-bold underline">bordo verde lampeggiante</span> per conferma posizionale.
+          </p>
+        </div>
+
+        <button
+          type="submit"
+          className="w-full bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-black py-3.5 rounded-lg text-xs tracking-widest transition-all shadow-lg cursor-pointer uppercase active:scale-[0.97]"
+        >
+          {initialData ? 'SALVA MODIFICHE ✅' : 'GENERA AREA FUNZIONALE ✅'}
+        </button>
+      </form>
+    </div>
+  );
+};
+

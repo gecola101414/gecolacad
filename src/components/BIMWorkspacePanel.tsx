@@ -17,6 +17,7 @@ import {
   RotateCw,
   Copy as CopyIcon,
   Maximize2,
+  Edit,
   Zap,
   Droplet,
   Grid,
@@ -135,6 +136,8 @@ interface BIMWorkspacePanelProps {
   onOpenElettrico?: () => void;
   onOpenIdraulico?: () => void;
   onOpenFiniture?: () => void;
+  onEditArea?: (id: string) => void;
+  onOpen3DView?: () => void;
 }
 
 // Shoelace formula helper
@@ -181,7 +184,9 @@ export function BIMWorkspacePanel({
   onOpenSanitari,
   onOpenElettrico,
   onOpenIdraulico,
-  onOpenFiniture
+  onOpenFiniture,
+  onEditArea,
+  onOpen3DView
 }: BIMWorkspacePanelProps) {
   const [customRoomName, setCustomRoomName] = useState<string>("");
   const [open2DSection, setOpen2DSection] = useState<boolean>(false);
@@ -703,6 +708,13 @@ export function BIMWorkspacePanel({
         <p className="text-[11px] leading-relaxed text-slate-300">
           Traccia elementi strutturali avanzati su layer automatici dedicati, configura impianti, arredi, e pavimenti per calcoli metrici in tempo reale.
         </p>
+        <button 
+          onClick={onOpen3DView}
+          className="mt-4 w-full bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black py-2.5 rounded-lg flex items-center justify-center gap-2 text-xs tracking-widest uppercase transition-all shadow-[0_10px_20px_rgba(34,211,238,0.2)]"
+        >
+          <BoxIcon size={16} />
+          Visualizzazione 3D BIM
+        </button>
       </div>
 
       {/* Rilevamento e Tracciamento Locali */}
@@ -1017,7 +1029,7 @@ export function BIMWorkspacePanel({
         {bimRooms.length > 0 ? (
           <div className="border border-neutral-200 rounded-lg overflow-hidden bg-white">
             <div className="p-1 px-2.5 bg-neutral-100 text-[9.5px] font-bold uppercase tracking-wider text-slate-500 border-b flex justify-between">
-              <span>Locale</span>
+              <span>Aree Funzionali</span>
               <span>Sup. (mq)</span>
             </div>
             <div className="divide-y max-h-40 overflow-y-auto">
@@ -1025,6 +1037,7 @@ export function BIMWorkspacePanel({
                 const pts = (r as any).bimPoints || (r as any).points;
                 const area = getRoomAreaMq(pts);
                 const isSelected = r.id === selectedId;
+                const dotColor = (r as any).backgroundColor || (r as any).color || '#10b981';
                 return (
                   <div
                     key={r.id}
@@ -1034,12 +1047,28 @@ export function BIMWorkspacePanel({
                     }`}
                   >
                     <span className="truncate pr-4 max-w-[130px] flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                      {r.bimName || "Unlabeled"}
+                      <span className="w-2.5 h-2.5 rounded-full border border-black/10 shadow-inner shrink-0" style={{ backgroundColor: dotColor }}></span>
+                      <div className="flex flex-col min-w-0">
+                        <span className="truncate font-bold text-slate-700">{(r as any).bimName || "Unlabeled"}</span>
+                        <div className="flex items-center gap-1">
+                          {(r as any).bimAreaType && (
+                            <span className="text-[7.5px] opacity-60 uppercase font-bold tracking-tighter leading-none">{(r as any).bimAreaType}</span>
+                          )}
+                          {(r as any).bimHatchPattern && (
+                             <span className="text-[7.5px] opacity-40 uppercase font-black tracking-tighter leading-none border-l pl-0.5 border-slate-300">{(r as any).bimHatchPattern}</span>
+                          )}
+                        </div>
+                      </div>
                     </span>
-                    <span className="font-mono text-[10px]">
+                    <span className="font-mono text-[10px] font-bold text-emerald-600">
                       {area.toFixed(2)}
                     </span>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); onEditArea?.(r.id); }}
+                      className="ml-1 p-1 text-slate-400 hover:text-cyan-500 hover:bg-cyan-50 rounded transition-colors"
+                    >
+                      <Edit size={10} />
+                    </button>
                   </div>
                 );
               })}

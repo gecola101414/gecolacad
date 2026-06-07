@@ -653,7 +653,7 @@ const getRgbaFromColor = (colorStr: string, alpha: number) => {
 };
 
 const drawHatchPattern = (ctx: CanvasRenderingContext2D, entity: any, zoom: number) => {
-  const { pattern, scale, angle, color, points, sfumatura = 0 } = entity;
+  const { pattern, scale, angle, color, points, sfumatura = 0, backgroundColor } = entity;
   if (!points || points.length < 3) return;
 
   ctx.save();
@@ -667,40 +667,57 @@ const drawHatchPattern = (ctx: CanvasRenderingContext2D, entity: any, zoom: numb
   ctx.closePath();
   ctx.clip();
 
-  // If solid fill, draw solid color or radial gradient and return
-  if (pattern?.toLowerCase() === 'solid') {
-    if (sfumatura > 0) {
-      // Calculate polygon center and bounds
-      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      for (const p of points) {
-        if (p.x < minX) minX = p.x;
-        if (p.x > maxX) maxX = p.x;
-        if (p.y < minY) minY = p.y;
-        if (p.y > maxY) maxY = p.y;
-      }
-      const cx = (minX + maxX) / 2;
-      const cy = (minY + maxY) / 2;
-      const diag = Math.sqrt((maxX - minX) ** 2 + (maxY - minY) ** 2);
-      const halfDiag = Math.max(10, diag / 2);
-
-      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, halfDiag);
-      const startColor = getRgbaFromColor(color || '#000000', 1.0);
-      const endOpacity = Math.max(0, 1 - (sfumatura / 100));
-      const endColor = getRgbaFromColor(color || '#000000', endOpacity);
-      grad.addColorStop(0, startColor);
-      grad.addColorStop(1, endColor);
-      ctx.fillStyle = grad;
-    } else {
-      ctx.fillStyle = color || 'rgba(99, 102, 241, 0.45)';
+  // Draw background color if present (important for BIM areas)
+  if (backgroundColor) {
+    ctx.fillStyle = backgroundColor;
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i].x, points[i].y);
     }
+    ctx.closePath();
     ctx.fill();
+  }
+
+  // If solid fill and no background was drawn yet, handle solid pattern
+  if (pattern?.toLowerCase() === 'solid') {
+    if (!backgroundColor) { // Only if not already filled by background
+      if (sfumatura > 0) {
+        // Calculate polygon center and bounds
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const p of points) {
+          if (p.x < minX) minX = p.x;
+          if (p.x > maxX) maxX = p.x;
+          if (p.y < minY) minY = p.y;
+          if (p.y > maxY) maxY = p.y;
+        }
+        const cx = (minX + maxX) / 2;
+        const cy = (minY + maxY) / 2;
+        const diag = Math.sqrt((maxX - minX) ** 2 + (maxY - minY) ** 2);
+        const halfDiag = Math.max(10, diag / 2);
+
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, halfDiag);
+        const startColor = getRgbaFromColor(color || '#000000', 1.0);
+        const endOpacity = Math.max(0, 1 - (sfumatura / 100));
+        const endColor = getRgbaFromColor(color || '#000000', endOpacity);
+        grad.addColorStop(0, startColor);
+        grad.addColorStop(1, endColor);
+        ctx.fillStyle = grad;
+        ctx.fill();
+      } else {
+        ctx.fillStyle = color || 'rgba(99, 102, 241, 0.45)';
+        ctx.fill();
+      }
+    }
     ctx.restore();
     return;
   }
 
-  // Draw optional light background coloring for beautiful hatch readability on technical papers
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.015)';
-  ctx.fill();
+  // Draw optional light background coloring if no specific background color was provided
+  if (!backgroundColor) {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.015)';
+    ctx.fill();
+  }
 
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const p of points) {
@@ -2072,6 +2089,8 @@ interface CADCanvasProps {
   setDefaultLineStyle: React.Dispatch<React.SetStateAction<{ color: string, lineWidth: number, dashed: boolean, mode: 'ink' | 'pencil' | 'CAD' }>>;
   eraserRadius: number;
   setEraserRadius: React.Dispatch<React.SetStateAction<number>>;
+  eraserType?: 'pencil' | 'all';
+  setEraserType?: React.Dispatch<React.SetStateAction<'pencil' | 'all'>>;
   onMouseMovePosition?: (pos: Point) => void;
   rulerStyle?: 'tecnigrafo' | 'crosshair';
   orthoMode?: boolean;
@@ -2097,9 +2116,11 @@ interface CADCanvasProps {
     angle: number;
     color: string;
   };
+  onAreaDetected?: (points: Point[]) => void;
+  highlightedPoints?: Point[] | null;
 }
 
-export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultHatchStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, setOrthoMode, isContinuousMode = false, cancelTrigger = 0, parallelTrigger = 0, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, selectedBIMSymbolType, setSelectedBIMSymbolType, bimSymbolScale = 1, raccordoConfig, onEditRaccordo, onActionStart }, ref) => {
+export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultHatchStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, eraserType = 'pencil', setEraserType, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, setOrthoMode, isContinuousMode = false, cancelTrigger = 0, parallelTrigger = 0, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, selectedBIMSymbolType, setSelectedBIMSymbolType, bimSymbolScale = 1, raccordoConfig, onEditRaccordo, onActionStart, onAreaDetected, highlightedPoints }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const entitiesRef = useRef(entities);
   useEffect(() => {
@@ -4615,117 +4636,108 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       if (activeTool === 'Eraser') {
           ctx.save();
           
-          // 1. Draw target indicator (semi-transparent dashed circular boundary for precision CAD work)
-          ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
-          ctx.lineWidth = 1 / view.zoom;
-          ctx.setLineDash([4 / view.zoom, 4 / view.zoom]);
-          ctx.beginPath();
-          ctx.arc(eraserPos.x, eraserPos.y, eraserRadius / view.zoom, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.setLineDash([]); // clear dash
-
-          // 2. Draw classic red & blue pencil eraser cursor OR standard classic yellow technical eraser
+          // 2. Draw classic beveled drafting erasers with pointed precision tip
+          // No more circle of influence as requested - the rubber itself is the guide.
           ctx.translate(eraserPos.x, eraserPos.y);
-          ctx.rotate(-Math.PI / 8); // nice natural hand tilt
+          ctx.rotate(-Math.PI / 12); // subtle natural tilt
 
-          const w = 15 / view.zoom;
-          const h = 7 / view.zoom;
+          // Materialize them larger for better visibility
+          const w = 40 / view.zoom; 
+          const h = 12 / view.zoom;
 
-          if (defaultLineStyle.mode === 'pencil') {
-              // Red/pink half (standard pencil graphite eraser face)
-              ctx.fillStyle = '#e57373'; // Matte pinkish red
-              ctx.beginPath();
-              ctx.moveTo(-w, -h * 0.8);
-              ctx.lineTo(-w, h * 0.8);
-              ctx.quadraticCurveTo(-w - 2/view.zoom, 0, -w, -h * 0.8); // slight round tip
-              ctx.lineTo(0, h);
-              ctx.lineTo(0, -h);
-              ctx.closePath();
-              ctx.fill();
+          if (eraserType === 'pencil') {
+              // Classic white/light-grey pencil eraser with precision wedge tip
+              // Draw main rubber wedge body
+              ctx.fillStyle = '#f8fafc'; // Even brighter white for visibility
+              ctx.shadowBlur = 4 / view.zoom;
+              ctx.shadowColor = 'rgba(0,0,0,0.2)';
               
-              // Red detail highlight/shadow
-              ctx.strokeStyle = '#c62828';
-              ctx.lineWidth = 1 / view.zoom;
-              ctx.beginPath();
-              ctx.moveTo(-w, -h * 0.8);
-              ctx.lineTo(0, -h);
-              ctx.stroke();
-
-              // Blue half (hard ink eraser face)
-              ctx.fillStyle = '#1e88e5'; // Blue color
-              ctx.beginPath();
-              ctx.moveTo(0, -h);
-              ctx.lineTo(0, h);
-              ctx.lineTo(w - 2/view.zoom, h);
-              ctx.lineTo(w, -h * 0.5); // chisel angled edge
-              ctx.lineTo(w - 2/view.zoom, -h);
-              ctx.closePath();
-              ctx.fill();
-
-              // Blue detail shadow
-              ctx.strokeStyle = '#1565c0';
-              ctx.lineWidth = 1 / view.zoom;
-              ctx.beginPath();
-              ctx.moveTo(0, -h);
-              ctx.lineTo(w - 2/view.zoom, -h);
-              ctx.lineTo(w, -h * 0.5);
-              ctx.stroke();
-
-              // White separation line in the middle
-              ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-              ctx.lineWidth = 1.5 / view.zoom;
-              ctx.beginPath();
-              ctx.moveTo(0, -h);
-              ctx.lineTo(0, h);
-              ctx.stroke();
-          } else {
-              // Classic yellow technical ink eraser block (Rotring/Koh-I-Noor style)
-              ctx.fillStyle = '#ffcc00'; // Technical drawing yellow
               ctx.beginPath();
               ctx.moveTo(-w, -h);
+              ctx.lineTo(-w * 0.25, -h);
+              ctx.lineTo(0, 0); // precise sharp tip at cursor point (0,0)
+              ctx.lineTo(-w * 0.25, h);
               ctx.lineTo(-w, h);
-              ctx.lineTo(w - 2/view.zoom, h);
-              ctx.lineTo(w, h * 0.4); // chisel wedge look
-              ctx.lineTo(w, -h * 0.4);
-              ctx.lineTo(w - 2/view.zoom, -h);
               ctx.closePath();
               ctx.fill();
 
-              // Orange shadow highlight for high-quality definition
-              ctx.strokeStyle = '#d97706';
-              ctx.lineWidth = 1 / view.zoom;
+              // Shadow/bevel 3D facet (diagonal bevel)
+              ctx.fillStyle = '#e2e8f0'; 
+              ctx.beginPath();
+              ctx.moveTo(-w * 0.25, -h);
+              ctx.lineTo(0, 0);
+              ctx.lineTo(-w * 0.25, 0);
+              ctx.closePath();
+              ctx.fill();
+
+              // Royal blue paper sleeve wrap
+              ctx.fillStyle = '#1e3a8a'; 
+              ctx.beginPath();
+              ctx.moveTo(-w * 1.05, -h * 1.1);
+              ctx.lineTo(-w * 0.4, -h * 1.1);
+              ctx.lineTo(-w * 0.4, h * 1.1);
+              ctx.lineTo(-w * 1.05, h * 1.1);
+              ctx.closePath();
+              ctx.fill();
+
+              // Light blue stripe detail for professional look
+              ctx.fillStyle = '#3b82f6';
+              ctx.beginPath();
+              ctx.moveTo(-w * 0.95, -h * 1.1);
+              ctx.lineTo(-w * 0.8, -h * 1.1);
+              ctx.lineTo(-w * 0.8, h * 1.1);
+              ctx.lineTo(-w * 0.95, h * 1.1);
+              ctx.closePath();
+              ctx.fill();
+          } else {
+              // Classic professional yellow drafting ink/china eraser with precision wedge tip
+              // Main yellow rubber wedge body
+              ctx.fillStyle = '#fbbf24'; // Bright yellow
+              ctx.shadowBlur = 4 / view.zoom;
+              ctx.shadowColor = 'rgba(0,0,0,0.2)';
+
               ctx.beginPath();
               ctx.moveTo(-w, -h);
-              ctx.lineTo(w - 2/view.zoom, -h);
-              ctx.lineTo(w, -h * 0.4);
-              ctx.moveTo(w - 2/view.zoom, h);
-              ctx.lineTo(w, h * 0.4);
-              ctx.stroke();
-              
-              // Outer paper/cardboard wrap sleeves (classic Koh-I-Noor yellow erasers have a nice white paper sleeve)
-              ctx.fillStyle = '#ffffff'; // Pristine white cover
-              ctx.beginPath();
-              ctx.moveTo(-w * 0.7, -h * 1.05);
-              ctx.lineTo(-w * 0.7, h * 1.05);
-              ctx.lineTo(w * 0.1, h * 1.05);
-              ctx.lineTo(w * 0.1, -h * 1.05);
+              ctx.lineTo(-w * 0.25, -h);
+              ctx.lineTo(0, 0); // precise sharp tip at cursor point (0,0)
+              ctx.lineTo(-w * 0.25, h);
+              ctx.lineTo(-w, h);
               ctx.closePath();
               ctx.fill();
 
-              // Brand logo stripe/details on paper sleeve (e.g., orange thin stripe and black technical text bar)
-              ctx.fillStyle = '#374151'; // Dark graphite brand text bar
+              // Bevel shadow
+              ctx.fillStyle = '#d97706'; 
               ctx.beginPath();
-              ctx.moveTo(-w * 0.45, -h * 1.05);
-              ctx.lineTo(-w * 0.45, h * 1.05);
-              ctx.lineTo(-w * 0.25, h * 1.05);
-              ctx.lineTo(-w * 0.25, -h * 1.05);
+              ctx.moveTo(-w * 0.25, -h);
+              ctx.lineTo(0, 0);
+              ctx.lineTo(-w * 0.25, 0);
               ctx.closePath();
               ctx.fill();
 
-              // Orange accent dot on the sleeve
-              ctx.fillStyle = '#ea580c';
+              // White cardboard sleeve
+              ctx.fillStyle = '#ffffff'; 
               ctx.beginPath();
-              ctx.arc(-w * 0.1, 0, 1.5 / view.zoom, 0, Math.PI * 2);
+              ctx.moveTo(-w * 1.05, -h * 1.1);
+              ctx.lineTo(-w * 0.4, -h * 1.1);
+              ctx.lineTo(-w * 0.4, h * 1.1);
+              ctx.lineTo(-w * 1.05, h * 1.1);
+              ctx.closePath();
+              ctx.fill();
+
+              // Technical brand graphic bar
+              ctx.fillStyle = '#334155';
+              ctx.beginPath();
+              ctx.moveTo(-w * 0.9, -h * 1.1);
+              ctx.lineTo(-w * 0.7, -h * 1.1);
+              ctx.lineTo(-w * 0.7, h * 1.1);
+              ctx.lineTo(-w * 0.9, h * 1.1);
+              ctx.closePath();
+              ctx.fill();
+
+              // Brand orange dot/accent
+              ctx.fillStyle = '#f97316';
+              ctx.beginPath();
+              ctx.arc(-w * 0.55, 0, 2 / view.zoom, 0, Math.PI * 2);
               ctx.fill();
           }
 
@@ -6081,6 +6093,37 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           
           ctx.restore();
       }
+      // Highlight Area Funzionale being classified (Pulsing Green Border)
+      if (highlightedPoints && highlightedPoints.length > 2) {
+          ctx.save();
+          ctx.translate(view.pan.x, view.pan.y);
+          ctx.scale(view.zoom, view.zoom);
+          
+          ctx.beginPath();
+          ctx.moveTo(highlightedPoints[0].x, highlightedPoints[0].y);
+          for (let i = 1; i < highlightedPoints.length; i++) {
+              ctx.lineTo(highlightedPoints[i].x, highlightedPoints[i].y);
+          }
+          ctx.closePath();
+          
+          // Outer Glow / Flash - Pulsing based on Date.now()
+          const opacity = 0.3 + 0.7 * Math.abs(Math.sin(Date.now() / 250));
+          ctx.strokeStyle = `rgba(16, 185, 129, ${opacity})`;
+          ctx.lineWidth = 4 / view.zoom;
+          ctx.stroke();
+
+          // Inner sharp border
+          ctx.strokeStyle = '#34d399';
+          ctx.lineWidth = 1.5 / view.zoom;
+          ctx.setLineDash([5 / view.zoom, 3 / view.zoom]);
+          ctx.stroke();
+
+          // Subtle fill for confirmation
+          ctx.fillStyle = `rgba(52, 211, 153, 0.1)`;
+          ctx.fill();
+
+          ctx.restore();
+      }
     };
 
     renderRef.current = render;
@@ -6088,7 +6131,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   }, [entities, layers, view, flashIds, flashIntensity, selectedParallelLine, blink, selectedEntityId, 
       positioningGroupId, positioningEntityId, selectedRaccordoLineIds, dragEntityIds, highlightedTrimLine, 
       highlightedTrimSegment, activeTool, specchioMode, specchioSelectedIds, copySourceEntityIds, eraserPos, 
-      tecnigrafoOrigin, tecnigrafoLock, manualRoomPoints, drawing]);
+      tecnigrafoOrigin, tecnigrafoLock, manualRoomPoints, drawing, highlightedPoints]);
 
 
   // BASIC PAN/ZOOM HANDLING
@@ -6266,6 +6309,20 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         const newEntities: Entity[] = [];
 
         for (const ent of entitiesRef.current) {
+            // Check if we should ignore this entity based on eraser type
+            // White pencil eraser only cancels pencil lines
+            const isPencilEntity = (ent as any).mode === 'pencil';
+            
+            if (eraserType === 'pencil') {
+                // If it's a white eraser, it ONLY affects pencil lines.
+                // It must IGNORE ink/china and CAD/BIM/Text entities.
+                if (!isPencilEntity) {
+                    newEntities.push(ent);
+                    continue;
+                }
+            }
+            // If eraserType is 'all' (Yellow), it affects everything, so no skip.
+
             if (ent.type === 'line') {
                 if (ent.inkPoints) {
                     // ANY line with inkPoints (freehand or straight with wave effect)
@@ -8230,36 +8287,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     } else if (activeTool === 'BIM_RilevaStanza') {
         const poly = findBoundaryPolygon(screenPos, entities, view, rect.width, rect.height, screenToCanvas, layers);
         if (poly && poly.length > 2) {
-            const nextIdx = entities.filter(e => e.isBIM && e.bimType === 'room').length + 1;
-            const newRoom: Entity = {
-                id: Date.now().toString(),
-                type: 'hatch',
-                isBIM: true,
-                bimType: 'room',
-                bimName: 'Stanza ' + nextIdx,
-                bimHeight: 2.70,
-                color: 'rgba(52, 211, 153, 0.15)',
-                points: poly,
-                pattern: 'SOLID',
-                scale: 1,
-                angle: 0,
-                lineWidth: 1,
-                mode: 'pencil',
-                layer: activeLayerId
-            } as any;
-            setEntities(prev => {
-                const next = [...prev, newRoom];
-                onCommitHistory?.(next);
-                return next;
-            });
-            onSelect(newRoom.id, newRoom);
-        }
-    } else if (activeTool === 'BIM_DisegnaStanza') {
-        const clickedPoint = snapped.point;
-        if (manualRoomPoints.length > 2) {
-            const firstPt = manualRoomPoints[0];
-            const distToStart = Math.sqrt((clickedPoint.x - firstPt.x)**2 + (clickedPoint.y - firstPt.y)**2);
-            if (distToStart < 15 / view.zoom) {
+            if (onAreaDetected) {
+                onAreaDetected(poly);
+            } else {
+                // Fallback if not provided (should not happen in main app)
                 const nextIdx = entities.filter(e => e.isBIM && e.bimType === 'room').length + 1;
                 const newRoom: Entity = {
                     id: Date.now().toString(),
@@ -8269,21 +8300,57 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                     bimName: 'Stanza ' + nextIdx,
                     bimHeight: 2.70,
                     color: 'rgba(52, 211, 153, 0.15)',
-                    points: [...manualRoomPoints],
+                    points: poly,
                     pattern: 'SOLID',
                     scale: 1,
                     angle: 0,
                     lineWidth: 1,
                     mode: 'pencil',
                     layer: activeLayerId
-                } as any;
+                };
                 setEntities(prev => {
                     const next = [...prev, newRoom];
                     onCommitHistory?.(next);
                     return next;
                 });
-                onSelect(newRoom.id);
-                setManualRoomPoints([]);
+                onSelect(newRoom.id, newRoom);
+            }
+        }
+    } else if (activeTool === 'BIM_DisegnaStanza') {
+        const clickedPoint = snapped.point;
+        if (manualRoomPoints.length > 2) {
+            const firstPt = manualRoomPoints[0];
+            const distToStart = Math.sqrt((clickedPoint.x - firstPt.x)**2 + (clickedPoint.y - firstPt.y)**2);
+            if (distToStart < 15 / view.zoom) {
+                if (onAreaDetected) {
+                    onAreaDetected([...manualRoomPoints]);
+                    setManualRoomPoints([]);
+                } else {
+                    const nextIdx = entities.filter(e => e.isBIM && e.bimType === 'room').length + 1;
+                    const newRoom: Entity = {
+                        id: Date.now().toString(),
+                        type: 'hatch',
+                        isBIM: true,
+                        bimType: 'room',
+                        bimName: 'Stanza ' + nextIdx,
+                        bimHeight: 2.70,
+                        color: 'rgba(52, 211, 153, 0.15)',
+                        points: [...manualRoomPoints],
+                        pattern: 'SOLID',
+                        scale: 1,
+                        angle: 0,
+                        lineWidth: 1,
+                        mode: 'pencil',
+                        layer: activeLayerId
+                    };
+                    setEntities(prev => {
+                        const next = [...prev, newRoom];
+                        onCommitHistory?.(next);
+                        return next;
+                    });
+                    onSelect(newRoom.id);
+                    setManualRoomPoints([]);
+                }
                 return;
             }
         }
@@ -9930,6 +9997,12 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
+
+    // Se siamo in modalità Gomma, il clic col tasto destro cambia tipo di gomma
+    if (activeTool === 'Eraser' && setEraserType) {
+        setEraserType(prev => prev === 'pencil' ? 'all' : 'pencil');
+        return;
+    }
 
     // Se c'è una finestra di input manuale, il tasto destro conferma (OK)
     if (showManualInput) {
