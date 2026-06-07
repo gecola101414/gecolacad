@@ -2025,6 +2025,10 @@ export default function App() {
             setSelectedBIMSymbolType={setSelectedBIMSymbolType}
             bimSymbolScale={bimSymbolScale}
             defaultHatchStyle={defaultHatchStyle}
+            bimWallHeight={bimWallHeight}
+            bimDoorHeight={bimDoorHeight}
+            bimWindowHeight={bimWindowHeight}
+            bimWallThickness={bimWallThickness}
             onActionStart={() => {
               setHoveredGuide(null);
               setGuideLockedBy(null);

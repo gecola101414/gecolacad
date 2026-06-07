@@ -2118,9 +2118,13 @@ interface CADCanvasProps {
   };
   onAreaDetected?: (points: Point[]) => void;
   highlightedPoints?: Point[] | null;
+  bimWallHeight?: number;
+  bimDoorHeight?: number;
+  bimWindowHeight?: number;
+  bimWallThickness?: number;
 }
 
-export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultHatchStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, eraserType = 'pencil', setEraserType, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, setOrthoMode, isContinuousMode = false, cancelTrigger = 0, parallelTrigger = 0, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, selectedBIMSymbolType, setSelectedBIMSymbolType, bimSymbolScale = 1, raccordoConfig, onEditRaccordo, onActionStart, onAreaDetected, highlightedPoints }, ref) => {
+export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultHatchStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, eraserType = 'pencil', setEraserType, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, setOrthoMode, isContinuousMode = false, cancelTrigger = 0, parallelTrigger = 0, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, selectedBIMSymbolType, setSelectedBIMSymbolType, bimSymbolScale = 1, raccordoConfig, onEditRaccordo, onActionStart, onAreaDetected, highlightedPoints, bimWallHeight = 270, bimDoorHeight = 210, bimWindowHeight = 140, bimWallThickness = 15 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const entitiesRef = useRef(entities);
   useEffect(() => {
@@ -8374,7 +8378,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             let endPoint = drawing.current || snapped.point;
 
             if (activeTool === 'BIM_Muro') {
-                const thickness = lastWallThickness || 15;
+                const thickness = bimWallThickness || 15;
                 const newElem: Entity = {
                     id: Date.now().toString(),
                     type: 'line',
@@ -8382,6 +8386,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                     bimType: 'wall',
                     bimName: `Muro sp.${thickness} cm`,
                     bimWidth: thickness,
+                    bimHeight: bimWallHeight,
                     start: drawing.start,
                     end: endPoint,
                     color: '#4b5563',
@@ -10489,7 +10494,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
         let newEntity: Entity;
         if (tool === 'BIM_Muro') {
-            const thickness = lastWallThickness || 15;
+            const thickness = bimWallThickness || 15;
             newEntity = {
                 id: Date.now().toString(),
                 type: 'line',
@@ -10497,6 +10502,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 bimType: 'wall',
                 bimName: `Muro sp.${thickness} cm`,
                 bimWidth: thickness,
+                bimHeight: bimWallHeight,
                 start: drawing.start,
                 end: finalPoint,
                 color: '#4b5563',
@@ -10504,10 +10510,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 mode: 'ink',
                 layer: 'BIM_Muri'
             } as any;
-            setLastWallThickness(thickness);
             localStorage.setItem('lastWallThickness', thickness.toString());
         } else {
             const isDoor = tool === 'BIM_Porta';
+            const height = isDoor ? (bimDoorHeight || 210) : (bimWindowHeight || 140);
             newEntity = {
                 id: Date.now().toString(),
                 type: 'line',
@@ -10515,7 +10521,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 bimType: isDoor ? 'door' : 'window',
                 bimName: isDoor ? `Porta ${L}` : `Finestra ${L}x${H}`,
                 bimWidth: L,
-                bimWindowHeight: isDoor ? undefined : H,
+                bimHeight: isDoor ? height : undefined,
+                bimWindowHeight: isDoor ? undefined : (H || height),
                 start: drawing.start,
                 end: finalPoint,
                 color: isDoor ? '#dc2626' : '#2563eb',
