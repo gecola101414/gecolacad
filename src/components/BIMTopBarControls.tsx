@@ -88,7 +88,7 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
   setBimSymbolScale
 }) => {
   const [activeDropdown, setActiveDropdown] = useState<
-    'muri' | 'porte' | 'finestre' | 'arredi' | 'sanitari' | 'elettrico' | 'idraulico' | 'finiture' | null
+    'porte' | 'finestre' | 'arredi' | 'sanitari' | 'elettrico' | 'idraulico' | 'finiture' | null
   >(null);
 
   const containerRef = useRef<HTMLDivElement>(null);

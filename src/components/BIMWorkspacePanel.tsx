@@ -898,14 +898,38 @@ export function BIMWorkspacePanel({
                     className="w-full border rounded px-1.5 py-1 text-xs bg-white"
                   />
                 </div>
-                <div className="bg-white/80 border p-1 rounded-md flex flex-col justify-center items-center text-center">
-                  <span className="text-[9px] text-slate-400 font-mono">Volume Loc.</span>
-                  <span className="text-[11px] font-bold text-slate-700">
-                    {((getRoomAreaMq((selectedEntity as any).bimPoints || (selectedEntity as any).points)) * (selectedEntity.bimHeight || 2.70)).toFixed(1)} m³
-                  </span>
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-0.5 font-bold">
+                    Tipo Area
+                  </label>
+                  <select
+                    value={selectedEntity.bimAreaType || 'stanza'}
+                    onChange={(e) => updateSelectedBIMField("bimAreaType", e.target.value)}
+                    className="w-full border rounded px-1.5 py-1 text-xs bg-white"
+                  >
+                    <option value="stanza">Stanza/Locale</option>
+                    <option value="muro">Muro Portante</option>
+                    <option value="tramezzo">Tramezzo Interno</option>
+                    <option value="giardino">Giardino/Esterno</option>
+                    <option value="tetto">Tetto/Copertura</option>
+                    <option value="altro">Altro/Specifica</option>
+                  </select>
                 </div>
               </div>
             )}
+            
+            <div className="pt-2">
+              <label className="text-[10px] text-slate-500 font-bold block mb-1">
+                Inizio (Offset - cm)
+              </label>
+              <input
+                type="number"
+                value={(selectedEntity as any).bimOffset || 0}
+                onChange={(e) => updateSelectedBIMField("bimOffset", parseFloat(e.target.value) || 0)}
+                placeholder="Es: 10"
+                className="w-full border rounded px-2 py-1 bg-white text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              />
+            </div>
 
             {(selectedEntity.bimType === 'door' || selectedEntity.bimType === 'window') && (
               <div className="space-y-3">
@@ -967,6 +991,33 @@ export function BIMWorkspacePanel({
                     <RotateCw size={12} className="text-cyan-600" />
                     Ruota 90°
                   </button>
+                </div>
+
+                {/* Description field for price list */}
+                <div className="pt-2">
+                  <label className="text-[10px] text-slate-500 font-bold block mb-1">
+                    Descrizione Prezzario
+                  </label>
+                  <textarea
+                    value={selectedEntity.bimDescription || ""}
+                    onChange={(e) => updateSelectedBIMField("bimDescription", e.target.value)}
+                    placeholder="Inserisci descrizione prezzario..."
+                    className="w-full border rounded px-2 py-1 bg-white text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                    rows={3}
+                  />
+                </div>
+
+                <div className="pt-2">
+                  <label className="text-[10px] text-slate-500 font-bold block mb-1">
+                    Opere in Marmo (Soglie)
+                  </label>
+                  <input
+                    type="text"
+                    value={selectedEntity.bimMarmo || ""}
+                    onChange={(e) => updateSelectedBIMField("bimMarmo", e.target.value)}
+                    placeholder="Es: Marmo bianco, 3cm"
+                    className="w-full border rounded px-2 py-1 bg-white text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                  />
                 </div>
 
                 <button

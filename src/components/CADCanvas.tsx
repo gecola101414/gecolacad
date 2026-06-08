@@ -4,6 +4,7 @@ import { ManualInputOverlay } from './ManualInputOverlay';
 import { TEMPLATES, Template } from '../data/templates';
 import { PdfRenderer } from './PdfRenderer';
 import { ImageEditorOverlay } from './ImageEditorOverlay';
+import { contours } from 'd3-contour';
 
 const getEffectiveCADRenderWidth = (lw: number, mode: string | undefined, zoom: number): number => {
     if (mode === 'ink') {
@@ -27,7 +28,7 @@ export interface CADCanvasAPI {
     clickPt1: Point,
     clickPt2: Point,
     existingRaccordoId: string,
-    config: { type: 'curvo' | 'rettilineo'; value: number },
+    config: { type: 'curvo' | 'rettilineo' | 'taglia'; value: number },
     originalLine1: any,
     originalLine2: any
   ) => void;
@@ -526,6 +527,17 @@ const isPointInPolygon = (p: Point, poly: Point[]): boolean => {
   return inside;
 };
 
+const isPointInFullPolygon = (pt: Point, poly: { points: Point[], holes?: Point[][] }): boolean => {
+  const insideOuter = isPointInPolygon(pt, poly.points);
+  if (!insideOuter) return false;
+  if (poly.holes) {
+    for (const hole of poly.holes) {
+      if (isPointInPolygon(pt, hole)) return false;
+    }
+  }
+  return true;
+};
+
 const distanceToSegmentPt = (p: Point, s: Point, e: Point): number => {
   const l2 = (e.x - s.x) ** 2 + (e.y - s.y) ** 2;
   if (l2 === 0) return Math.sqrt((p.x - s.x) ** 2 + (p.y - s.y) ** 2);
@@ -653,65 +665,84 @@ const getRgbaFromColor = (colorStr: string, alpha: number) => {
 };
 
 const drawHatchPattern = (ctx: CanvasRenderingContext2D, entity: any, zoom: number) => {
-  const { pattern, scale, angle, color, points, sfumatura = 0, backgroundColor } = entity;
-  if (!points || points.length < 3) return;
+    const { pattern, scale, angle, color, points, holes, sfumatura = 0, backgroundColor } = entity;
+    if (!points || points.length < 3) return;
 
-  ctx.save();
-  
-  // Set clipping path to the closed shape boundary
-  ctx.beginPath();
-  ctx.moveTo(points[0].x, points[0].y);
-  for (let i = 1; i < points.length; i++) {
-    ctx.lineTo(points[i].x, points[i].y);
-  }
-  ctx.closePath();
-  ctx.clip();
-
-  // Draw background color if present (important for BIM areas)
-  if (backgroundColor) {
-    ctx.fillStyle = backgroundColor;
+    ctx.save();
+    
+    // Set clipping path to the closed shape boundary (with holes) using even-odd fill rule
     ctx.beginPath();
     ctx.moveTo(points[0].x, points[0].y);
     for (let i = 1; i < points.length; i++) {
-      ctx.lineTo(points[i].x, points[i].y);
+        ctx.lineTo(points[i].x, points[i].y);
     }
     ctx.closePath();
-    ctx.fill();
-  }
-
-  // If solid fill and no background was drawn yet, handle solid pattern
-  if (pattern?.toLowerCase() === 'solid') {
-    if (!backgroundColor) { // Only if not already filled by background
-      if (sfumatura > 0) {
-        // Calculate polygon center and bounds
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        for (const p of points) {
-          if (p.x < minX) minX = p.x;
-          if (p.x > maxX) maxX = p.x;
-          if (p.y < minY) minY = p.y;
-          if (p.y > maxY) maxY = p.y;
-        }
-        const cx = (minX + maxX) / 2;
-        const cy = (minY + maxY) / 2;
-        const diag = Math.sqrt((maxX - minX) ** 2 + (maxY - minY) ** 2);
-        const halfDiag = Math.max(10, diag / 2);
-
-        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, halfDiag);
-        const startColor = getRgbaFromColor(color || '#000000', 1.0);
-        const endOpacity = Math.max(0, 1 - (sfumatura / 100));
-        const endColor = getRgbaFromColor(color || '#000000', endOpacity);
-        grad.addColorStop(0, startColor);
-        grad.addColorStop(1, endColor);
-        ctx.fillStyle = grad;
-        ctx.fill();
-      } else {
-        ctx.fillStyle = color || 'rgba(99, 102, 241, 0.45)';
-        ctx.fill();
-      }
+    
+    if (holes && holes.length > 0) {
+        holes.forEach((hole: Point[]) => {
+            if (hole.length < 3) return;
+            ctx.moveTo(hole[0].x, hole[0].y);
+            for (let i = 1; i < hole.length; i++) {
+                ctx.lineTo(hole[i].x, hole[i].y);
+            }
+            ctx.closePath();
+        });
     }
-    ctx.restore();
-    return;
-  }
+    
+    ctx.clip('evenodd');
+
+    // Draw background color if present (important for BIM areas)
+    if (backgroundColor) {
+        ctx.fillStyle = backgroundColor;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+            ctx.lineTo(points[i].x, points[i].y);
+        }
+        ctx.closePath();
+        if (holes) {
+            holes.forEach((hole: Point[]) => {
+                ctx.moveTo(hole[0].x, hole[0].y);
+                for(let i=1; i<hole.length; i++) ctx.lineTo(hole[i].x, hole[i].y);
+                ctx.closePath();
+            });
+        }
+        ctx.fill('evenodd');
+    }
+
+    // If solid fill and no background was drawn yet, handle solid pattern
+    if (pattern?.toLowerCase() === 'solid') {
+        if (!backgroundColor) { // Only if not already filled by background
+            if (sfumatura > 0) {
+                // Calculate polygon center and bounds
+                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                for (const p of points) {
+                    if (p.x < minX) minX = p.x;
+                    if (p.x > maxX) maxX = p.x;
+                    if (p.y < minY) minY = p.y;
+                    if (p.y > maxY) maxY = p.y;
+                }
+                const cx = (minX + maxX) / 2;
+                const cy = (minY + maxY) / 2;
+                const diag = Math.sqrt((maxX - minX) ** 2 + (maxY - minY) ** 2);
+                const halfDiag = Math.max(10, diag / 2);
+
+                const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, halfDiag);
+                const startColor = getRgbaFromColor(color || '#000000', 1.0);
+                const endOpacity = Math.max(0, 1 - (sfumatura / 100));
+                const endColor = getRgbaFromColor(color || '#000000', endOpacity);
+                grad.addColorStop(0, startColor);
+                grad.addColorStop(1, endColor);
+                ctx.fillStyle = grad;
+                ctx.fill('evenodd');
+            } else {
+                ctx.fillStyle = color || 'rgba(99, 102, 241, 0.45)';
+                ctx.fill('evenodd');
+            }
+        }
+        ctx.restore();
+        return;
+    }
 
   // Draw optional light background coloring if no specific background color was provided
   if (!backgroundColor) {
@@ -1140,7 +1171,7 @@ const findBoundaryPolygon = (
   height: number,
   screenToCanvas: (x: number, y: number) => Point,
   layers: Layer[]
-): Point[] | null => {
+): { points: Point[], holes?: Point[][] } | null => {
   const offCanvas = document.createElement('canvas');
   offCanvas.width = width;
   offCanvas.height = height;
@@ -1155,15 +1186,13 @@ const findBoundaryPolygon = (
   oCtx.scale(view.zoom, view.zoom);
 
   oCtx.strokeStyle = '#000000';
-  oCtx.lineWidth = Math.max(3.0, 3.5 / view.zoom);
+  oCtx.lineWidth = Math.max(5.0, 5.0 / view.zoom); // Increased lineWidth
   oCtx.lineJoin = 'round';
   oCtx.lineCap = 'round';
 
   entities.forEach(ent => {
     const layer = layers.find(l => l.id === ent.layer);
     if (layer && (!layer.visible || layer.frozen)) return;
-    // Exclude annotations, dimensions, hatches, and any furniture templates/BIM blocks
-    // so that rooms are scanned purely on architectural structural lines (walls)
     if (
       ent.type === 'dimension' ||
       ent.type === 'text' ||
@@ -1176,7 +1205,6 @@ const findBoundaryPolygon = (
     }
 
     if (ent.isBIM) {
-      // Allow doors and windows to seal the boundary envelope, but exclude rooms or other annotations
       if (ent.bimType !== 'door' && ent.bimType !== 'window') {
         return;
       }
@@ -1185,7 +1213,6 @@ const findBoundaryPolygon = (
     oCtx.beginPath();
     if (ent.type === 'line') {
       if (ent.inkPoints && ent.inkPoints.length > 0) {
-        // Handle freehand/pencil strokes by following all their intermediate points
         oCtx.moveTo(ent.inkPoints[0].x, ent.inkPoints[0].y);
         for (let i = 1; i < ent.inkPoints.length; i++) {
           oCtx.lineTo(ent.inkPoints[i].x, ent.inkPoints[i].y);
@@ -1247,10 +1274,7 @@ const findBoundaryPolygon = (
       break;
     }
 
-    const neighbors = [
-      [cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]
-    ];
-
+    const neighbors = [[cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]];
     for (const [nx, ny] of neighbors) {
       if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
         if (!filled[ny][nx] && isWhite(nx, ny)) {
@@ -1261,62 +1285,64 @@ const findBoundaryPolygon = (
     }
   }
 
-  if (touchesBorder) {
-    return null;
-  }
+  if (touchesBorder) return null;
 
-  let foundStart = false;
-  let bX = 0, bY = 0;
-  outer: for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      if (filled[y][x]) {
-        bX = x;
-        bY = y;
-        foundStart = true;
-        break outer;
-      }
-    }
-  }
-
-  if (!foundStart) return null;
-
-  const grid = Array.from({ length: height }, () => new Array(width).fill(false));
+  // Use d3-contour to find the multi-boundary of the filled region
+  const gridValues = new Float32Array(width * height);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      if (filled[y][x]) grid[y][x] = true;
+      gridValues[y * width + x] = filled[y][x] ? 1 : 0;
     }
   }
 
-  const rawContour = traceContour(grid, bX, bY);
-  if (rawContour.length < 3) return null;
+  const contourGen = contours().size([width, height]).thresholds([0.5]);
+  const results = contourGen(gridValues);
+  if (!results || results.length === 0) return null;
 
-  const downsampled: Point[] = [];
-  const step = Math.max(1, Math.floor(rawContour.length / 1000));
-  for (let i = 0; i < rawContour.length; i += step) {
-    downsampled.push(rawContour[i]);
-  }
-  if (downsampled.length > 0) {
-    downsampled.push(downsampled[0]);
-  }
+  // We find the MultiPolygon result (usually exactly one MultiPolygon is returned for threshold 0.5)
+  const multiPoly = results[0];
+  if (!multiPoly || !multiPoly.coordinates || multiPoly.coordinates.length === 0) return null;
 
-  const simplifiedScreen = simplifyPolygon(downsampled, 0.05);
-  if (simplifiedScreen.length > 1) {
-    const p1 = simplifiedScreen[0];
-    const pE = simplifiedScreen[simplifiedScreen.length - 1];
-    const dist = Math.sqrt((p1.x - pE.x)**2 + (p1.y - pE.y)**2);
-    if (dist < 1e-3) {
-      simplifiedScreen.pop();
+  // multiPoly.coordinates is [ Polygon, Polygon, ... ]
+  // Each Polygon is [ Ring, Ring, ... ] where the first Ring is outer and subsequent are holes
+  // We'll take the first non-empty MultiPolygon part
+  
+  let bestPoints: Point[] = [];
+  let bestHoles: Point[][] = [];
+
+  // Find the polygon that contains our click point (there should be only one since it's a connected component)
+  for (const polygon of multiPoly.coordinates) {
+    const outerRing = polygon[0].map((p: any) => ({ x: p[0], y: p[1] }));
+    if (isPointInPolygon(clickPoint, outerRing)) {
+      bestPoints = outerRing;
+      bestHoles = polygon.slice(1).map((ring: any) => ring.map((p: any) => ({ x: p[0], y: p[1] })));
+      break;
     }
   }
 
-  const expandedScreen = expandPolygon(simplifiedScreen, 1.2);
-  const canvasPoints = expandedScreen.map(pt => screenToCanvas(pt.x, pt.y));
+  if (bestPoints.length < 3) return null;
 
-  // Snap the detected polygon vertices to the exact CAD geometry features for precise areas (e.g., 25.00 mq)
-  const snappedPoints = snapPolygonToGeometry(canvasPoints, entities, layers);
-  const cleanedPoints = cleanSnappedPolygon(snappedPoints);
+  const processLoop = (loop: Point[]) => {
+    const downsampled: Point[] = [];
+    const step = Math.max(1, Math.floor(loop.length / 1000));
+    for (let i = 0; i < loop.length; i += step) downsampled.push(loop[i]);
+    if (downsampled.length > 0) downsampled.push(downsampled[0]);
 
-  return cleanedPoints;
+    const simplified = simplifyPolygon(downsampled, 0.05);
+    if (simplified.length > 1) {
+      const p1 = simplified[0], pE = simplified[simplified.length - 1];
+      if (Math.sqrt((p1.x - pE.x)**2 + (p1.y - pE.y)**2) < 1e-3) simplified.pop();
+    }
+    const expanded = expandPolygon(simplified, 1.2);
+    const canvasPts = expanded.map(pt => screenToCanvas(pt.x, pt.y));
+    const snapped = snapPolygonToGeometry(canvasPts, entities, layers);
+    return cleanSnappedPolygon(snapped);
+  };
+
+  return {
+    points: processLoop(bestPoints),
+    holes: bestHoles.length > 0 ? bestHoles.map(processLoop).filter(h => h.length >= 3) : undefined
+  };
 };
 
 function snapPolygonToGeometry(polyPoints: Point[], entities: Entity[], layers: Layer[]): Point[] {
@@ -2107,7 +2133,7 @@ interface CADCanvasProps {
   setSelectedBIMSymbolType?: (val: string | null) => void;
   bimSymbolScale?: number;
   defaultTextStyle?: { fontFamily: string, fontSize: number, fontWeight: string, textAlign: 'left' | 'center' | 'right' | 'justify' };
-  raccordoConfig?: { type: 'curvo' | 'rettilineo'; value: number };
+  raccordoConfig?: { type: 'curvo' | 'rettilineo' | 'taglia'; value: number };
   onEditRaccordo?: (raccordoEntity: Entity) => void;
   onActionStart?: () => void;
   defaultHatchStyle?: {
@@ -2116,8 +2142,8 @@ interface CADCanvasProps {
     angle: number;
     color: string;
   };
-  onAreaDetected?: (points: Point[]) => void;
-  highlightedPoints?: Point[] | null;
+  onAreaDetected?: (result: { points: Point[], holes?: Point[][] }) => void;
+  highlightedPoints?: Point[] | { points: Point[], holes?: Point[][] } | null;
   bimWallHeight?: number;
   bimDoorHeight?: number;
   bimWindowHeight?: number;
@@ -2440,7 +2466,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return;
         const rawMouse = screenToCanvas(mouseScreenPosRef.current.x - rect.left, mouseScreenPosRef.current.y - rect.top);
-        const snapped = getSnappedPoint(rawMouse, entities, activeTool, null);
+        const snapped = getSnappedPoint(rawMouse, entities, activeTool as any, null);
         currentStart = snapped.point;
       }
 
@@ -2459,9 +2485,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       
       const screenPos = canvasToScreen(currentStart.x, currentStart.y);
       setBubblePosition(screenPos);
-      if (activeTool !== 'Parallel') {
-        setShowManualInput(true);
-      }
+      setShowManualInput(true);
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -2616,7 +2640,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       clickPt1: Point,
       clickPt2: Point,
       existingRaccordoId: string,
-      config: { type: 'curvo' | 'rettilineo'; value: number },
+      config: { type: 'curvo' | 'rettilineo' | 'taglia'; value: number },
       originalLine1: any,
       originalLine2: any
     ) => {
@@ -2656,7 +2680,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       const stepX = Math.max(8, Math.round(width / gridCols));
       const stepY = Math.max(8, Math.round(height / gridRows));
 
-      const detectedPolygons: Point[][] = [];
+      const detectedPolygons: { points: Point[], holes?: Point[][] }[] = [];
 
       // Helpers for centroid and area
       const getCentroid = (pts: Point[]): Point => {
@@ -2676,6 +2700,16 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         return Math.abs(area) / 2;
       };
 
+      const getFullArea = (poly: { points: Point[], holes?: Point[][] }): number => {
+        let totalArea = getArea(poly.points);
+        if (poly.holes) {
+          poly.holes.forEach(hole => {
+            totalArea -= getArea(hole);
+          });
+        }
+        return Math.max(0, totalArea);
+      };
+
       // Loop through our screen search grid
       for (let c = 1; c < gridCols; c++) {
         for (let r = 1; r < gridRows; r++) {
@@ -2683,34 +2717,31 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           const y = r * stepY;
           const screenPt = { x, y };
 
-          const poly = findBoundaryPolygon(screenPt, entities, view, width, height, screenToCanvas, layers);
-          if (poly && poly.length > 2) {
-            const centroid = getCentroid(poly);
-            const area = getArea(poly);
-            const areaMq = area / 10000;
+    const poly = findBoundaryPolygon(screenPt, entities, view, width, height, screenToCanvas, layers);
+    if (poly && poly.points.length > 2) {
+        const centroid = getCentroid(poly.points);
+        const area = getFullArea(poly);
+        const areaMq = area / 10000;
 
-            // Rooms usually are between 1.0 mq and 150.0 mq
-            if (areaMq < 1.0 || areaMq > 150) continue;
+        if (areaMq < 1.0 || areaMq > 150) continue;
 
-            // Check if duplicate of an existing detected polygon
-            let isDuplicate = false;
-            for (const existing of detectedPolygons) {
-              const exCentroid = getCentroid(existing);
-              const dist = Math.sqrt((centroid.x - exCentroid.x)**2 + (centroid.y - exCentroid.y)**2);
-              const exArea = getArea(existing);
-              const areaDiff = Math.abs(area - exArea) / exArea;
+        let isDuplicate = false;
+        for (const existing of detectedPolygons) {
+            const exCentroid = getCentroid(existing.points);
+            const dist = Math.sqrt((centroid.x - exCentroid.x)**2 + (centroid.y - exCentroid.y)**2);
+            const exArea = getFullArea(existing);
+            const areaDiff = Math.abs(area - exArea) / exArea;
 
-              // If centroid is extremely close or area is almost identical, it's the exact same Room!
-              if (dist < 15 || (dist < 35 && areaDiff < 0.12)) {
+            if (dist < 15 || (dist < 35 && areaDiff < 0.12)) {
                 isDuplicate = true;
                 break;
-              }
             }
+        }
 
-            if (!isDuplicate) {
-              detectedPolygons.push(poly);
-            }
-          }
+        if (!isDuplicate) {
+            detectedPolygons.push(poly);
+        }
+    }
         }
       }
 
@@ -2772,10 +2803,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       let cntDisimpegno = 1;
 
       detectedPolygons.forEach((poly) => {
-        const areaMq = getArea(poly) / 10000;
+        const areaMq = getFullArea(poly) / 10000;
         
         // Count templates located inside this boundary
-        const furnitureInside = groupCentroids.filter(gc => isPointInPolygon(gc.center, poly));
+        const furnitureInside = groupCentroids.filter(gc => isPointInFullPolygon(gc.center, poly));
 
         // Skip tiny "fictional" spaces (like window recesses, framing artifacts, door swings)
         // that do not contain any physical furniture or fixtures
@@ -2785,7 +2816,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
         // Also check bounding box of the polygon to reject long, narrow sills/recesses
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        poly.forEach(pt => {
+        poly.points.forEach(pt => {
           if (pt.x < minX) minX = pt.x;
           if (pt.x > maxX) maxX = pt.x;
           if (pt.y < minY) minY = pt.y;
@@ -2909,7 +2940,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           bimName: label,
           bimHeight: 2.70,
           color: 'rgba(52, 211, 153, 0.15)',
-          points: poly,
+          points: poly.points,
+          holes: poly.holes,
           pattern: 'SOLID',
           scale: 1,
           angle: 0,
@@ -3023,7 +3055,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     };
   };
 
-  const getSnapPoints = (point: Point, entities: Entity[], activeTool: string, drawing: {start: Point, current: Point} | null): {point: Point, type: 'CAD' | 'smart', refPoint?: Point, refEntityId?: string, constraintAxis?: 'x' | 'y'}[] => {
+  const getSnapPoints = (point: Point, entities: Entity[], activeTool: string, drawing: {start: Point, current?: Point} | null): {point: Point, type: 'CAD' | 'smart', refPoint?: Point, refEntityId?: string, constraintAxis?: 'x' | 'y'}[] => {
     const snaps: {point: Point, type: 'CAD' | 'smart', refPoint?: Point, refEntityId?: string, constraintAxis?: 'x' | 'y'}[] = [];
     const keyPoints: Point[] = [];
     
@@ -3212,7 +3244,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     return snaps;
   };
 
-  const getSnappedPoint = (point: Point, entities: Entity[], activeTool: string, drawing: {start: Point, current: Point} | null): {
+  const getSnappedPoint = (point: Point, entities: Entity[], activeTool: string, drawing: {start: Point, current?: Point} | null): {
     point: Point;
     snapped: boolean;
     type: 'CAD' | 'smart';
@@ -3323,7 +3355,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           const maxY = Math.max(ent.start.y, ent.end.y) + clickThreshold;
           if (point.x < minX || point.x > maxX || point.y < minY || point.y > maxY) {
               // Special case for BIM doors/windows which might have extra geometry outside the main line
-              if (!ent.isBIM || ent.bimType === 'wall' || ent.bimType === 'symbol' || !ent.bimType) continue;
+              if (!ent.isBIM || ent.bimType === 'wall' || (ent.bimType && ent.bimType.includes('symbol')) || !ent.bimType) continue;
           }
       }
 
@@ -3567,7 +3599,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     clickPt1: Point,
     clickPt2: Point,
     existingRaccordoId?: string,
-    overrideConfig?: { type: 'curvo' | 'rettilineo'; value: number },
+    overrideConfig?: { type: 'curvo' | 'rettilineo' | 'taglia'; value: number },
     forceOriginalLines?: { originalLine1: LineEntity; originalLine2: LineEntity }
   ) => {
     const line1 = (forceOriginalLines ? forceOriginalLines.originalLine1 : entities.find(e => e.id === id1)) as LineEntity | undefined;
@@ -3592,44 +3624,26 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     const intersectY = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / denom;
     const I = { x: intersectX, y: intersectY };
 
-    // 2. Determine ray directions V1 and V2 starting from I towards click points
-    let len1 = Math.sqrt((clickPt1.x - I.x) ** 2 + (clickPt1.y - I.y) ** 2);
-    let V1 = { x: 0, y: 0 };
-    if (len1 > 1e-3) {
-      V1 = { x: (clickPt1.x - I.x) / len1, y: (clickPt1.y - I.y) / len1 };
-    } else {
-      let d1 = Math.sqrt((x1 - I.x) ** 2 + (y1 - I.y) ** 2);
-      let d2 = Math.sqrt((x2 - I.x) ** 2 + (y2 - I.y) ** 2);
-      let farPt = d1 > d2 ? line1.start : line1.end;
-      let lenFar = Math.sqrt((farPt.x - I.x) ** 2 + (farPt.y - I.y) ** 2);
-      if (lenFar > 1e-3) {
-        V1 = { x: (farPt.x - I.x) / lenFar, y: (farPt.y - I.y) / lenFar };
-      } else {
-        if (!existingRaccordoId) {
-          alert("Geometria del primo segmento non valida.");
-        }
-        return;
+    // 2. Determine ray directions V1 and V2 starting from I along the lines, away from I
+    const dStart1 = Math.sqrt((line1.start.x - I.x) ** 2 + (line1.start.y - I.y) ** 2);
+    const dEnd1 = Math.sqrt((line1.end.x - I.x) ** 2 + (line1.end.y - I.y) ** 2);
+    const farEndpoint1 = dStart1 > dEnd1 ? line1.start : line1.end;
+    const len1 = Math.max(dStart1, dEnd1);
+
+    const dStart2 = Math.sqrt((line2.start.x - I.x) ** 2 + (line2.start.y - I.y) ** 2);
+    const dEnd2 = Math.sqrt((line2.end.x - I.x) ** 2 + (line2.end.y - I.y) ** 2);
+    const farEndpoint2 = dStart2 > dEnd2 ? line2.start : line2.end;
+    const len2 = Math.max(dStart2, dEnd2);
+
+    if (len1 < 1e-3 || len2 < 1e-3) {
+      if (!existingRaccordoId) {
+        alert("Geometria di uno dei segmenti non valida.");
       }
+      return;
     }
 
-    let len2 = Math.sqrt((clickPt2.x - I.x) ** 2 + (clickPt2.y - I.y) ** 2);
-    let V2 = { x: 0, y: 0 };
-    if (len2 > 1e-3) {
-      V2 = { x: (clickPt2.x - I.x) / len2, y: (clickPt2.y - I.y) / len2 };
-    } else {
-      let d3 = Math.sqrt((x3 - I.x) ** 2 + (y3 - I.y) ** 2);
-      let d4 = Math.sqrt((x4 - I.x) ** 2 + (y4 - I.y) ** 2);
-      let farPt = d3 > d4 ? line2.start : line2.end;
-      let lenFar = Math.sqrt((farPt.x - I.x) ** 2 + (farPt.y - I.y) ** 2);
-      if (lenFar > 1e-3) {
-        V2 = { x: (farPt.x - I.x) / lenFar, y: (farPt.y - I.y) / lenFar };
-      } else {
-        if (!existingRaccordoId) {
-          alert("Geometria del secondo segmento non valida.");
-        }
-        return;
-      }
-    }
+    const V1 = { x: (farEndpoint1.x - I.x) / len1, y: (farEndpoint1.y - I.y) / len1 };
+    const V2 = { x: (farEndpoint2.x - I.x) / len2, y: (farEndpoint2.y - I.y) / len2 };
 
     // 3. Compute angle theta between V1 and V2
     const cosTheta = Math.max(-1, Math.min(1, V1.x * V2.x + V1.y * V2.y));
@@ -3659,12 +3673,12 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     // 4. Determine endpoints that lie on the rays pointing away from I
     const dot1 = (x1 - I.x) * V1.x + (y1 - I.y) * V1.y;
     const dot2 = (x2 - I.x) * V1.x + (y2 - I.y) * V1.y;
-    const farEndpoint1 = dot1 > dot2 ? line1.start : line1.end;
+    const farEndpoint1_proj = dot1 > dot2 ? line1.start : line1.end;
     const maxLen1 = Math.max(dot1, dot2);
 
     const dot3 = (x3 - I.x) * V2.x + (y3 - I.y) * V2.y;
     const dot4 = (x4 - I.x) * V2.x + (y4 - I.y) * V2.y;
-    const farEndpoint2 = dot3 > dot4 ? line2.start : line2.end;
+    const farEndpoint2_proj = dot3 > dot4 ? line2.start : line2.end;
     const maxLen2 = Math.max(dot3, dot4);
 
     // Check if configuration parameter is too large
@@ -3713,9 +3727,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     if (config.type === 'curvo') {
       // 6a. Arc-fillet construction
       const alpha = theta / 2;
+      // V_bisect points towards the corner I. To move O away from I, we follow this bisector.
       const V_bisect = { x: V1.x + V2.x, y: V1.y + V2.y };
       const lenBisect = Math.sqrt(V_bisect.x * V_bisect.x + V_bisect.y * V_bisect.y);
-      if (lenBisect < 1e-4) return;
+      if (lenBisect < 1e-6) return;
       V_bisect.x /= lenBisect;
       V_bisect.y /= lenBisect;
 
@@ -3728,7 +3743,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       const a1 = Math.atan2(U1.y, U1.x) * 180 / Math.PI;
       const a2 = Math.atan2(U2.y, U2.x) * 180 / Math.PI;
 
-      // center O points to bisect of Ray 1 and Ray 2. The arc midpoint faces corner/I
+      // The arc midpoint facing corner I is in the direction of -V_bisect relative to Center O
       const aMid = Math.atan2(-V_bisect.y, -V_bisect.x) * 180 / Math.PI;
 
       let startAngle = a1;
@@ -3767,16 +3782,53 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     }
 
     setEntities(prev => {
-      let filtered = prev;
-      if (existingRaccordoId) {
-        filtered = filtered.filter(ent => ent.id !== existingRaccordoId);
-      }
+      // 1. Remove existing raccordo for this pair OR the specific existingRaccordoId being edited
+      const filtered = prev.filter(ent => {
+          if (existingRaccordoId && ent.id === existingRaccordoId) return false;
+          if (ent.raccordoMetadata) {
+              const m = ent.raccordoMetadata;
+              const isSamePair = (m.id1 === id1 && m.id2 === id2) || (m.id1 === id2 && m.id2 === id1);
+              if (isSamePair) return false;
+          }
+          
+          // Improved Precise Trimming: Identify and remove overlapping residues or collinear tails
+          if (ent.type === 'line' && ent.id !== id1 && ent.id !== id2) {
+             const l = ent as LineEntity;
+             
+             // Tolerance for collinearity should be very tight now that I is high-precision
+             const tolerance = 0.05; 
+             
+             // Check Line 1 collinearity
+             const distStart1 = Math.abs((l.start.x - I.x) * V1.y - (l.start.y - I.y) * V1.x);
+             const distEnd1 = Math.abs((l.end.x - I.x) * V1.y - (l.end.y - I.y) * V1.x);
+             if (distStart1 < tolerance && distEnd1 < tolerance) {
+                 const dotS = (l.start.x - I.x) * V1.x + (l.start.y - I.y) * V1.y;
+                 const dotE = (l.end.x - I.x) * V1.x + (l.end.y - I.y) * V1.y;
+                 // If the whole line is on the wrong side relative to I (towards V1), remove it
+                 if (dotS < tolerance && dotE < tolerance) return false;
+             }
+
+             // Check Line 2 collinearity
+             const distStart2 = Math.abs((l.start.x - I.x) * V2.y - (l.start.y - I.y) * V2.x);
+             const distEnd2 = Math.abs((l.end.x - I.x) * V2.y - (l.end.y - I.y) * V2.x);
+             if (distStart2 < tolerance && distEnd2 < tolerance) {
+                 const dotS = (l.start.x - I.x) * V2.x + (l.start.y - I.y) * V2.y;
+                 const dotE = (l.end.x - I.x) * V2.x + (l.end.y - I.y) * V2.y;
+                 if (dotS < tolerance && dotE < tolerance) return false;
+             }
+          }
+          return true;
+      });
+
+      // 2. Identify the lines to update 
       const updated = filtered.map(ent => {
         if (ent.id === id1) return updatedLine1;
         if (ent.id === id2) return updatedLine2;
         return ent;
       });
-      return isBothWalls ? updated : updated.concat(newConnector);
+      
+      const shouldAddConnector = !isBothWalls && T > 0.001;
+      return (shouldAddConnector ? updated.concat(newConnector) : updated) as Entity[];
     });
 
     // Smooth cinematic camera transition to the focal point of the raccordo
@@ -4459,8 +4511,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             ctx.restore();
         } else if (entity.type === 'circle') {
           ctx.arc(entity.center.x, entity.center.y, entity.radius, 0, Math.PI * 2);
+          ctx.stroke();
         } else if (entity.type === 'arc') {
           ctx.arc(entity.center.x, entity.center.y, entity.radius, entity.startAngle * Math.PI / 180, entity.endAngle * Math.PI / 180);
+          ctx.stroke();
         } else if (entity.type === 'point') {
           ctx.beginPath();
           ctx.arc(entity.point.x, entity.point.y, 2 / view.zoom, 0, Math.PI * 2);
@@ -4470,10 +4524,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           const width = entity.p2.x - entity.p1.x;
           const height = entity.p2.y - entity.p1.y;
           ctx.rect(entity.p1.x, entity.p1.y, width, height);
+          ctx.stroke();
         } else if (entity.type === 'text') {
           ctx.font = `${entity.fontWeight || 'normal'} ${entity.fontSize / view.zoom}px ${entity.fontFamily || 'sans-serif'}`;
           ctx.fillStyle = entity.color || '#000000';
-          ctx.textAlign = entity.textAlign || 'left';
+          ctx.textAlign = (entity.textAlign as CanvasTextAlign) || 'left';
           ctx.textBaseline = 'top';
 
           const lines = entity.text.split('\n');
@@ -4871,7 +4926,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         ctx.restore();
       }
 
-      if (drawing && (activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra' || activeTool === 'BIM_Muro')) {
+      if (drawing && ((activeTool as string) === 'BIM_Porta' || (activeTool as string) === 'BIM_Finestra' || (activeTool as string) === 'BIM_Muro')) {
         ctx.save();
         const start = drawing.start;
         const end = drawing.current || actualMousePosRef.current;
@@ -4942,7 +4997,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           ctx.restore();
         }
 
-        if (activeTool === 'BIM_Porta' && len > 0.1) {
+        if ((activeTool as string) === 'BIM_Porta' && len > 0.1) {
           ctx.strokeStyle = '#dc2626';
           ctx.lineWidth = 2 / view.zoom;
           
@@ -5179,7 +5234,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             
             // Posizioniamo la finestrella dinamica spostata in alto a destra,
             // per evitare che venga nascosta dalla mano dell'utente, dal tecnigrafo o dal cursore.
-            if (activeTool !== 'Eraser' && activeTool !== 'Trim' && activeTool !== 'Select') {
+            if ((activeTool as any) !== 'Eraser' && (activeTool as any) !== 'Trim' && (activeTool as any) !== 'Select') {
                 offsetX = 55;
                 offsetY = -55; // Sposta in alto e a destra in modo universale
             }
@@ -5222,7 +5277,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             }
 
             // --- TEMPLATE PREVIEW ---
-        if (activeTool === 'Template' && selectedTemplateId && hoverSnap) {
+        if ((activeTool as string) === 'Template' && selectedTemplateId && hoverSnap) {
             const template = TEMPLATES.find(t => t.id === selectedTemplateId);
             if (template) {
                 ctx.save();
@@ -5251,7 +5306,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
 
         // --- BIM SYMBOL PREVIEW ---
-        if (activeTool === 'BIM_Symbol' && selectedBIMSymbolType) {
+        if ((activeTool as string) === 'BIM_Symbol' && selectedBIMSymbolType) {
             const isElectrical = ['punto_luce', 'presa_standard', 'presa_schuko', 'presa_tv', 'presa_dati', 'interruttore', 'interruttore_bipolare', 'deviatore', 'invertitore', 'pulsante', 'pulsante_tirante', 'quadro', 'scatola_derivazione', 'suoneria', 'ronzatore', 'termostato', 'faretto', 'lampada_emergenza', 'applique', 'citofono', 'videocitofono'].includes(selectedBIMSymbolType);
             const targetColor = '#334155'; // Using Slate 700 for a clean, consistent UI tone for all symbols
             
@@ -5287,7 +5342,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
         // Render snap indicator
         if (drawing.snapType === 'smart') {
-            const currentSnaps = getSnapPoints(drawing.current, entities, activeTool, drawing);
+            const currentSnaps = getSnapPoints(drawing.current!, entities, activeTool, drawing as any);
             const activeSnap = currentSnaps.find(s => 
                 Math.abs(s.point.x - drawing.current.x) < 0.01 && Math.abs(s.point.y - drawing.current.y) < 0.01
             );
@@ -5628,6 +5683,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         // Draw Room
         if (entity.bimType === 'room') {
           const roomPoints = (entity as any).bimPoints || (entity as any).points;
+          const roomHoles = (entity as any).holes;
           if (roomPoints && roomPoints.length > 2) {
             ctx.save();
             // Solid transparent fill
@@ -5638,14 +5694,23 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
               ctx.lineTo(roomPoints[i].x, roomPoints[i].y);
             }
             ctx.closePath();
-            ctx.fill();
+            
+            if (roomHoles) {
+                roomHoles.forEach((hole: Point[]) => {
+                    ctx.moveTo(hole[0].x, hole[0].y);
+                    for(let i=1; i<hole.length; i++) ctx.lineTo(hole[i].x, hole[i].y);
+                    ctx.closePath();
+                });
+            }
+            
+            ctx.fill('evenodd');
 
             // Outline
             ctx.strokeStyle = 'rgba(16, 185, 129, 0.6)';
             ctx.lineWidth = 1.5 / view.zoom;
             ctx.stroke();
 
-            // Calculate Centroid (average points)
+            // Calculate Centroid (average points of outer boundary)
             let cx = 0, cy = 0;
             roomPoints.forEach((p: Point) => {
               cx += p.x;
@@ -5654,7 +5719,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             cx /= roomPoints.length;
             cy /= roomPoints.length;
 
-            // Compute Area using shoelace formula
+            // Compute Area using shoelace formula (subtract holes if present)
             let area = 0;
             const len = roomPoints.length;
             for (let i = 0; i < len; i++) {
@@ -5663,8 +5728,20 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
               area += p1.x * p2.y - p2.x * p1.y;
             }
             area = Math.abs(area) / 2;
+            
+            if (roomHoles) {
+                roomHoles.forEach((hole: Point[]) => {
+                    let holeArea = 0;
+                    for (let i = 0; i < hole.length; i++) {
+                        const p1 = hole[i];
+                        const p2 = hole[(i + 1) % hole.length];
+                        holeArea += p1.x * p2.y - p2.x * p1.y;
+                    }
+                    area -= Math.abs(holeArea) / 2;
+                });
+            }
 
-            const areaMq = area / 10000;
+            const areaMq = Math.max(0, area / 10000);
             const perimeterM = roomPoints.reduce((acc: number, p: Point, idx: number) => {
               const nextP = roomPoints[(idx + 1) % len];
               const dist = Math.sqrt((nextP.x - p.x)**2 + (nextP.y - p.y)**2);
@@ -5772,8 +5849,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
         // Draw Window
         if (entity.bimType === 'window') {
-          const start = (entity as any).start;
-          const end = (entity as any).end;
+          console.log("Drawing window:", entity);
+          const entAsAny = (entity as any);
+          const start = entAsAny.start || entAsAny.p1;
+          const end = entAsAny.end || entAsAny.p2;
           if (start && end) {
             ctx.save();
             const dx = end.x - start.x;
@@ -6098,35 +6177,52 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           ctx.restore();
       }
       // Highlight Area Funzionale being classified (Pulsing Green Border)
-      if (highlightedPoints && highlightedPoints.length > 2) {
-          ctx.save();
-          ctx.translate(view.pan.x, view.pan.y);
-          ctx.scale(view.zoom, view.zoom);
-          
-          ctx.beginPath();
-          ctx.moveTo(highlightedPoints[0].x, highlightedPoints[0].y);
-          for (let i = 1; i < highlightedPoints.length; i++) {
-              ctx.lineTo(highlightedPoints[i].x, highlightedPoints[i].y);
+      if (highlightedPoints) {
+          const hPoints = Array.isArray(highlightedPoints) ? highlightedPoints : (highlightedPoints as any).points;
+          const hHoles = Array.isArray(highlightedPoints) ? undefined : (highlightedPoints as any).holes;
+
+          if (hPoints && hPoints.length > 2) {
+              ctx.save();
+              ctx.translate(view.pan.x, view.pan.y);
+              ctx.scale(view.zoom, view.zoom);
+              
+              const buildPath = () => {
+                  ctx.beginPath();
+                  ctx.moveTo(hPoints[0].x, hPoints[0].y);
+                  for (let i = 1; i < hPoints.length; i++) {
+                      ctx.lineTo(hPoints[i].x, hPoints[i].y);
+                  }
+                  ctx.closePath();
+                  
+                  if (hHoles) {
+                      hHoles.forEach((hole: Point[]) => {
+                          if (hole.length < 3) return;
+                          ctx.moveTo(hole[0].x, hole[0].y);
+                          for (let i = 1; i < hole.length; i++) ctx.lineTo(hole[i].x, hole[i].y);
+                          ctx.closePath();
+                      });
+                  }
+              };
+
+              buildPath();
+              // Outer Glow / Flash - Pulsing based on Date.now()
+              const opacity = 0.3 + 0.7 * Math.abs(Math.sin(Date.now() / 250));
+              ctx.strokeStyle = `rgba(16, 185, 129, ${opacity})`;
+              ctx.lineWidth = 4 / view.zoom;
+              ctx.stroke();
+
+              // Inner sharp border
+              ctx.strokeStyle = '#34d399';
+              ctx.lineWidth = 1.5 / view.zoom;
+              ctx.setLineDash([5 / view.zoom, 3 / view.zoom]);
+              ctx.stroke();
+
+              // Subtle fill for confirmation
+              ctx.fillStyle = `rgba(52, 211, 153, 0.1)`;
+              ctx.fill('evenodd');
+
+              ctx.restore();
           }
-          ctx.closePath();
-          
-          // Outer Glow / Flash - Pulsing based on Date.now()
-          const opacity = 0.3 + 0.7 * Math.abs(Math.sin(Date.now() / 250));
-          ctx.strokeStyle = `rgba(16, 185, 129, ${opacity})`;
-          ctx.lineWidth = 4 / view.zoom;
-          ctx.stroke();
-
-          // Inner sharp border
-          ctx.strokeStyle = '#34d399';
-          ctx.lineWidth = 1.5 / view.zoom;
-          ctx.setLineDash([5 / view.zoom, 3 / view.zoom]);
-          ctx.stroke();
-
-          // Subtle fill for confirmation
-          ctx.fillStyle = `rgba(52, 211, 153, 0.1)`;
-          ctx.fill();
-
-          ctx.restore();
       }
     };
 
@@ -6164,10 +6260,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                  minY = Math.min(minY, ent.center.y - radius);
                  maxY = Math.max(maxY, ent.center.y + radius);
              } else if (ent.type === 'rectangle') {
-                 minX = Math.min(minX, ent.start.x, ent.end.x);
-                 maxX = Math.max(maxX, ent.start.x, ent.end.x);
-                 minY = Math.min(minY, ent.start.y, ent.end.y);
-                 maxY = Math.max(maxY, ent.start.y, ent.end.y);
+                 const r = ent as RectEntity;
+                 minX = Math.min(minX, r.p1.x, r.p2.x);
+                 maxX = Math.max(maxX, r.p1.x, r.p2.x);
+                 minY = Math.min(minY, r.p1.y, r.p2.y);
+                 maxY = Math.max(maxY, r.p1.y, r.p2.y);
              }
         });
 
@@ -6176,7 +6273,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     };
 
     const rect = canvas.getBoundingClientRect();
-    const zoomSensitivity = 0.0015;
+    const zoomSensitivity = isContinuousMode ? 0.0015 * 10 : 0.0015;
     const zoomFactor = Math.pow(0.95, e.deltaY * zoomSensitivity);
 
     const focus = screenToCanvas(rect.width / 2, rect.height / 2);
@@ -7741,7 +7838,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             setDragEntityId(null);
             dragEntityIdRef.current = null;
             setActiveMoveSnapPoint(null);
-            setEntities(prev => { onCommitHistory?.(prev); return [...prev]; });
+            setEntities(prev => prev);
             return;
         }
 
@@ -7869,14 +7966,14 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     
     if (positioningDimId) {
         setPositioningDimId(null);
-        setEntities(prev => { onCommitHistory?.(prev); return prev; });
+        setEntities(prev => prev);
         return;
     }
 
     if (positioningGroupId) {
         setPositioningGroupId(null);
         setPositioningGroupStartPos(null);
-        setEntities(prev => { onCommitHistory?.(prev); return prev; });
+        setEntities(prev => prev);
         onSelect(null);
         return;
     }
@@ -7884,7 +7981,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     if (positioningEntityId) {
         setPositioningEntityId(null);
         setPositioningEntityStartPos(null);
-        setEntities(prev => { onCommitHistory?.(prev); return prev; });
+        setEntities(prev => prev);
         onSelect(null);
         return;
     }
@@ -7897,7 +7994,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     
     const snapped = shouldSkipSnap
         ? { point: rawPoint, snapped: false, type: 'CAD' as const, refPoint: undefined, constraintAxis: undefined, refPoint2: undefined, constraintAxis2: undefined, hasDoubleSmart: false }
-        : getSnappedPoint(rawPoint, entities, activeTool, drawing);
+        : getSnappedPoint(rawPoint, entities, activeTool, drawing as any);
 
     if (activeTool === 'CopiaVideo') {
         setSelectionWindow({ start: rawPoint, current: rawPoint });
@@ -7965,7 +8062,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                         }
                         return ent;
                     });
-                    onCommitHistory?.(next);
                     return next;
                 });
                 return;
@@ -8025,7 +8121,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             };
             setEntities(prev => {
                 const next = [...prev, newAxis];
-                onCommitHistory?.(next);
                 return next;
             });
             setSpecchioFinalAxis({ start: specchioAxisPt1, end: finalPt2, isExisting: false, entityId: newAxisId });
@@ -8103,7 +8198,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 };
 
                 setEntities(prev => {
-                    onCommitHistory?.(prev);
                     return autoCornerParallel(newLine, prev);
                 });
                 
@@ -8196,7 +8290,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         const targetLayerName = isFinitura ? 'BIM_Finiture' : 'Hatch';
         const targetLayerId = layers.find(l => l.name === targetLayerName)?.id || (isFinitura ? 'BIM_Finiture' : activeLayerId);
         
-        const clickedHatch = entities.find(ent => ent.type === 'hatch' && ent.layer === targetLayerId && (ent as any).points && isPointInPolygon(rawPoint, (ent as any).points));
+        const clickedHatch = entities.find(ent => {
+          if (ent.type !== 'hatch' || ent.layer !== targetLayerId || !(ent as any).points) return false;
+          return isPointInFullPolygon(rawPoint, { points: (ent as any).points, holes: (ent as any).holes });
+        });
         if (clickedHatch) {
             onSelect(clickedHatch.id);
         } else {
@@ -8211,11 +8308,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                     color: isFinitura ? (defaultHatchStyle?.color || '#ef4444') : (defaultHatchStyle?.color || defaultLineStyle.color || '#3b82f6'),
                     sfumatura: (defaultHatchStyle as any)?.sfumatura || 0,
                     mode: defaultLineStyle.mode,
-                    points: poly,
+                    points: poly.points,
+                    holes: poly.holes,
                     layer: targetLayerId
                 } as any;
                 setEntities(prev => {
-                    onCommitHistory?.(prev);
                     return [...prev, newHatch];
                 });
                 onSelect(newHatch.id);
@@ -8284,17 +8381,15 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         if (newEntities.length > 0) {
             setEntities(prev => {
                 const next = [...prev, ...newEntities];
-                onCommitHistory?.(next);
                 return next;
             });
         }
     } else if (activeTool === 'BIM_RilevaStanza') {
         const poly = findBoundaryPolygon(screenPos, entities, view, rect.width, rect.height, screenToCanvas, layers);
-        if (poly && poly.length > 2) {
+        if (poly && poly.points.length > 2) {
             if (onAreaDetected) {
                 onAreaDetected(poly);
             } else {
-                // Fallback if not provided (should not happen in main app)
                 const nextIdx = entities.filter(e => e.isBIM && e.bimType === 'room').length + 1;
                 const newRoom: Entity = {
                     id: Date.now().toString(),
@@ -8304,7 +8399,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                     bimName: 'Stanza ' + nextIdx,
                     bimHeight: 2.70,
                     color: 'rgba(52, 211, 153, 0.15)',
-                    points: poly,
+                    points: poly.points,
+                    holes: poly.holes,
                     pattern: 'SOLID',
                     scale: 1,
                     angle: 0,
@@ -8314,7 +8410,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 };
                 setEntities(prev => {
                     const next = [...prev, newRoom];
-                    onCommitHistory?.(next);
                     return next;
                 });
                 onSelect(newRoom.id, newRoom);
@@ -8327,7 +8422,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             const distToStart = Math.sqrt((clickedPoint.x - firstPt.x)**2 + (clickedPoint.y - firstPt.y)**2);
             if (distToStart < 15 / view.zoom) {
                 if (onAreaDetected) {
-                    onAreaDetected([...manualRoomPoints]);
+                    onAreaDetected({ points: [...manualRoomPoints] });
                     setManualRoomPoints([]);
                 } else {
                     const nextIdx = entities.filter(e => e.isBIM && e.bimType === 'room').length + 1;
@@ -8349,7 +8444,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                     };
                     setEntities(prev => {
                         const next = [...prev, newRoom];
-                        onCommitHistory?.(next);
                         return next;
                     });
                     onSelect(newRoom.id);
@@ -8370,7 +8464,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         if (!drawing) {
             setDrawing({ start: snapped.point, current: snapped.point });
         } else {
-            const isLineLikeTool = activeTool === 'Line' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra' || activeTool === 'BIM_Muro';
+            const isLineLikeTool = (activeTool as string) === 'Line' || (activeTool as string) === 'BIM_Porta' || (activeTool as string) === 'BIM_Finestra' || (activeTool as string) === 'BIM_Muro';
             const effectiveOrthoMode = isLineLikeTool && (orthoMode ? !isShiftPressedRef.current : isShiftPressedRef.current);
             const isOrthoHorizontal = isLineLikeTool && effectiveOrthoMode && 
                   Math.abs(snapped.point.x - drawing.start.x) >= Math.abs(snapped.point.y - drawing.start.y);
@@ -8409,7 +8503,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 });
             } else {
                 const doorWidth = Math.round(Math.sqrt((endPoint.x - drawing.start.x)**2 + (endPoint.y - drawing.start.y)**2));
-                const isDoor = activeTool === 'BIM_Porta';
+                const isDoor = (activeTool as string) === 'BIM_Porta';
                 const h = isDoor ? lastDoorHeight : lastWindowHeight;
                 const newElem: Entity = {
                     id: Date.now().toString(),
@@ -8457,12 +8551,12 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
               // Find snap status at rawPoint (without ortho constraint applied)
               let rawSnappedFromRawPoint: any = { point: rawPoint, snapped: false, type: 'CAD', refPoint: undefined, constraintAxis: undefined, refPoint2: undefined, constraintAxis2: undefined, hasDoubleSmart: false };
               if (!isTempOrtho) {
-                  rawSnappedFromRawPoint = getSnappedPoint(rawPoint, entities, activeTool, drawing);
+                  rawSnappedFromRawPoint = getSnappedPoint(rawPoint, entities, activeTool, drawing as any);
               }
 
               const isBothSnappedException = false;
 
-              const isLineLikeTool = activeTool === 'Line' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra';
+              const isLineLikeTool = (activeTool as string) === 'Line' || (activeTool as string) === 'BIM_Porta' || (activeTool as string) === 'BIM_Finestra';
               const effectiveOrthoMode = isLineLikeTool && (orthoMode ? !isShiftPressedRef.current : isShiftPressedRef.current);
 
               const isOrthoHorizontal = isLineLikeTool && effectiveOrthoMode && 
@@ -8476,7 +8570,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                       finalPoint = isOrthoHorizontal 
                         ? { x: finalPoint.x, y: drawing.start.y } 
                         : { x: drawing.start.x, y: finalPoint.y };
-                  } else if (!e.shiftKey && !isTempOrtho && activeTool === 'Line') {
+                  } else if (!e.shiftKey && !isTempOrtho && (activeTool as any) === 'Line') {
                       finalPoint = applyAngleSnapping(drawing.start, rawPoint);
                   }
               }
@@ -8487,7 +8581,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
               } else if (isBothSnappedException) {
                   rawSnapped = rawSnappedFromRawPoint;
               } else {
-                  rawSnapped = getSnappedPoint(finalPoint, entities, activeTool, drawing);
+                  rawSnapped = getSnappedPoint(finalPoint, entities, activeTool, drawing as any);
               }
               
               if (isLineLikeTool && effectiveOrthoMode && !isBothSnappedException) {
@@ -9016,7 +9110,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                         isVirtual: false
                     });
                 } else {
-                    const snappedResult = getSnappedPoint(rawPoint, entities, activeTool, drawing);
+                    const snappedResult = getSnappedPoint(rawPoint, entities, activeTool, drawing as any);
                     let finalEndPoint = snappedResult.point;
 
                     const newDim: Entity = {
@@ -9528,9 +9622,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           });
       } else {
           // 1. Check for Snaps around raw mouse position
-          let snapRes = getSnappedPoint(rawPoint, entities, activeTool, drawing);
+          let snapRes = getSnappedPoint(rawPoint, entities, activeTool, drawing as any);
           
-          const isOrthoTool = activeTool === 'Line' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra' || activeTool === 'BIM_Muro' || activeTool === 'Rectangle' || activeTool === 'Circle' || activeTool === 'Arc' || activeTool === 'Parallel';
+          const isOrthoTool = (activeTool as string) === 'Line' || (activeTool as string) === 'BIM_Porta' || (activeTool as string) === 'BIM_Finestra' || (activeTool as string) === 'BIM_Muro' || (activeTool as string) === 'Rectangle' || (activeTool as string) === 'Circle' || (activeTool as string) === 'Arc' || (activeTool as string) === 'Parallel';
           const effectiveOrthoMode = isOrthoTool && (orthoMode ? !isShiftPressedRef.current : isShiftPressedRef.current);
 
           // 2. If we have a standard strong snap (Endpoint, Midpoint, etc.), it WINS over Ortho
@@ -9565,7 +9659,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                     }
                     
                     // 4. Try to snap the Ortho point
-                    let orthoSnap = getSnappedPoint(orthoPoint, entities, activeTool, drawing);
+                    let orthoSnap = getSnappedPoint(orthoPoint, entities, activeTool, drawing as any);
                     let finalPoint = orthoSnap.point;
                     if (activeTool === 'Rectangle' && orthoSnap.snapped) {
                          const side = Math.max(Math.abs(finalPoint.x - drawing.start.x), Math.abs(finalPoint.y - drawing.start.y));
@@ -9809,7 +9903,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         activeTool === 'Move' || 
         activeTool === 'Copy' ||
         activeTool === 'BIM_Muro' ||
-        activeTool === 'BIM_Porta' ||
+        (activeTool as string) === 'BIM_Porta' ||
         activeTool === 'BIM_Finestra' ||
         activeTool === 'BIM_Symbol' ||
         activeTool === 'BIM_DisegnaStanza'
@@ -9862,7 +9956,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             layer: activeLayerId
         };
         setEntities(prev => {
-            onCommitHistory?.(prev);
             return [...prev, newEntity];
         });
         setDrawing(null);
@@ -9893,7 +9986,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             executeWindowTrim(selectionWindow.start, selectionWindow.current);
         } else if (activeTool === 'Cancella' && ids.length > 0) {
             setEntities(prev => {
-                onCommitHistory?.(prev);
                 return prev.filter(ent => !ids.includes(ent.id));
             });
         } else if (activeTool === 'Move' || activeTool === 'Copy') {
@@ -9923,15 +10015,15 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         setDragEntityId(null);
         dragEntityIdRef.current = null;
         setActiveMoveSnapPoint(null);
-        setEntities(prev => { onCommitHistory?.(prev); return [...prev]; });
+        setEntities(prev => prev);
         return;
     }
 
     if (activeTool === 'Eraser') {
-        setEntities(prev => { onCommitHistory?.(prev); return prev; });
+        setEntities(prev => prev);
     } else if (positioningDimId) {
         setPositioningDimId(null);
-        setEntities(prev => { onCommitHistory?.(prev); return prev; });
+        setEntities(prev => prev);
     }
   };
 
@@ -9940,7 +10032,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         const newGroupId = Date.now().toString();
         const joinedIds = [...dragEntityIds];
         setEntities(prev => {
-            onCommitHistory?.(prev);
             return prev.map(ent => {
                 if (joinedIds.includes(ent.id)) {
                     return { ...ent, groupId: newGroupId };
@@ -10307,11 +10398,12 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             
             setEntities(prev => {
                 const next = prev.map(ent => {
-                    if (ent.id === line.id) {
+                    if (ent.id === line.id && ent.type === 'line') {
+                        const l = ent as LineEntity;
                         return { 
-                            ...ent, 
-                            start: { x: ent.start.x + offsetX, y: ent.start.y + offsetY },
-                            end: { x: ent.end.x + offsetX, y: ent.end.y + offsetY }
+                            ...l, 
+                            start: { x: l.start.x + offsetX, y: l.start.y + offsetY },
+                            end: { x: l.end.x + offsetX, y: l.end.y + offsetY }
                         };
                     }
                     return ent;
@@ -10868,7 +10960,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                       zoom={view.zoom}
                       pan={view.pan}
                       onUpdate={(id, updates) => {
-                          setEntities(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
+                          setEntities(prev => prev.map(e => e.id === id ? ({ ...e, ...updates } as Entity) : e));
                       }}
                       isActive={true}
                   />
@@ -11089,7 +11181,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             {showManualInput && (
           <ManualInputOverlay
               type={activeTool === "Parallel" ? "parallel" : (activeTool.toLowerCase() as any)}
-              drawing={drawing || undefined}
+              drawing={drawing as any}
               parallelLine={activeTool === "Parallel" ? { 
                   start: selectedParallelLine?.type === 'line' ? (selectedParallelLine as LineEntity).start : { x: 0, y: 0 }, 
                   end: selectedParallelLine?.type === 'line' ? (selectedParallelLine as LineEntity).end : { x: 0, y: 0 }, 

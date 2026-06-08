@@ -634,7 +634,7 @@ export const CanvasPDFPreview: React.FC<CanvasPDFPreviewProps> = ({ entities, ta
         ctx.font = `${ent.fontWeight || 'normal'} ${textFontSize}px ${ent.fontFamily || 'sans-serif'}`;
         const isBIMSymbol = ent.isBIM && (ent.bimType === 'electrical_symbol' || ent.bimType === 'hydraulic_symbol');
         ctx.fillStyle = isBIMSymbol ? '#000000' : (ent.color || '#000000');
-        ctx.textAlign = ent.textAlign || 'left';
+        ctx.textAlign = (ent.textAlign as CanvasTextAlign) || 'left';
         ctx.textBaseline = 'top';
 
         const lines = ent.text.split('\n');

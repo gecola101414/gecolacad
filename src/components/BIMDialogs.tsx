@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   Building, 
   X, 
@@ -359,7 +359,7 @@ interface FinestreDialogProps {
   onClose: () => void;
   lastWindowWidth: number;
   lastWindowHeight: number;
-  onConfirmWindow: (width: number, height: number, type: string) => void;
+  onConfirmWindow: (width: number, height: number, type: string, trasmittanza: number, prezzario: string) => void;
 }
 export const FinestreDialog: React.FC<FinestreDialogProps> = ({
   isOpen,
@@ -373,11 +373,14 @@ export const FinestreDialog: React.FC<FinestreDialogProps> = ({
   const [height, setHeight] = useState<number>(lastWindowHeight || 140);
   const [winType, setWinType] = useState<string>('singola');
 
+  const [trasmittanza, setTrasmittanza] = useState<number>(0.0);
+  const [prezzario, setPrezzario] = useState<string>('');
+
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onConfirmWindow(width, height, winType);
+    onConfirmWindow(width, height, winType, trasmittanza, prezzario);
   };
 
   const presetMisure = [80, 100, 120, 140, 180, 240];
@@ -453,13 +456,33 @@ export const FinestreDialog: React.FC<FinestreDialogProps> = ({
               <option value="vasistas">Basi / Vasistas</option>
             </select>
           </div>
+          <div>
+            <label className="block text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Trasmittanza (W/m²K)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={trasmittanza}
+              onChange={(e) => setTrasmittanza(parseFloat(e.target.value) || 0.0)}
+              className="w-full bg-slate-900 border border-slate-800 text-white p-1.5 rounded text-xs font-mono"
+            />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Voce Prezzario</label>
+            <input
+              type="text"
+              value={prezzario}
+              onChange={(e) => setPrezzario(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-800 text-white p-1.5 rounded text-xs font-mono"
+              placeholder="Codice o voce..."
+            />
+          </div>
         </div>
 
         <button
           type="submit"
           className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-2.5 rounded-lg text-xs tracking-wider transition shadow-md cursor-pointer"
         >
-          ATTIVA FINESTRA IN LOCAZIONE 🪟
+          CONFERMA E POSIZIONA
         </button>
       </form>
     </div>
@@ -915,7 +938,7 @@ interface AreaFunzionaleDialogProps {
     height: number;
     hatch: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE';
   }) => void;
-  points?: Point[];
+  points?: Point[] | { points: Point[], holes?: Point[][] };
   initialData?: {
     type: 'stanza' | 'muro' | 'tramezzo' | 'giardino' | 'tetto' | 'altro';
     name: string;
@@ -941,7 +964,7 @@ const HATCH_PATTERNS: Array<{ id: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE', label: 
   { id: 'NONE', label: 'Solo Contorno' },
 ];
 
-const AREA_LABELS: Record<string, string> = {
+const AREA_LABELS: Record<'stanza' | 'muro' | 'tramezzo' | 'giardino' | 'tetto' | 'altro', string> = {
   stanza: 'Stanza / Locale',
   muro: 'Muro Portante',
   tramezzo: 'Tramezzo Interno',
@@ -996,6 +1019,29 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
       else setHatch('SOLID');
     }
   }, [isOpen, areaType, initialData]);
+
+  const calculatedArea = useMemo(() => {
+    if (!points) return 0;
+    const computeArea = (pts: Point[]) => {
+      let area = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const p1 = pts[i];
+        const p2 = pts[(i + 1) % pts.length];
+        area += p1.x * p2.y - p2.x * p1.y;
+      }
+      return Math.abs(area) / 2;
+    };
+
+    if (Array.isArray(points)) {
+      return computeArea(points) / 10000;
+    } else {
+      let total = computeArea(points.points);
+      if (points.holes) {
+        points.holes.forEach(h => total -= computeArea(h));
+      }
+      return Math.max(0, total / 10000);
+    }
+  }, [points]);
 
   if (!isOpen) return null;
 
@@ -1104,10 +1150,13 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
           </div>
         </div>
 
-        <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+        <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg flex items-center justify-between">
           <p className="text-[9px] text-emerald-400/80 leading-relaxed italic">
             L'area visualizzata sul CAD avrà un <span className="text-emerald-300 font-bold underline">bordo verde lampeggiante</span> per conferma posizionale.
           </p>
+          <div className="bg-emerald-500/20 px-2 py-1 rounded border border-emerald-500/30">
+            <span className="text-[10px] font-mono font-black text-emerald-400">{calculatedArea.toFixed(2)} mq</span>
+          </div>
         </div>
 
         <button

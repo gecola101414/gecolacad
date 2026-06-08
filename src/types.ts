@@ -28,7 +28,7 @@ export interface CADEntity {
     originalLine2: any;
     clickPt1: { x: number; y: number };
     clickPt2: { x: number; y: number };
-    config: { type: 'curvo' | 'rettilineo'; value: number };
+    config: { type: 'curvo' | 'rettilineo' | 'taglia'; value: number };
   };
   isBIM?: boolean;
   bimType?: 'room' | 'door' | 'window' | 'wall' | 'electrical_symbol' | 'hydraulic_symbol' | 'functional_area';
@@ -38,6 +38,7 @@ export interface CADEntity {
   bimWidth?: number;  // e.g. 80, 90, 120
   bimWindowHeight?: number; // e.g. 140
   bimPoints?: Point[]; // Polygon corners For rooms/areas
+  bimOffset?: number; // Offset for positioning
   backgroundColor?: string; // Fill color for functional areas
   bimHatchPattern?: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE'; 
 }
@@ -101,6 +102,7 @@ export interface HatchEntity extends CADEntity {
   scale: number;
   angle: number; // in degrees
   points: Point[]; // Polygon boundary
+  holes?: Point[][]; // Inner boundaries (holes)
   backgroundColor?: string;
   sfumatura?: number;
 }

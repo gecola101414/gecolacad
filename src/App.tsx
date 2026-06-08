@@ -225,7 +225,7 @@ export default function App() {
   const [bimSymbolScale, setBimSymbolScale] = useState<number>(() => parseFloat(localStorage.getItem('lastBIMSymbolScale') || '1'));
 
   const [editingRaccordo, setEditingRaccordo] = useState<Entity | null>(null);
-  const [raccordoConfig, setRaccordoConfig] = useState<{ type: 'curvo' | 'rettilineo'; value: number }>({
+  const [raccordoConfig, setRaccordoConfig] = useState<{ type: 'curvo' | 'rettilineo' | 'taglia'; value: number }>({
     type: 'curvo',
     value: 10,
   });
@@ -245,7 +245,7 @@ export default function App() {
   const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere' | 'testo' | 'gemini' | 'manuale' | 'bim'>(() => (localStorage.getItem('activeSidebarTab') as any) || 'penne');
   const [isBIMAreaDialogOpen, setIsBIMAreaDialogOpen] = useState(false);
   const [is3DViewOpen, setIs3DViewOpen] = useState(false);
-  const [detectedAreaPoints, setDetectedAreaPoints] = useState<Point[] | null>(null);
+  const [detectedAreaPoints, setDetectedAreaPoints] = useState<Point[] | { points: Point[], holes?: Point[][] } | null>(null);
   const [editingAreaId, setEditingAreaId] = useState<string | null>(null);
   const [hoveredGuide, setHoveredGuide] = useState<GuideItem | null>(null);
   const [guideLockedBy, setGuideLockedBy] = useState<string | null>(null);
@@ -448,8 +448,8 @@ export default function App() {
     }
   };
 
-  const handleAreaDetected = (points: Point[]) => {
-    setDetectedAreaPoints(points);
+  const handleAreaDetected = (result: { points: Point[], holes?: Point[][] }) => {
+    setDetectedAreaPoints(result);
     setEditingAreaId(null);
     setIsBIMAreaDialogOpen(true);
   };
@@ -458,7 +458,10 @@ export default function App() {
     const area = entities.find(e => e.id === areaId);
     if (!area) return;
     
-    setDetectedAreaPoints((area as any).bimPoints || area.points || null);
+    setDetectedAreaPoints({
+      points: (area as any).bimPoints || (area as any).points || [],
+      holes: (area as any).holes
+    });
     setEditingAreaId(areaId);
     setIsBIMAreaDialogOpen(true);
   };
@@ -485,11 +488,15 @@ export default function App() {
       setShortcutToast(`Area ${areaData.name} aggiornata ✅`);
     } else {
       // CREATE NEW (with duplicate check)
+      if (!detectedAreaPoints) return;
+      const pts = Array.isArray(detectedAreaPoints) ? detectedAreaPoints : detectedAreaPoints.points;
+      const hls = Array.isArray(detectedAreaPoints) ? undefined : detectedAreaPoints.holes;
+
       const isDuplicate = entities.some(e => 
         e.bimType === 'room' && 
-        e.points && 
-        e.points.length === detectedAreaPoints.length &&
-        e.points.every((p, i) => Math.abs(p.x - (detectedAreaPoints as Point[])[i].x) < 0.1 && Math.abs(p.y - (detectedAreaPoints as Point[])[i].y) < 0.1)
+        (e as any).points && 
+        (e as any).points.length === pts.length &&
+        (e as any).points.every((p: Point, i: number) => Math.abs(p.x - pts[i].x) < 0.1 && Math.abs(p.y - pts[i].y) < 0.1)
       );
 
       if (isDuplicate) {
@@ -503,7 +510,8 @@ export default function App() {
       const newArea: Entity = {
         id: `bim-area-${Date.now()}`,
         type: 'hatch', 
-        points: detectedAreaPoints,
+        points: pts,
+        holes: hls,
         color: 'rgba(0,0,0,0.5)',
         strokeWidth: 1,
         layer: 'BIM_Aree_Funzionali',
@@ -1089,10 +1097,15 @@ export default function App() {
       setGuideLockedBy(null);
     }
 
-    if (tool === "Raccordo") {
-      setIsRaccordoDialogOpen(true);
-      setShowProperties(false);
-    } else if (tool === "Parallel") {
+           if (tool === "Raccordo") {
+             setSelectedTool("Raccordo");
+             // Non forzare l'apertura del dialog se è già aperto o se l'utente vuole solo usare il tool
+             // Lo apriamo solo la prima volta o se cliccano di nuovo
+             if (!isRaccordoDialogOpen) {
+                 setIsRaccordoDialogOpen(true);
+             }
+             setShowProperties(false);
+           } else if (tool === "Parallel") {
       setSelectedTool("Parallel");
       setCancelTrigger(prev => prev + 1);
       setParallelTrigger(prev => prev + 1);
@@ -1149,7 +1162,7 @@ export default function App() {
 
   const updateEntity = (id: string, updates: Partial<Entity>) => {
     setEntities((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, ...updates } : e)),
+      prev.map((e) => (e.id === id ? ({ ...e, ...updates } as Entity) : e)),
     );
   };
 
@@ -1295,6 +1308,8 @@ export default function App() {
     historyRef.current = history;
   }, [history]);
 
+  const historyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   const areEntitiesEqual = (list1: Entity[], list2: Entity[]) => {
     if (list1 === list2) return true;
     if (!list1 || !list2) return list1 === list2;
@@ -1310,6 +1325,10 @@ export default function App() {
   };
 
   const undo = () => {
+    if (historyTimeoutRef.current) {
+        clearTimeout(historyTimeoutRef.current);
+        historyTimeoutRef.current = null;
+    }
     if (historyIndex > 0) {
       setHistoryIndex((prev) => prev - 1);
       setEntities(history[historyIndex - 1]);
@@ -1317,6 +1336,10 @@ export default function App() {
   };
 
   const redo = () => {
+    if (historyTimeoutRef.current) {
+        clearTimeout(historyTimeoutRef.current);
+        historyTimeoutRef.current = null;
+    }
     if (historyIndex < history.length - 1) {
       setHistoryIndex((prev) => prev + 1);
       setEntities(history[historyIndex + 1]);
@@ -1326,10 +1349,18 @@ export default function App() {
   const updateEntitiesSilent = (
     newEntities: React.SetStateAction<Entity[]>,
   ) => {
+    if (historyTimeoutRef.current) {
+        clearTimeout(historyTimeoutRef.current);
+        historyTimeoutRef.current = null;
+    }
     setEntities(newEntities);
   };
 
   const commitToHistory = (snapshotToSave?: Entity[]) => {
+    if (historyTimeoutRef.current) {
+        clearTimeout(historyTimeoutRef.current);
+        historyTimeoutRef.current = null;
+    }
     const targetSnapshot = snapshotToSave || entities;
     const currentIdx = historyIndexRef.current;
     const currentHistory = historyRef.current;
@@ -1350,17 +1381,20 @@ export default function App() {
   const updateEntitiesWithHistory = (
     newEntities: React.SetStateAction<Entity[]>,
   ) => {
+    if (historyTimeoutRef.current) {
+        clearTimeout(historyTimeoutRef.current);
+    }
     setEntities((prev) => {
       const next =
         typeof newEntities === "function" ? (newEntities as Function)(prev) : newEntities;
       
-      // Postpone history state side-effects safely to avoid React render queue issues
-      setTimeout(() => {
+      historyTimeoutRef.current = setTimeout(() => {
         const currentIdx = historyIndexRef.current;
         const currentHistory = historyRef.current;
         const lastState = currentHistory[currentIdx];
 
         if (lastState && areEntitiesEqual(lastState, next)) {
+          historyTimeoutRef.current = null;
           return; // Do not commit duplicates
         }
 
@@ -1370,7 +1404,8 @@ export default function App() {
           return newHistory;
         });
         setHistoryIndex((prevIndex) => prevIndex + 1);
-      }, 0);
+        historyTimeoutRef.current = null;
+      }, 50);
 
       return next;
     });

@@ -4,14 +4,14 @@ import { OrbitControls, PerspectiveCamera, Grid, Stars, Float, Text, Html, Conta
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import { Entity, Point, LineEntity, RectEntity } from '../types';
-import { X, ZoomIn, ZoomOut, RotateCw, Box, Layers, Database, Maximize, Home, Compass, Eye, Info, Settings, MousePointer2, Move } from 'lucide-react';
+import { X, ZoomIn, ZoomOut, RotateCw, Box, Layers, Database, Maximize, Home, Compass, Eye, Info, Settings, MousePointer2, Move, Scissors, Play, Pause, RefreshCw, ArrowDown, ArrowUp } from 'lucide-react';
 
 interface BIM3DViewerProps {
   entities: Entity[];
   onClose: () => void;
 }
 
-const Wall = ({ points, height, width, color }: { points: Point[], height: number, width?: number, color: string }) => {
+const Wall = ({ points, height, width, color, clippingPlanes = [] }: { points: Point[], height: number, width?: number, color: string, clippingPlanes?: THREE.Plane[] }) => {
   const segments = useMemo(() => {
     const result = [];
     const h = height / 100; // Convert to meters
@@ -46,6 +46,8 @@ const Wall = ({ points, height, width, color }: { points: Point[], height: numbe
             metalness={0.15} 
             roughness={0.4} 
             envMapIntensity={1}
+            clippingPlanes={clippingPlanes}
+            clipShadows={true}
           />
           <Edges color="#1e293b" threshold={15} />
         </mesh>
@@ -54,7 +56,7 @@ const Wall = ({ points, height, width, color }: { points: Point[], height: numbe
   );
 };
 
-const Room = ({ points, height, color, name, areaType }: { points: Point[], height: number, color: string, name?: string, areaType?: string }) => {
+const Room = ({ points, holes, height, color, name, areaType, clippingPlanes = [] }: { points: Point[], holes?: Point[][], height: number, color: string, name?: string, areaType?: string, clippingPlanes?: THREE.Plane[] }) => {
   const h = height / 100; // Convert to meters
   const shape = useMemo(() => {
     if (!points || points.length < 3) return null;
@@ -64,8 +66,22 @@ const Room = ({ points, height, color, name, areaType }: { points: Point[], heig
       s.lineTo(points[i].x / 100, -points[i].y / 100);
     }
     s.closePath();
+
+    if (holes && holes.length > 0) {
+      holes.forEach(holePoints => {
+        if (holePoints.length < 3) return;
+        const holePath = new THREE.Path();
+        holePath.moveTo(holePoints[0].x / 100, -holePoints[0].y / 100);
+        for (let i = 1; i < holePoints.length; i++) {
+          holePath.lineTo(holePoints[i].x / 100, -holePoints[i].y / 100);
+        }
+        holePath.closePath();
+        s.holes.push(holePath);
+      });
+    }
+
     return s;
-  }, [points]);
+  }, [points, holes]);
 
   if (!shape) return null;
 
@@ -94,6 +110,8 @@ const Room = ({ points, height, color, name, areaType }: { points: Point[], heig
           metalness={isWall ? 0.3 : 0.1}
           roughness={isWall ? 0.4 : 0.3}
           envMapIntensity={1.2}
+          clippingPlanes={clippingPlanes}
+          clipShadows={true}
         />
         <Edges color="#1e293b" threshold={15} />
       </mesh>
@@ -102,7 +120,12 @@ const Room = ({ points, height, color, name, areaType }: { points: Point[], heig
       {!isWall && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]} receiveShadow>
           <shapeGeometry args={[shape]} />
-          <meshStandardMaterial color={color} transparent opacity={0.4} />
+          <meshStandardMaterial 
+            color={color} 
+            transparent 
+            opacity={0.4} 
+            clippingPlanes={clippingPlanes}
+          />
         </mesh>
       )}
 
@@ -115,6 +138,7 @@ const Room = ({ points, height, color, name, areaType }: { points: Point[], heig
           anchorY="middle"
           outlineWidth={0.02}
           outlineColor="#0f172a"
+          visible={clippingPlanes.length === 0 || clippingPlanes.every(p => p.distanceToPoint(new THREE.Vector3(...center)) >= 0)}
         >
           {name}
         </Text>
@@ -123,7 +147,7 @@ const Room = ({ points, height, color, name, areaType }: { points: Point[], heig
   );
 };
 
-const BIMSymbol = ({ entity, onPointerOver, onPointerOut }: { entity: any, onPointerOver?: () => void, onPointerOut?: () => void }) => {
+const BIMSymbol = ({ entity, onPointerOver, onPointerOut, clippingPlanes = [] }: { entity: any, onPointerOver?: () => void, onPointerOut?: () => void, clippingPlanes?: THREE.Plane[] }) => {
   const { bimType, points, point, bimHeight = 210, bimWidth = 90, bimWindowHeight = 120, isHovered } = entity;
   const p = point || (points && points[0]);
   if (!p) return null;
@@ -150,6 +174,8 @@ const BIMSymbol = ({ entity, onPointerOver, onPointerOut }: { entity: any, onPoi
         roughness={0.3} 
         emissive={isHovered ? color : '#000000'}
         emissiveIntensity={isHovered ? 0.2 : 0}
+        clippingPlanes={clippingPlanes}
+        clipShadows={true}
       />
       <Edges color={isHovered ? "cyan" : "white"} />
     </mesh>
@@ -218,6 +244,61 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose }) =
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  
+  // Slicing States
+  const [isSlicing, setIsSlicing] = useState(false);
+  const [slicingHeight, setSlicingHeight] = useState(3.0); // Default max height
+  const [slicingMode, setSlicingMode] = useState<'HIDE_ABOVE' | 'HIDE_BELOW' | 'WINDOW'>('HIDE_ABOVE');
+  const [slicingDirection, setSlicingDirection] = useState<'UP' | 'DOWN'>('UP');
+  const [isAutoSlicing, setIsAutoSlicing] = useState(false);
+  const [windowThickness, setWindowThickness] = useState(0.5);
+
+  const clippingPlanes = useMemo(() => {
+    if (!isSlicing) return [];
+    
+    if (slicingMode === 'HIDE_ABOVE') {
+      // Normal [0, -1, 0] clips everything ABOVE height
+      return [new THREE.Plane(new THREE.Vector3(0, -1, 0), slicingHeight)];
+    } else if (slicingMode === 'HIDE_BELOW') {
+      // Normal [0, 1, 0] clips everything BELOW height
+      return [new THREE.Plane(new THREE.Vector3(0, 1, 0), -slicingHeight)];
+    } else if (slicingMode === 'WINDOW') {
+      // Window of thickess around slicingHeight
+      const half = windowThickness / 2;
+      return [
+        new THREE.Plane(new THREE.Vector3(0, -1, 0), slicingHeight + half),
+        new THREE.Plane(new THREE.Vector3(0, 1, 0), -(slicingHeight - half))
+      ];
+    }
+    return [];
+  }, [isSlicing, slicingHeight, slicingMode, windowThickness]);
+
+  // Auto-slicing logic
+  useEffect(() => {
+    let interval: any;
+    if (isAutoSlicing) {
+      interval = setInterval(() => {
+        setSlicingHeight(prev => {
+          const step = 0.015;
+          const maxH = 4.0;
+          if (slicingDirection === 'UP') {
+            if (prev >= maxH) {
+              setSlicingDirection('DOWN');
+              return prev;
+            }
+            return prev + step;
+          } else {
+            if (prev <= 0) {
+              setSlicingDirection('UP');
+              return prev;
+            }
+            return prev - step;
+          }
+        });
+      }, 16);
+    }
+    return () => clearInterval(interval);
+  }, [isAutoSlicing, slicingDirection]);
 
   const bimEntities = useMemo(() => {
     return entities.filter(e => e.isBIM);
@@ -263,9 +344,95 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose }) =
 
         <div className="w-px h-8 bg-slate-200 mx-1" />
         
+        {/* SLICING CONTROLS */}
+        <div className="flex items-center gap-1.5 bg-slate-50/50 p-1 rounded-xl border border-slate-200/50">
+          <button 
+            onClick={() => setIsSlicing(!isSlicing)}
+            className={`p-2.5 rounded-lg transition-all ${isSlicing ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-200' : 'hover:bg-white text-slate-400'}`}
+            title="Slicing Engine (Section Mobile)"
+          >
+            <Scissors size={20} />
+          </button>
+          
+          {isSlicing && (
+            <>
+              <div className="w-px h-6 bg-slate-200 mx-1" />
+              
+              <div className="flex bg-white rounded-lg p-0.5 shadow-sm border border-slate-100">
+                <button 
+                  onClick={() => setSlicingMode('HIDE_ABOVE')}
+                  className={`p-2 rounded-md transition-all ${slicingMode === 'HIDE_ABOVE' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+                  title="Taglia Sopra (Keep Bottom)"
+                >
+                  <ArrowDown size={16} />
+                </button>
+                <button 
+                  onClick={() => setSlicingMode('HIDE_BELOW')}
+                  className={`p-2 rounded-md transition-all ${slicingMode === 'HIDE_BELOW' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+                  title="Taglia Sotto (Keep Top)"
+                >
+                  <ArrowUp size={16} />
+                </button>
+                <button 
+                  onClick={() => setSlicingMode('WINDOW')}
+                  className={`p-2 rounded-md transition-all ${slicingMode === 'WINDOW' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+                  title="Sezione Mobile (Window)"
+                >
+                  <Maximize size={16} className="rotate-45" />
+                </button>
+              </div>
+
+              <div className="w-px h-6 bg-slate-200 mx-1" />
+
+              <button 
+                onClick={() => setIsAutoSlicing(!isAutoSlicing)}
+                className={`p-2.5 rounded-lg transition-all ${isAutoSlicing ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-100' : 'hover:bg-white text-emerald-600'}`}
+                title={isAutoSlicing ? "Sospendi Animazione" : "Avvia Animazione 3D Printer"}
+              >
+                {isAutoSlicing ? <Pause size={18} /> : <Play size={18} />}
+              </button>
+              
+              <div className="flex flex-col px-3 justify-center">
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="4" 
+                  step="0.01" 
+                  value={slicingHeight}
+                  onChange={(e) => {
+                    setSlicingHeight(parseFloat(e.target.value));
+                    setIsAutoSlicing(false);
+                  }}
+                  className="w-24 h-1.5 bg-indigo-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                />
+                <span className="text-[8px] font-black text-indigo-400 uppercase mt-0.5 text-center">Posizione: {slicingHeight.toFixed(2)}m</span>
+              </div>
+
+              {slicingMode === 'WINDOW' && (
+                <div className="flex flex-col px-3 justify-center border-l border-slate-100">
+                  <input 
+                    type="range" 
+                    min="0.1" 
+                    max="2" 
+                    step="0.1" 
+                    value={windowThickness}
+                    onChange={(e) => setWindowThickness(parseFloat(e.target.value))}
+                    className="w-16 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-600"
+                  />
+                  <span className="text-[7px] font-black text-slate-400 uppercase mt-0.5 text-center">Spessore: {windowThickness}m</span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="w-px h-8 bg-slate-200 mx-1" />
+        
         <div className="flex items-center px-5 gap-3 h-10 bg-slate-50/50 rounded-xl border border-slate-100">
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
-          <span className="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em] font-mono">BIM ENGINE LIVE</span>
+          <div className={`w-2.5 h-2.5 rounded-full ${isAutoSlicing ? 'bg-indigo-500 animate-pulse' : 'bg-emerald-500'} shadow-[0_0_8px_rgba(16,185,129,0.6)]`} />
+          <span className="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em] font-mono">
+            {isSlicing ? 'SLICING ACTIVE' : 'BIM ENGINE LIVE'}
+          </span>
         </div>
       </div>
 
@@ -361,7 +528,7 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose }) =
 
       {/* 3D SCENE CANVAS */}
       <div className="flex-1 cursor-crosshair">
-        <Canvas shadows dpr={[1, 2]} gl={{ antialias: true, alpha: true }}>
+        <Canvas shadows dpr={[1, 2]} gl={{ antialias: true, alpha: true, localClippingEnabled: true }}>
           <Environment preset="city" />
           <PerspectiveCamera 
             makeDefault 
@@ -386,6 +553,49 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose }) =
             castShadow 
             shadow-mapSize={[2048, 2048]}
           />
+
+          {isSlicing && (
+            <group position={[0, slicingHeight, 0]}>
+              {slicingMode === 'WINDOW' && (
+                <>
+                  <mesh position={[0, windowThickness/2, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+                    <planeGeometry args={[100, 100]} />
+                    <meshStandardMaterial color="#6366f1" transparent opacity={0.03} depthWrite={false} />
+                  </mesh>
+                  <mesh position={[0, -windowThickness/2, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+                    <planeGeometry args={[100, 100]} />
+                    <meshStandardMaterial color="#6366f1" transparent opacity={0.03} depthWrite={false} />
+                  </mesh>
+                </>
+              )}
+              
+              <mesh rotation={[-Math.PI / 2, 0, 0]}>
+                <planeGeometry args={[100, 100]} />
+                <meshStandardMaterial 
+                  color="#6366f1" 
+                  transparent 
+                  opacity={0.08} 
+                  depthWrite={false}
+                  emissive="#818cf8"
+                  emissiveIntensity={0.5}
+                />
+              </mesh>
+              <Grid 
+                infiniteGrid 
+                cellSize={0.2} 
+                sectionSize={1} 
+                sectionColor={slicingMode === 'WINDOW' ? "#f59e0b" : "#a5b4fc"} 
+                cellColor="#818cf8" 
+                sectionThickness={1.5}
+                fadeDistance={40}
+              />
+              {/* Scan Line Detail */}
+              <mesh rotation={[-Math.PI / 2, 0, 0]}>
+                <ringGeometry args={[0, 50, 4]} />
+                <meshStandardMaterial color={slicingMode === 'WINDOW' ? "#f59e0b" : "#4f46e1"} transparent opacity={0.1} />
+              </mesh>
+            </group>
+          )}
           
           <ContactShadows 
             position={[0, 0, 0]} 
@@ -445,19 +655,21 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose }) =
                 >
                   {isMuro ? (
                     points.length >= 3 && (entity as any).type === 'hatch' ? (
-                      <Room points={points} height={(entity as any).bimHeight || 270} color={color} areaType="muro" />
+                      <Room points={points} holes={(entity as any).holes} height={(entity as any).bimHeight || 270} color={color} areaType="muro" clippingPlanes={clippingPlanes} />
                     ) : (
-                      <Wall points={points} height={(entity as any).bimHeight || 270} width={(entity as any).bimWidth} color={color} />
+                      <Wall points={points} height={(entity as any).bimHeight || 270} width={(entity as any).bimWidth} color={color} clippingPlanes={clippingPlanes} />
                     )
                   ) : entity.bimType === 'room' ? (
                     <Room 
                       points={points} 
+                      holes={(entity as any).holes}
                       height={(entity as any).bimHeight || 270} 
                       color={color} 
                       name={entity.bimName}
+                      clippingPlanes={clippingPlanes}
                     />
                   ) : entity.bimType === 'door' || entity.bimType === 'window' ? (
-                    <BIMSymbol entity={{ ...entity, color, isHovered }} />
+                    <BIMSymbol entity={{ ...entity, color, isHovered }} clippingPlanes={clippingPlanes} />
                   ) : null}
                   {isHovered && <Edges color="cyan" />}
                 </group>
