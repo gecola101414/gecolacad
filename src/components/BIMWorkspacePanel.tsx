@@ -898,37 +898,66 @@ export function BIMWorkspacePanel({
                     className="w-full border rounded px-1.5 py-1 text-xs bg-white"
                   />
                 </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-0.5 font-bold">
-                    Tipo Area
-                  </label>
-                  <select
-                    value={selectedEntity.bimAreaType || 'stanza'}
-                    onChange={(e) => updateSelectedBIMField("bimAreaType", e.target.value)}
-                    className="w-full border rounded px-1.5 py-1 text-xs bg-white"
-                  >
-                    <option value="stanza">Stanza/Locale</option>
-                    <option value="muro">Muro Portante</option>
-                    <option value="tramezzo">Tramezzo Interno</option>
-                    <option value="giardino">Giardino/Esterno</option>
-                    <option value="tetto">Tetto/Copertura</option>
-                    <option value="altro">Altro/Specifica</option>
-                  </select>
-                </div>
               </div>
             )}
             
-            <div className="pt-2">
-              <label className="text-[10px] text-slate-500 font-bold block mb-1">
-                Inizio (Offset - cm)
-              </label>
-              <input
-                type="number"
-                value={(selectedEntity as any).bimOffset || 0}
-                onChange={(e) => updateSelectedBIMField("bimOffset", parseFloat(e.target.value) || 0)}
-                placeholder="Es: 10"
-                className="w-full border rounded px-2 py-1 bg-white text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-              />
+            {/* Generic BIM Fields for all BIM entities */}
+            <div className="space-y-2 border-t pt-2 mt-2">
+              <div>
+                <label className="text-[10px] text-slate-500 block mb-0.5 font-bold">
+                  Tipo Elemento/Area
+                </label>
+                <select
+                  value={selectedEntity.bimAreaType || 'stanza'}
+                  onChange={(e) => updateSelectedBIMField("bimAreaType", e.target.value)}
+                  className="w-full border rounded px-1.5 py-1 text-xs bg-white text-slate-800"
+                >
+                  <option value="stanza">Stanza/Locale</option>
+                  <option value="muro">Muro Portante</option>
+                  <option value="tramezzo">Tramezzo Interno</option>
+                  <option value="giardino">Giardino/Esterno</option>
+                  <option value="tetto">Tetto/Copertura</option>
+                  <option value="altro">Altro/Specifica</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="text-[10px] text-slate-500 block mb-0.5 font-bold">
+                  Trasmittanza (U)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={selectedEntity.bimTrasmittanza || 0}
+                  onChange={(e) => updateSelectedBIMField("bimTrasmittanza", parseFloat(e.target.value) || 0)}
+                  className="w-full border rounded px-1.5 py-1 text-xs bg-white text-slate-800"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] text-slate-500 block mb-0.5 font-bold">
+                  Voce Prezzario
+                </label>
+                <input
+                  type="text"
+                  value={selectedEntity.bimDescription || ""}
+                  onChange={(e) => updateSelectedBIMField("bimDescription", e.target.value)}
+                  className="w-full border rounded px-1.5 py-1 text-xs bg-white text-slate-800"
+                />
+              </div>
+
+              <div className="pt-2">
+                <label className="text-[10px] text-slate-500 font-bold block mb-1">
+                  Inizio (Offset - cm)
+                </label>
+                <input
+                  type="number"
+                  value={(selectedEntity as any).bimOffset || 0}
+                  onChange={(e) => updateSelectedBIMField("bimOffset", parseFloat(e.target.value) || 0)}
+                  placeholder="Es: 10"
+                  className="w-full border rounded px-2 py-1 bg-white text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                />
+              </div>
             </div>
 
             {(selectedEntity.bimType === 'door' || selectedEntity.bimType === 'window') && (

@@ -11,10 +11,11 @@ interface BIM3DViewerProps {
   onClose: () => void;
 }
 
-const Wall = ({ points, height, width, color, clippingPlanes = [] }: { points: Point[], height: number, width?: number, color: string, clippingPlanes?: THREE.Plane[] }) => {
+const Wall = ({ points, height, width, color, baseZ, clippingPlanes = [] }: { points: Point[], height: number, width?: number, color: string, baseZ: number, clippingPlanes?: THREE.Plane[] }) => {
   const segments = useMemo(() => {
     const result = [];
     const h = height / 100; // Convert to meters
+    const zBase = baseZ / 100;
     for (let i = 0; i < points.length - 1; i++) {
       const p1 = points[i];
       const p2 = points[i+1];
@@ -28,13 +29,13 @@ const Wall = ({ points, height, width, color, clippingPlanes = [] }: { points: P
       const centerY = (p1.y + p2.y) / 2;
       
       result.push({
-        position: [centerX / 100, h / 2, -centerY / 100] as [number, number, number],
+        position: [centerX / 100, zBase + h / 2, -centerY / 100] as [number, number, number],
         rotation: [0, -angle, 0] as [number, number, number],
         args: [length / 100, h, (width || 15) / 100] as [number, number, number],
       });
     }
     return result;
-  }, [points, height, width]);
+  }, [points, height, width, baseZ]);
 
   return (
     <group>
@@ -56,14 +57,15 @@ const Wall = ({ points, height, width, color, clippingPlanes = [] }: { points: P
   );
 };
 
-const Room = ({ points, holes, height, color, name, areaType, clippingPlanes = [] }: { points: Point[], holes?: Point[][], height: number, color: string, name?: string, areaType?: string, clippingPlanes?: THREE.Plane[] }) => {
+const Room = ({ points, holes, height, color, name, areaType, baseZ, clippingPlanes = [] }: { points: Point[], holes?: Point[][], height: number, color: string, name?: string, areaType?: string, baseZ: number, clippingPlanes?: THREE.Plane[] }) => {
   const h = height / 100; // Convert to meters
+  const zBase = baseZ / 100;
   const shape = useMemo(() => {
     if (!points || points.length < 3) return null;
     const s = new THREE.Shape();
     s.moveTo(points[0].x / 100, -points[0].y / 100);
     for (let i = 1; i < points.length; i++) {
-      s.lineTo(points[i].x / 100, -points[i].y / 100);
+        s.lineTo(points[i].x / 100, -points[i].y / 100);
     }
     s.closePath();
 
@@ -94,13 +96,13 @@ const Room = ({ points, holes, height, color, name, areaType, clippingPlanes = [
   const center = useMemo(() => {
     let sx = 0, sy = 0;
     points.forEach(p => { sx += p.x; sy += p.y; });
-    return [sx / (points.length * 100), h + 0.05, -sy / (points.length * 100)] as [number, number, number];
-  }, [points, h]);
+    return [sx / (points.length * 100), zBase + h + 0.05, -sy / (points.length * 100)] as [number, number, number];
+  }, [points, h, zBase]);
 
   const isWall = areaType === 'muro';
 
   return (
-    <group>
+    <group position={[0, zBase, 0]}>
       <mesh rotation={[-Math.PI / 2, 0, 0]} castShadow receiveShadow>
         <extrudeGeometry args={[shape, extrudeSettings]} />
         <meshStandardMaterial 
@@ -131,14 +133,14 @@ const Room = ({ points, holes, height, color, name, areaType, clippingPlanes = [
 
       {name && (
         <Text
-          position={center}
+          position={center as [number, number, number]}
           fontSize={0.16}
           color="white"
           anchorX="center"
           anchorY="middle"
           outlineWidth={0.02}
           outlineColor="#0f172a"
-          visible={clippingPlanes.length === 0 || clippingPlanes.every(p => p.distanceToPoint(new THREE.Vector3(...center)) >= 0)}
+          visible={clippingPlanes.length === 0 || clippingPlanes.every(p => p.distanceToPoint(new THREE.Vector3(...(center as [number, number, number]))) >= 0)}
         >
           {name}
         </Text>
@@ -148,14 +150,15 @@ const Room = ({ points, holes, height, color, name, areaType, clippingPlanes = [
 };
 
 const BIMSymbol = ({ entity, onPointerOver, onPointerOut, clippingPlanes = [] }: { entity: any, onPointerOver?: () => void, onPointerOut?: () => void, clippingPlanes?: THREE.Plane[] }) => {
-  const { bimType, points, point, bimHeight = 210, bimWidth = 90, bimWindowHeight = 120, isHovered } = entity;
+  const { bimType, bimZPlane = 0, bimZElevation = 0, points, point, bimHeight = 210, bimWidth = 90, bimWindowHeight = 120, isHovered } = entity;
   const p = point || (points && points[0]);
   if (!p) return null;
 
   const color = entity.color || (bimType === 'door' ? '#ef4444' : '#3b82f6');
   const h = (bimType === 'door' ? bimHeight : bimWindowHeight) / 100;
   const w = (bimWidth || 90) / 100;
-  const zPos = bimType === 'door' ? h / 2 : 1.5;
+  const zBase = (bimZPlane + bimZElevation) / 100;
+  const zPos = zBase + h / 2;
   const pos: [number, number, number] = [p.x / 100, zPos, -p.y / 100];
   
   return (
@@ -205,9 +208,12 @@ const SceneAutoFit = ({ entities, resetTrigger }: { entities: Entity[], resetTri
       }
 
       points.forEach(p => {
-        box.expandByPoint(new THREE.Vector3(p.x / 100, 0, -p.y / 100));
-        const entityHeight = ((entity as any).height || (entity as any).bimHeight || 270) / 100;
-        box.expandByPoint(new THREE.Vector3(p.x / 100, entityHeight, -p.y / 100));
+        const e = entity as any;
+        const baseZ = (e.bimZPlane || 0) + (e.bimZElevation || 0);
+        const entityHeight = (e.bimHeight || e.height || 270) / 100;
+        
+        box.expandByPoint(new THREE.Vector3(p.x / 100, baseZ / 100, -p.y / 100));
+        box.expandByPoint(new THREE.Vector3(p.x / 100, (baseZ / 100) + entityHeight, -p.y / 100));
         hasValidBounds = true;
       });
     });
@@ -245,6 +251,10 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose }) =
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   
+  useEffect(() => {
+    resetCamera();
+  }, []);
+
   // Slicing States
   const [isSlicing, setIsSlicing] = useState(false);
   const [slicingHeight, setSlicingHeight] = useState(3.0); // Default max height
@@ -653,24 +663,34 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose }) =
                   onPointerOver={(e) => { e.stopPropagation(); setHoveredId(entity.id); }}
                   onPointerOut={(e) => { e.stopPropagation(); setHoveredId(null); }}
                 >
-                  {isMuro ? (
-                    points.length >= 3 && (entity as any).type === 'hatch' ? (
-                      <Room points={points} holes={(entity as any).holes} height={(entity as any).bimHeight || 270} color={color} areaType="muro" clippingPlanes={clippingPlanes} />
-                    ) : (
-                      <Wall points={points} height={(entity as any).bimHeight || 270} width={(entity as any).bimWidth} color={color} clippingPlanes={clippingPlanes} />
-                    )
-                  ) : entity.bimType === 'room' ? (
-                    <Room 
-                      points={points} 
-                      holes={(entity as any).holes}
-                      height={(entity as any).bimHeight || 270} 
-                      color={color} 
-                      name={entity.bimName}
-                      clippingPlanes={clippingPlanes}
-                    />
-                  ) : entity.bimType === 'door' || entity.bimType === 'window' ? (
-                    <BIMSymbol entity={{ ...entity, color, isHovered }} clippingPlanes={clippingPlanes} />
-                  ) : null}
+                  {(() => {
+                    const e = entity as any;
+                    const baseZ = (e.bimZPlane || 0) + (e.bimZElevation || 0);
+                    const heightValue = e.bimHeight || e.height || 270;
+                    
+                    if (isMuro) {
+                      return points.length >= 3 && (entity as any).type === 'hatch' ? (
+                        <Room points={points} holes={e.holes} height={heightValue} color={color} areaType="muro" baseZ={baseZ} clippingPlanes={clippingPlanes} />
+                      ) : (
+                        <Wall points={points} height={heightValue} width={e.bimWidth} color={color} baseZ={baseZ} clippingPlanes={clippingPlanes} />
+                      );
+                    } else if (entity.bimType === 'room') {
+                      return (
+                        <Room 
+                          points={points} 
+                          holes={e.holes}
+                          height={heightValue} 
+                          color={color} 
+                          name={e.bimName}
+                          baseZ={baseZ}
+                          clippingPlanes={clippingPlanes}
+                        />
+                      );
+                    } else if (entity.bimType === 'door' || entity.bimType === 'window') {
+                      return <BIMSymbol entity={{ ...entity, color, isHovered }} clippingPlanes={clippingPlanes} />;
+                    }
+                    return null;
+                  })()}
                   {isHovered && <Edges color="cyan" />}
                 </group>
               );

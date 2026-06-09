@@ -60,6 +60,9 @@ interface BIMTopBarControlsProps {
   setBimWindowHeight: (val: number) => void;
   bimSymbolScale?: number;
   setBimSymbolScale?: (val: number) => void;
+  setIsBIMFinestreOpen: (val: boolean) => void;
+  isBIMModeEnabled: boolean;
+  setIsBIMModeEnabled: (val: boolean) => void;
 }
 
 export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
@@ -85,7 +88,10 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
   bimWindowHeight,
   setBimWindowHeight,
   bimSymbolScale = 1,
-  setBimSymbolScale
+  setBimSymbolScale,
+  setIsBIMFinestreOpen,
+  isBIMModeEnabled,
+  setIsBIMModeEnabled
 }) => {
   const [activeDropdown, setActiveDropdown] = useState<
     'porte' | 'finestre' | 'arredi' | 'sanitari' | 'elettrico' | 'idraulico' | 'finiture' | null
@@ -109,18 +115,6 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
   };
 
   // Sync canvas defaults
-  const handleWallThicknessChange = (w: number) => {
-    setBimWallThickness(w);
-    localStorage.setItem('lastWallThickness', w.toString());
-    cadCanvasRef.current?.setBIMDefaults(w, bimWallHeight, 'wall');
-  };
-
-  const handleWallHeightChange = (h: number) => {
-    setBimWallHeight(h);
-    localStorage.setItem('lastWallHeight', h.toString());
-    cadCanvasRef.current?.setBIMDefaults(bimWallThickness, h, 'wall');
-  };
-
   const handleDoorSpecsChange = (w: number, h: number) => {
     setBimDoorWidth(w);
     setBimDoorHeight(h);
@@ -136,10 +130,6 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
     localStorage.setItem('lastWindowHeight', h.toString());
     cadCanvasRef.current?.setBIMDefaults(w, h, 'window');
   };
-
-  // Preset constants
-  const wallThicknessPresets = [10, 15, 30, 40];
-  const wallHeightPresets = [270, 300, 350];
 
   const doorPresets = [
     { w: 70, h: 210, label: '70 x 210' },
@@ -203,100 +193,6 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
   return (
     <div ref={containerRef} className="flex items-center gap-1.5 w-full text-neutral-800">
       
-      {/* 1. WALLS BUTTON & DROPDOWN */}
-      <div className="relative flex items-center">
-        <button
-          onClick={() => {
-            cadCanvasRef.current?.setBIMDefaults(bimWallThickness, bimWallHeight, 'wall');
-            setSelectedTool('BIM_Muro');
-          }}
-          className={`px-2 py-0.5 rounded-l flex items-center gap-1 text-xs border border-r-0 transition ${
-            selectedTool === 'BIM_Muro' 
-              ? 'bg-cyan-100 text-cyan-950 font-bold border-cyan-300 shadow-sm' 
-              : 'hover:bg-neutral-100 border-neutral-300 bg-white'
-          }`}
-          title="Disegna segmenti di muro continui (con Orto e Snap!)"
-        >
-          <Building size={12} className="text-cyan-600" />
-          <span>Muro ({bimWallThickness}cm)</span>
-        </button>
-        <button
-          onClick={() => toggleDropdown('muri')}
-          className={`px-1 py-1 rounded-r border transition text-neutral-500 hover:text-neutral-900 ${
-            activeDropdown === 'muri' ? 'bg-cyan-50 border-cyan-300' : 'hover:bg-neutral-100 border-neutral-300 bg-white'
-          }`}
-        >
-          <ChevronDown size={11} />
-        </button>
-
-        {activeDropdown === 'muri' && (
-          <div className="absolute top-7 left-0 w-52 bg-white rounded-lg shadow-xl border border-neutral-200 p-3 z-50 animate-fade-in text-xs space-y-3">
-            <div>
-              <span className="font-semibold text-[10px] uppercase text-neutral-400 block mb-1">Spessore Muro</span>
-              <div className="grid grid-cols-4 gap-1 mb-2">
-                {wallThicknessPresets.map(w => (
-                  <button
-                    key={w}
-                    onClick={() => handleWallThicknessChange(w)}
-                    className={`py-1 rounded text-[10px] font-mono font-bold border transition ${
-                      bimWallThickness === w 
-                        ? 'bg-cyan-50 border-cyan-500 text-cyan-800' 
-                        : 'bg-neutral-50 border-neutral-200 text-neutral-600 hover:border-neutral-300'
-                    }`}
-                  >
-                    {w}
-                  </button>
-                ))}
-              </div>
-              <input
-                type="number"
-                min="1"
-                max="120"
-                value={bimWallThickness}
-                onChange={(e) => handleWallThicknessChange(parseInt(e.target.value) || 15)}
-                className="w-full bg-neutral-50 border border-neutral-200 text-neutral-800 rounded p-1 text-[11px] font-mono focus:outline-none focus:border-cyan-400"
-              />
-            </div>
-
-            <div>
-              <span className="font-semibold text-[10px] uppercase text-neutral-400 block mb-1">Altezza Muro (cm)</span>
-              <div className="grid grid-cols-3 gap-1 mb-2">
-                {wallHeightPresets.map(h => (
-                  <button
-                    key={h}
-                    onClick={() => handleWallHeightChange(h)}
-                    className={`py-0.5 rounded text-[10px] font-mono font-bold border transition ${
-                      bimWallHeight === h 
-                        ? 'bg-cyan-50 border-cyan-500 text-cyan-800' 
-                        : 'bg-neutral-50 border-neutral-200 text-neutral-600 hover:border-neutral-300'
-                    }`}
-                  >
-                    {h}
-                  </button>
-                ))}
-              </div>
-              <input
-                type="number"
-                min="100"
-                max="600"
-                value={bimWallHeight}
-                onChange={(e) => handleWallHeightChange(parseInt(e.target.value) || 270)}
-                className="w-full bg-neutral-50 border border-neutral-200 text-neutral-800 rounded p-1 text-[11px] font-mono"
-              />
-            </div>
-            
-            <button
-              onClick={() => {
-                setSelectedTool('BIM_Muro');
-                setActiveDropdown(null);
-              }}
-              className="w-full py-1 text-center bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded text-[10px] uppercase tracking-wider"
-            >
-              Attiva Disegno Muri
-            </button>
-          </div>
-        )}
-      </div>
 
       {/* 2. DOORS BUTTON & DROPDOWN */}
       <div className="relative flex items-center">
@@ -387,6 +283,7 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
         <button
           onClick={() => {
             cadCanvasRef.current?.setBIMDefaults(bimWindowWidth, bimWindowHeight, 'window');
+            setIsBIMFinestreOpen(true);
             setSelectedTool('BIM_Finestra');
           }}
           className={`px-2 py-0.5 rounded-l flex items-center gap-1 text-xs border border-r-0 transition ${
@@ -721,6 +618,17 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
           </div>
         )}
       </div>
+
+      <div className="h-4 w-[1px] bg-neutral-300 mx-1" />
+
+      <button
+        onClick={() => setIsBIMModeEnabled(!isBIMModeEnabled)}
+        className={`px-3 py-1 rounded flex items-center gap-1.5 text-xs font-bold transition ${isBIMModeEnabled ? 'bg-indigo-600 text-white' : 'bg-neutral-200 text-neutral-700'}`}
+        title="Attiva/Disattiva Visualizzazione BIM"
+      >
+        <Building size={12} />
+        {isBIMModeEnabled ? 'BIM ON' : 'BIM OFF'}
+      </button>
 
       <div className="h-4 w-[1px] bg-neutral-300 mx-1" />
 

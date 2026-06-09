@@ -41,6 +41,9 @@ export interface CADEntity {
   bimOffset?: number; // Offset for positioning
   backgroundColor?: string; // Fill color for functional areas
   bimHatchPattern?: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE'; 
+  bimDescription?: string;
+  bimMarmo?: string;
+  bimTrasmittanza?: number;
 }
 
 export interface LineEntity extends CADEntity {

@@ -935,7 +935,9 @@ interface AreaFunzionaleDialogProps {
     type: 'stanza' | 'muro' | 'tramezzo' | 'giardino' | 'tetto' | 'altro'; 
     name: string; 
     color: string; 
-    height: number;
+    zPlane: number;
+    zElevation: number;
+    objectHeight: number;
     hatch: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE';
   }) => void;
   points?: Point[] | { points: Point[], holes?: Point[][] };
@@ -943,7 +945,9 @@ interface AreaFunzionaleDialogProps {
     type: 'stanza' | 'muro' | 'tramezzo' | 'giardino' | 'tetto' | 'altro';
     name: string;
     color: string;
-    height: number;
+    zPlane: number;
+    zElevation: number;
+    objectHeight: number;
     hatch: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE';
   };
 }
@@ -984,7 +988,9 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
   const [areaType, setAreaType] = useState<'stanza' | 'muro' | 'tramezzo' | 'giardino' | 'tetto' | 'altro'>('stanza');
   const [name, setName] = useState('');
   const [color, setColor] = useState(AREA_COLORS[0]);
-  const [height, setHeight] = useState(2.70);
+  const [zPlane, setZPlane] = useState(0);
+  const [zElevation, setZElevation] = useState(0);
+  const [objectHeight, setObjectHeight] = useState(2.70);
   const [hatch, setHatch] = useState<'SOLID' | 'ANSI31' | 'CROSS' | 'NONE'>('SOLID');
 
   useEffect(() => {
@@ -993,14 +999,18 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
         setAreaType(initialData.type);
         setName(initialData.name);
         setColor(initialData.color);
-        setHeight(initialData.height);
+        setZPlane(initialData.zPlane);
+        setZElevation(initialData.zElevation);
+        setObjectHeight(initialData.objectHeight);
         setHatch(initialData.hatch);
       } else {
         // Reset to defaults for new area
         setAreaType('stanza');
         setName(AREA_LABELS['stanza']);
         setColor(AREA_COLORS[0]);
-        setHeight(2.70);
+        setZPlane(parseFloat(localStorage.getItem('last_bim_zPlane') || '0'));
+        setZElevation(parseFloat(localStorage.getItem('last_bim_zElevation') || '0'));
+        setObjectHeight(parseFloat(localStorage.getItem('last_bim_height') || '270'));
         setHatch('SOLID');
       }
     }
@@ -1020,34 +1030,14 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
     }
   }, [isOpen, areaType, initialData]);
 
-  const calculatedArea = useMemo(() => {
-    if (!points) return 0;
-    const computeArea = (pts: Point[]) => {
-      let area = 0;
-      for (let i = 0; i < pts.length; i++) {
-        const p1 = pts[i];
-        const p2 = pts[(i + 1) % pts.length];
-        area += p1.x * p2.y - p2.x * p1.y;
-      }
-      return Math.abs(area) / 2;
-    };
-
-    if (Array.isArray(points)) {
-      return computeArea(points) / 10000;
-    } else {
-      let total = computeArea(points.points);
-      if (points.holes) {
-        points.holes.forEach(h => total -= computeArea(h));
-      }
-      return Math.max(0, total / 10000);
-    }
-  }, [points]);
-
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onConfirm({ type: areaType, name, color, height, hatch });
+    localStorage.setItem('last_bim_zPlane', zPlane.toString());
+    localStorage.setItem('last_bim_zElevation', zElevation.toString());
+    localStorage.setItem('last_bim_height', objectHeight.toString());
+    onConfirm({ type: areaType, name, color, zPlane, zElevation, objectHeight: parseFloat(objectHeight.toString()), hatch });
   };
 
   return (
@@ -1118,16 +1108,38 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
             </select>
           </div>
 
-          <div>
-            <label className="block text-[9px] text-slate-400 font-black uppercase tracking-widest mb-1.5 font-mono">Altezza (m)</label>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="col-span-1">
+            <label className="block text-[8px] text-slate-400 font-black uppercase tracking-widest mb-1 font-mono">Piano Z (m)</label>
             <input
               type="number"
               step="0.01"
-              value={height}
-              onChange={(e) => setHeight(parseFloat(e.target.value) || 2.70)}
-              className="w-full bg-white/5 border border-white/10 text-white rounded-lg p-2.5 text-xs font-mono font-bold focus:outline-none focus:border-cyan-500"
+              value={zPlane}
+              onChange={(e) => setZPlane(parseFloat(e.target.value) || 0)}
+              className="w-full bg-white/5 border border-white/10 text-white rounded p-2 text-xs font-mono font-bold focus:outline-none focus:border-cyan-500"
             />
           </div>
+          <div className="col-span-1">
+            <label className="block text-[8px] text-slate-400 font-black uppercase tracking-widest mb-1 font-mono">Elevaz. (m)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={zElevation}
+              onChange={(e) => setZElevation(parseFloat(e.target.value) || 0)}
+              className="w-full bg-white/5 border border-white/10 text-white rounded p-2 text-xs font-mono font-bold focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+          <div className="col-span-1">
+            <label className="block text-[8px] text-slate-400 font-black uppercase tracking-widest mb-1 font-mono">Altezza (cm)</label>
+            <input
+              type="number"
+              step="1"
+              value={objectHeight}
+              onChange={(e) => setObjectHeight(parseFloat(e.target.value) || 270)}
+              className="w-full bg-white/5 border border-white/10 text-white rounded p-2 text-xs font-mono font-bold focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+        </div>
         </div>
 
         <div className="flex gap-3">
@@ -1155,7 +1167,6 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
             L'area visualizzata sul CAD avrà un <span className="text-emerald-300 font-bold underline">bordo verde lampeggiante</span> per conferma posizionale.
           </p>
           <div className="bg-emerald-500/20 px-2 py-1 rounded border border-emerald-500/30">
-            <span className="text-[10px] font-mono font-black text-emerald-400">{calculatedArea.toFixed(2)} mq</span>
           </div>
         </div>
 

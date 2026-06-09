@@ -13,7 +13,7 @@ import { DimensionStyleDialog } from "./components/DimensionStyleDialog";
 import { RaccordoDialog } from "./components/RaccordoDialog";
 import { DXFTextReaderDialog } from "./components/DXFTextReaderDialog";
 import { TemplatePreview } from "./components/TemplatePreview";
-import { AreaFunzionaleDialog } from "./components/BIMDialogs";
+import { AreaFunzionaleDialog, FinestreDialog } from "./components/BIMDialogs";
 import { BIMWorkspacePanel } from "./components/BIMWorkspacePanel";
 import { BIMTopBarControls } from "./components/BIMTopBarControls";
 import { BIM3DViewer } from "./components/BIM3DViewer";
@@ -206,7 +206,6 @@ export default function App() {
   const [selectedBIMSymbolType, setSelectedBIMSymbolType] = useState<string | null>(null);
 
   // BIM dedicated dialog states
-  const [isBIMMuriOpen, setIsBIMMuriOpen] = useState(false);
   const [isBIMPorteOpen, setIsBIMPorteOpen] = useState(false);
   const [isBIMFinestreOpen, setIsBIMFinestreOpen] = useState(false);
   const [isBIMArrediOpen, setIsBIMArrediOpen] = useState(false);
@@ -218,6 +217,15 @@ export default function App() {
   // BIM top bar reactive parameters
   const [bimWallThickness, setBimWallThickness] = useState<number>(() => parseFloat(localStorage.getItem('lastWallThickness') || '15'));
   const [bimWallHeight, setBimWallHeight] = useState<number>(() => parseFloat(localStorage.getItem('lastWallHeight') || '270'));
+  const [bimWallType, setBimWallType] = useState<string>(() => localStorage.getItem('lastWallType') || "Forati (Laterizio)");
+  
+const MASONRY_TYPES = [
+  "Forati (Laterizio)", "Mattoni Pieni", "Blocchi di Cemento", "Calcestruzzo Cellulare",
+  "Gasbeton", "Cartongesso", "Pietra Locale", "Blocchi Argilla Espansa",
+  "Forati Alveolati", "Blocchi Insonorizzati", "Blocchi Sismici", "Pannelli Sandwich",
+  "Blocchi Termici", "Blocchi Portanti", "Blocchi Faccia a Vista", "Blocchi Isolanti Grafite",
+  "Blocchi Isolanti Sughero", "Blocchi Isolanti Lana Roccia", "Blocchi Isolanti Perlite", "Laterizio Porizzato"
+];
   const [bimDoorWidth, setBimDoorWidth] = useState<number>(() => parseFloat(localStorage.getItem('lastDoorWidth') || '80'));
   const [bimDoorHeight, setBimDoorHeight] = useState<number>(() => parseFloat(localStorage.getItem('lastDoorHeight') || '210'));
   const [bimWindowWidth, setBimWindowWidth] = useState<number>(() => parseFloat(localStorage.getItem('lastWindowWidth') || '120'));
@@ -244,6 +252,7 @@ export default function App() {
   ]);
   const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere' | 'testo' | 'gemini' | 'manuale' | 'bim'>(() => (localStorage.getItem('activeSidebarTab') as any) || 'penne');
   const [isBIMAreaDialogOpen, setIsBIMAreaDialogOpen] = useState(false);
+  const [isBIMModeEnabled, setIsBIMModeEnabled] = useState(true);
   const [is3DViewOpen, setIs3DViewOpen] = useState(false);
   const [detectedAreaPoints, setDetectedAreaPoints] = useState<Point[] | { points: Point[], holes?: Point[][] } | null>(null);
   const [editingAreaId, setEditingAreaId] = useState<string | null>(null);
@@ -313,7 +322,37 @@ export default function App() {
     return () => clearTimeout(timeoutId);
   }, [entities, fileHandle, layers, tavole, measurements]);
 
+  const bimVisibilityStateRef = useRef<Record<string, boolean>>({});
+
   // UI Persistence Effects
+  useEffect(() => {
+    setLayers(prev => {
+      if (!isBIMModeEnabled) {
+        // BIM mode turning OFF. Save current visibility of BIM layers and hide them.
+        const newOriginalVisibility: Record<string, boolean> = { ...bimVisibilityStateRef.current };
+        const newLayers = prev.map(layer => {
+          if (layer.id.startsWith("BIM_")) {
+            newOriginalVisibility[layer.id] = layer.visible;
+            return { ...layer, visible: false }; // Hide
+          }
+          return layer;
+        });
+        bimVisibilityStateRef.current = newOriginalVisibility;
+        return newLayers;
+      } else {
+        // BIM mode turning ON. Restore based on stored visibility.
+        return prev.map(layer => {
+          if (layer.id.startsWith("BIM_")) {
+            const originalVisibility = bimVisibilityStateRef.current[layer.id];
+            // Default to true if not found in ref
+            return { ...layer, visible: originalVisibility !== undefined ? originalVisibility : true };
+          }
+          return layer;
+        });
+      }
+    });
+  }, [isBIMModeEnabled]);
+
   useEffect(() => {
     localStorage.setItem('selectedTool', selectedTool || '');
   }, [selectedTool]);
@@ -351,6 +390,12 @@ export default function App() {
   }, [favoritePanels]);
 
   useEffect(() => {
+    if (!isBIMModeEnabled && activeSidebarTab === 'bim') {
+      setActiveSidebarTab('penne');
+    }
+  }, [isBIMModeEnabled, activeSidebarTab]);
+
+  useEffect(() => {
     localStorage.setItem('activeSidebarTab', activeSidebarTab);
   }, [activeSidebarTab]);
 
@@ -372,6 +417,7 @@ export default function App() {
       { id: "BIM_Impianti_Idraulici", name: "BIM_Impianti_Idraulici", visible: true, frozen: false },
       { id: "BIM_Finiture", name: "BIM_Finiture", visible: true, frozen: false },
       { id: "BIM_Legenda", name: "BIM_Legenda", visible: true, frozen: false },
+      { id: "BIM_Locali", name: "BIM_Locali", visible: true, frozen: false },
     ];
     setLayers(prev => {
       const updated = [...prev];
@@ -466,7 +512,7 @@ export default function App() {
     setIsBIMAreaDialogOpen(true);
   };
 
-  const handleConfirmArea = (areaData: { type: string; name: string; color: string; height: number; hatch: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE' }) => {
+  const handleConfirmArea = (areaData: { type: string; name: string; color: string; zPlane: number; zElevation: number; objectHeight: number; hatch: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE' }) => {
     if (!detectedAreaPoints) return;
 
     if (editingAreaId) {
@@ -480,32 +526,20 @@ export default function App() {
             backgroundColor: areaData.color,
             bimHatchPattern: areaData.hatch,
             pattern: areaData.hatch === 'NONE' ? 'SOLID' : areaData.hatch,
-            height: areaData.height
+            bimHeight: areaData.objectHeight,
+            bimZPlane: areaData.zPlane,
+            bimZElevation: areaData.zElevation,
+            isBIM: true
           };
         }
         return e;
       }));
       setShortcutToast(`Area ${areaData.name} aggiornata ✅`);
     } else {
-      // CREATE NEW (with duplicate check)
+      // CREATE NEW
       if (!detectedAreaPoints) return;
       const pts = Array.isArray(detectedAreaPoints) ? detectedAreaPoints : detectedAreaPoints.points;
       const hls = Array.isArray(detectedAreaPoints) ? undefined : detectedAreaPoints.holes;
-
-      const isDuplicate = entities.some(e => 
-        e.bimType === 'room' && 
-        (e as any).points && 
-        (e as any).points.length === pts.length &&
-        (e as any).points.every((p: Point, i: number) => Math.abs(p.x - pts[i].x) < 0.1 && Math.abs(p.y - pts[i].y) < 0.1)
-      );
-
-      if (isDuplicate) {
-        setShortcutToast("Area già mappata in precedenza!");
-        setTimeout(() => setShortcutToast(null), 3000);
-        setIsBIMAreaDialogOpen(false);
-        setDetectedAreaPoints(null);
-        return;
-      }
 
       const newArea: Entity = {
         id: `bim-area-${Date.now()}`,
@@ -514,7 +548,7 @@ export default function App() {
         holes: hls,
         color: 'rgba(0,0,0,0.5)',
         strokeWidth: 1,
-        layer: 'BIM_Aree_Funzionali',
+        layer: 'BIM_Locali',
         isBIM: true,
         bimType: 'room',
         bimAreaType: areaData.type as any,
@@ -522,7 +556,9 @@ export default function App() {
         backgroundColor: areaData.color,
         bimHatchPattern: areaData.hatch,
         pattern: areaData.hatch === 'NONE' ? 'SOLID' : areaData.hatch,
-        height: areaData.height,
+        bimHeight: areaData.objectHeight,
+        bimZPlane: areaData.zPlane,
+        bimZElevation: areaData.zElevation,
         timestamp: Date.now()
       } as any;
 
@@ -1076,7 +1112,7 @@ export default function App() {
     }
 
     // If not in a drawing tool, switch to Line
-    if (!["Line", "Circle", "Arc", "Hatch", "Dimension"].includes(selectedTool || '')) {
+    if (!["Line", "Muro", "Circle", "Arc", "Hatch", "Dimension"].includes(selectedTool || '')) {
       setSelectedCategory("Disegno");
       handleToolClick("Line");
       setShortcutToast("Strumento: Linea");
@@ -1126,7 +1162,7 @@ export default function App() {
     } else {
       setSelectedTool(tool);
       // Ensure the correct sidebar tab opens for specific tools as requested
-      if (tool === 'Hatch' || tool === 'Line' || tool === 'Circle') {
+      if (tool === 'Hatch' || tool === 'Line' || tool === 'Circle' || tool === 'Muro') {
         setActiveSidebarTab('penne');
         setShowProperties(true);
       } else if (tool === 'Testo') {
@@ -1177,6 +1213,7 @@ export default function App() {
       icon: DraftingCompass,
       tools: [
         { name: "Line", icon: Minus },
+        { name: "Muro", icon: Building },
         { name: "Circle", icon: Circle },
         { name: "Arc", icon: History },
         { name: "Hatch", icon: Grid },
@@ -1200,7 +1237,6 @@ export default function App() {
       name: "BIM",
       icon: Building,
       tools: [
-        { name: "BIM_Muro", icon: Building },
         { name: "BIM_Porta", icon: Type },
         { name: "BIM_Finestra", icon: Maximize2 },
         { name: "BIM_Arredi", icon: Home },
@@ -1604,6 +1640,7 @@ export default function App() {
           <Sparkles size={16} className={showProperties && activeSidebarTab === 'gemini' ? "text-amber-500 animate-pulse" : "text-amber-500"} />
           <span className="text-[10px]">Gemini AI</span>
         </button>
+        {isBIMModeEnabled && (
         <button
           onClick={() => {
             handleGuideClick('BIM');
@@ -1621,6 +1658,7 @@ export default function App() {
           <Building size={16} className={showProperties && activeSidebarTab === 'bim' ? "text-cyan-600 animate-pulse" : "text-cyan-600"} />
           <span className="text-[10px] font-bold">BIM</span>
         </button>
+        )}
         <div className="flex-1"></div>
         <button
           onClick={() => {
@@ -1732,6 +1770,7 @@ export default function App() {
               setBimSymbolScale(val);
               localStorage.setItem('lastBIMSymbolScale', val.toString());
             }}
+            setIsBIMFinestreOpen={setIsBIMFinestreOpen}
           />
         ) : (
           selectedCategoryTools.map((tool) => (
@@ -2049,6 +2088,7 @@ export default function App() {
             orthoMode={orthoMode}
             setOrthoMode={setOrthoMode}
             isContinuousMode={isContinuousMode}
+            isBIMModeEnabled={isBIMModeEnabled}
             cancelTrigger={cancelTrigger}
             parallelTrigger={parallelTrigger}
             tavole={tavole}
@@ -2064,6 +2104,7 @@ export default function App() {
             bimDoorHeight={bimDoorHeight}
             bimWindowHeight={bimWindowHeight}
             bimWallThickness={bimWallThickness}
+            bimWallType={bimWallType}
             onActionStart={() => {
               setHoveredGuide(null);
               setGuideLockedBy(null);
@@ -2097,6 +2138,19 @@ export default function App() {
                 hatch: (e as any).bimHatchPattern || 'SOLID'
               };
             })() : undefined}
+          />
+          <FinestreDialog
+            isOpen={isBIMFinestreOpen}
+            onClose={() => setIsBIMFinestreOpen(false)}
+            lastWindowWidth={bimWindowWidth}
+            lastWindowHeight={bimWindowHeight}
+            onConfirmWindow={(width, height, type, trasmittanza, prezzario) => {
+              setBimWindowWidth(width);
+              setBimWindowHeight(height);
+              setIsBIMFinestreOpen(false);
+              setSelectedBIMSymbolType('window');
+              setShortcutToast("Seleziona un punto sul muro per inserire la finestra");
+            }}
           />
 
           {is3DViewOpen && (
@@ -2532,7 +2586,7 @@ export default function App() {
             </h3>
 
             <div className="space-y-4 flex-1">
-              {activeSidebarTab === "bim" ? (
+              {activeSidebarTab === "bim" && isBIMModeEnabled ? (
                 <BIMWorkspacePanel
                   entities={entities}
                   selectedTool={selectedTool}
@@ -2544,7 +2598,6 @@ export default function App() {
                   cadCanvasRef={cadCanvasRef}
                   selectedTemplateId={selectedTemplateId}
                   setSelectedTemplateId={setSelectedTemplateId}
-                  onOpenMuri={() => setIsBIMMuriOpen(true)}
                   onOpenPorte={() => setIsBIMPorteOpen(true)}
                   onOpenFinestre={() => setIsBIMFinestreOpen(true)}
                   onOpenArredi={() => setIsBIMArrediOpen(true)}
@@ -2555,6 +2608,55 @@ export default function App() {
                   onEditArea={handleEditBIMArea}
                   onOpen3DView={() => setIs3DViewOpen(true)}
                 />
+              ) : selectedTool === 'Muro' ? (
+                <div className="space-y-4">
+                  <div className="bg-cyan-50 border border-cyan-200 p-3 rounded-lg shadow-sm">
+                    <p className="text-[11px] text-cyan-900 leading-normal font-sans">
+                      <span className="font-bold">🧱 IMPOSTAZIONI MURO:</span> Definisci la tipologia e le dimensioni.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-mono">Spessore (cm)</label>
+                      <input
+                        type="number"
+                        value={bimWallThickness}
+                        onChange={(e) => {
+                          setBimWallThickness(parseInt(e.target.value) || 15);
+                          localStorage.setItem('lastWallThickness', e.target.value);
+                        }}
+                        className="w-full bg-neutral-50 border border-neutral-300 rounded p-2 text-xs font-mono"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-mono">Altezza (cm)</label>
+                      <input
+                        type="number"
+                        value={bimWallHeight}
+                        onChange={(e) => {
+                          setBimWallHeight(parseInt(e.target.value) || 270);
+                          localStorage.setItem('lastWallHeight', e.target.value);
+                        }}
+                        className="w-full bg-neutral-50 border border-neutral-300 rounded p-2 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                      <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-mono">Tipo Muratura</label>
+                      <select
+                        value={bimWallType}
+                        onChange={(e) => {
+                          setBimWallType(e.target.value);
+                          localStorage.setItem('lastWallType', e.target.value);
+                        }}
+                        className="w-full bg-neutral-50 border border-neutral-300 rounded p-2 text-xs font-mono"
+                      >
+                        {MASONRY_TYPES.map(type => (
+                          <option key={type} value={type}>{type}</option>
+                        ))}
+                      </select>
+                  </div>
+                </div>
               ) : activeSidebarTab === "gemini" ? (
                 <div className="space-y-4">
                   <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg shadow-sm">

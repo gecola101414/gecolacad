@@ -64,6 +64,19 @@ const normalizeAngle = (a: number) => {
   return deg;
 };
 
+const AREA_TYPE_COLORS: Record<string, string> = {
+  'stanza': 'rgba(16, 185, 129, 0.12)',
+  'muro': 'rgba(107, 114, 128, 0.2)',
+  'tramezzo': 'rgba(156, 163, 175, 0.15)',
+  'giardino': 'rgba(34, 197, 94, 0.15)',
+  'tetto': 'rgba(239, 68, 68, 0.15)',
+  'altro': 'rgba(168, 85, 247, 0.15)'
+};
+
+const getAreaColor = (type: string | undefined): string => {
+  return AREA_TYPE_COLORS[type || 'stanza'] || AREA_TYPE_COLORS['stanza'];
+};
+
 const mirrorPoint = (p: Point, a: Point, b: Point): Point => {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
@@ -664,8 +677,37 @@ const getRgbaFromColor = (colorStr: string, alpha: number) => {
   return str;
 };
 
-const drawHatchPattern = (ctx: CanvasRenderingContext2D, entity: any, zoom: number) => {
-    const { pattern, scale, angle, color, points, holes, sfumatura = 0, backgroundColor } = entity;
+const drawHatchPattern = (ctx: CanvasRenderingContext2D, entity: any, zoom: number, isBIMModeEnabled: boolean) => {
+    const { pattern, scale, angle, color, points, holes, sfumatura = 0, backgroundColor, isBIM } = entity;
+    
+    // In Normal Mode, do not draw BIM hatches, BUT draw the outline
+    if (!isBIMModeEnabled && (isBIM || entity.bimType)) {
+        ctx.save();
+        ctx.strokeStyle = '#cccccc'; // Subtle light gray for reference
+        ctx.lineWidth = Math.max(0.5, 0.8 / zoom);
+        ctx.beginPath();
+        if (points && points.length >= 3) {
+            ctx.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i++) {
+                ctx.lineTo(points[i].x, points[i].y);
+            }
+            ctx.closePath();
+            if (holes) {
+                holes.forEach((hole: Point[]) => {
+                    if (hole.length < 3) return;
+                    ctx.moveTo(hole[0].x, hole[0].y);
+                    for (let i = 1; i < hole.length; i++) {
+                        ctx.lineTo(hole[i].x, hole[i].y);
+                    }
+                    ctx.closePath();
+                });
+            }
+        }
+        ctx.stroke();
+        ctx.restore();
+        return;
+    }
+    
     if (!points || points.length < 3) return;
 
     ctx.save();
@@ -692,7 +734,7 @@ const drawHatchPattern = (ctx: CanvasRenderingContext2D, entity: any, zoom: numb
     ctx.clip('evenodd');
 
     // Draw background color if present (important for BIM areas)
-    if (backgroundColor) {
+    if (backgroundColor && isBIMModeEnabled) {
         ctx.fillStyle = backgroundColor;
         ctx.beginPath();
         ctx.moveTo(points[0].x, points[0].y);
@@ -2148,9 +2190,11 @@ interface CADCanvasProps {
   bimDoorHeight?: number;
   bimWindowHeight?: number;
   bimWallThickness?: number;
+  bimWallType?: string;
+  isBIMModeEnabled?: boolean;
 }
 
-export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultHatchStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, eraserType = 'pencil', setEraserType, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, setOrthoMode, isContinuousMode = false, cancelTrigger = 0, parallelTrigger = 0, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, selectedBIMSymbolType, setSelectedBIMSymbolType, bimSymbolScale = 1, raccordoConfig, onEditRaccordo, onActionStart, onAreaDetected, highlightedPoints, bimWallHeight = 270, bimDoorHeight = 210, bimWindowHeight = 140, bimWallThickness = 15 }, ref) => {
+export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultHatchStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, eraserType = 'pencil', setEraserType, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, setOrthoMode, isContinuousMode = false, cancelTrigger = 0, parallelTrigger = 0, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, selectedBIMSymbolType, setSelectedBIMSymbolType, bimSymbolScale = 1, raccordoConfig, onEditRaccordo, onActionStart, onAreaDetected, highlightedPoints, bimWallHeight = 270, bimDoorHeight = 210, bimWindowHeight = 140, bimWallThickness = 15, bimWallType = 'Forati (Laterizio)', isBIMModeEnabled = true }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const entitiesRef = useRef(entities);
   useEffect(() => {
@@ -2165,6 +2209,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
   const [hoveredTavolaPart, setHoveredTavolaPart] = useState<{ id: string; part: 'cartiglio' | 'badge' } | null>(null);
   const [manualRoomPoints, setManualRoomPoints] = useState<Point[]>([]);
+  const isBIMModeEnabledRef = useRef(isBIMModeEnabled);
+  useEffect(() => { isBIMModeEnabledRef.current = isBIMModeEnabled; }, [isBIMModeEnabled]);
 
   const getHoveredTavolaPart = (rawPoint: Point): { id: string; part: 'cartiglio' | 'badge' } | null => {
     if (!tavole) return null;
@@ -2947,7 +2993,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           angle: 0,
           lineWidth: 1,
           mode: 'pencil',
-          layer: activeLayerId
+          layer: 'BIM_Locali'
         } as any;
 
         newRoomEntities.push(newRoom);
@@ -3172,7 +3218,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
     }
 
-    const isDrawingTool = ['Line', 'Circle', 'Arc', 'Rectangle', 'Hatch', 'Dimension', 'BIM_Muro', 'BIM_Porta', 'BIM_Finestra', 'BIM_Symbol', 'BIM_DisegnaStanza'].includes(activeTool);
+    const isDrawingTool = ['Line', 'Circle', 'Arc', 'Rectangle', 'Hatch', 'Dimension', 'Muro', 'BIM_Muro', 'BIM_Porta', 'BIM_Finestra', 'BIM_Symbol', 'BIM_DisegnaStanza'].includes(activeTool);
     if (isDrawingTool && (drawing ? true : isShiftPressedRef.current)) {
         const threshold = 12 / view.zoom;
         const uniqueKeyPoints: Point[] = [];
@@ -3346,6 +3392,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     for (const ent of entitiesRef.current) {
       const layer = layerMapForSelection.get(ent.layer);
       if (layer && (!layer.visible || layer.frozen)) continue;
+
+      if ((ent as any).isBIM && !isBIMModeEnabledRef.current) continue;
 
       // Cheap bounding box culling
       if (ent.type === 'line') {
@@ -4311,14 +4359,16 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                   }
                   
                   // 1. Solid fill for wall 2D thickness
-                  ctx.fillStyle = 'rgba(75, 85, 99, 0.12)';
-                  ctx.beginPath();
-                  ctx.moveTo(startPlus.x, startPlus.y);
-                  ctx.lineTo(endPlus.x, endPlus.y);
-                  ctx.lineTo(endMinus.x, endMinus.y);
-                  ctx.lineTo(startMinus.x, startMinus.y);
-                  ctx.closePath();
-                  ctx.fill();
+                  if (isBIMModeEnabledRef.current) {
+                      ctx.fillStyle = 'rgba(75, 85, 99, 0.12)';
+                      ctx.beginPath();
+                      ctx.moveTo(startPlus.x, startPlus.y);
+                      ctx.lineTo(endPlus.x, endPlus.y);
+                      ctx.lineTo(endMinus.x, endMinus.y);
+                      ctx.lineTo(startMinus.x, startMinus.y);
+                      ctx.closePath();
+                      ctx.fill();
+                  }
 
                   // 2. Wall border lines
                   ctx.strokeStyle = isHighlighted ? highlightColor : '#374151';
@@ -4549,7 +4599,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             ctx.strokeRect(entity.point.x + offsetX - 4/view.zoom, entity.point.y - 4/view.zoom, maxW + 8/view.zoom, h + 8/view.zoom);
           }
         } else if (entity.type === 'hatch') {
-          drawHatchPattern(ctx, entity, view.zoom);
+          drawHatchPattern(ctx, entity, view.zoom, isBIMModeEnabledRef.current);
           ctx.beginPath();
           if ((selectedEntityId === entity.id || isFlashing) && entity.points && entity.points.length >= 3) {
             ctx.moveTo(entity.points[0].x, entity.points[0].y);
@@ -4705,47 +4755,54 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           const h = 12 / view.zoom;
 
           if (eraserType === 'pencil') {
-              // Classic white/light-grey pencil eraser with precision wedge tip
+              // Kneaded eraser (gomma pane) look: light grey/off-white
               // Draw main rubber wedge body
-              ctx.fillStyle = '#f8fafc'; // Even brighter white for visibility
+              ctx.fillStyle = '#d9d9d9'; 
               ctx.shadowBlur = 4 / view.zoom;
               ctx.shadowColor = 'rgba(0,0,0,0.2)';
               
               ctx.beginPath();
-              ctx.moveTo(-w, -h);
-              ctx.lineTo(-w * 0.25, -h);
+              // Pointed right to left: tip at (0,0)
+              ctx.moveTo(w, -h);
+              ctx.lineTo(w * 0.25, -h);
               ctx.lineTo(0, 0); // precise sharp tip at cursor point (0,0)
-              ctx.lineTo(-w * 0.25, h);
-              ctx.lineTo(-w, h);
+              ctx.lineTo(w * 0.25, h);
+              ctx.lineTo(w, h);
               ctx.closePath();
+              ctx.fill();
+
+              // Add a grey smudge on the tip
+              ctx.fillStyle = '#a3a3a3';
+              ctx.beginPath();
+              ctx.arc(w * 0.05, 0, 2 / view.zoom, 0, Math.PI * 2);
               ctx.fill();
 
               // Shadow/bevel 3D facet (diagonal bevel)
               ctx.fillStyle = '#e2e8f0'; 
               ctx.beginPath();
-              ctx.moveTo(-w * 0.25, -h);
+              ctx.moveTo(w * 0.25, -h);
               ctx.lineTo(0, 0);
-              ctx.lineTo(-w * 0.25, 0);
+              ctx.lineTo(w * 0.25, 0);
               ctx.closePath();
               ctx.fill();
 
               // Royal blue paper sleeve wrap
               ctx.fillStyle = '#1e3a8a'; 
               ctx.beginPath();
-              ctx.moveTo(-w * 1.05, -h * 1.1);
-              ctx.lineTo(-w * 0.4, -h * 1.1);
-              ctx.lineTo(-w * 0.4, h * 1.1);
-              ctx.lineTo(-w * 1.05, h * 1.1);
+              ctx.moveTo(w * 1.05, -h * 1.1);
+              ctx.lineTo(w * 0.4, -h * 1.1);
+              ctx.lineTo(w * 0.4, h * 1.1);
+              ctx.lineTo(w * 1.05, h * 1.1);
               ctx.closePath();
               ctx.fill();
 
               // Light blue stripe detail for professional look
               ctx.fillStyle = '#3b82f6';
               ctx.beginPath();
-              ctx.moveTo(-w * 0.95, -h * 1.1);
-              ctx.lineTo(-w * 0.8, -h * 1.1);
-              ctx.lineTo(-w * 0.8, h * 1.1);
-              ctx.lineTo(-w * 0.95, h * 1.1);
+              ctx.moveTo(w * 0.95, -h * 1.1);
+              ctx.lineTo(w * 0.8, -h * 1.1);
+              ctx.lineTo(w * 0.8, h * 1.1);
+              ctx.lineTo(w * 0.95, h * 1.1);
               ctx.closePath();
               ctx.fill();
           } else {
@@ -4926,7 +4983,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         ctx.restore();
       }
 
-      if (drawing && ((activeTool as string) === 'BIM_Porta' || (activeTool as string) === 'BIM_Finestra' || (activeTool as string) === 'BIM_Muro')) {
+      if (drawing && ((activeTool as string) === 'BIM_Porta' || (activeTool as string) === 'BIM_Finestra' || (activeTool as string) === 'BIM_Muro' || (activeTool as string) === 'Muro')) {
         ctx.save();
         const start = drawing.start;
         const end = drawing.current || actualMousePosRef.current;
@@ -4934,7 +4991,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         const dy = end.y - start.y;
         const len = Math.sqrt(dx * dx + dy * dy);
 
-        if (activeTool === 'BIM_Muro' && len > 0.1) {
+        if ((activeTool === 'BIM_Muro' || activeTool === 'Muro') && len > 0.1) {
           const thickness = lastWallThickness || 15;
           const nx = -dy / len;
           const ny = dx / len;
@@ -5679,15 +5736,15 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       // --- BIM OVERLAY RENDERING PASS (STARTS) ---
       entities.forEach(entity => {
         if (!entity.isBIM) return;
+        const layer = layers.find(l => l.id === entity.layer || l.name === entity.layer);
+        if (layer && !layer.visible) return;
 
         // Draw Room
-        if (entity.bimType === 'room') {
+        if (isBIMModeEnabledRef.current && entity.bimType === 'room') {
           const roomPoints = (entity as any).bimPoints || (entity as any).points;
           const roomHoles = (entity as any).holes;
           if (roomPoints && roomPoints.length > 2) {
             ctx.save();
-            // Solid transparent fill
-            ctx.fillStyle = entity.color || 'rgba(16, 185, 129, 0.12)';
             ctx.beginPath();
             ctx.moveTo(roomPoints[0].x, roomPoints[0].y);
             for (let i = 1; i < roomPoints.length; i++) {
@@ -5703,8 +5760,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 });
             }
             
-            ctx.fill('evenodd');
-
             // Outline
             ctx.strokeStyle = 'rgba(16, 185, 129, 0.6)';
             ctx.lineWidth = 1.5 / view.zoom;
@@ -5791,7 +5846,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
 
         // Draw Door
-        if (entity.bimType === 'door') {
+        if (isBIMModeEnabledRef.current && entity.bimType === 'door') {
           const start = (entity as any).start;
           const end = (entity as any).end;
           if (start && end) {
@@ -5848,7 +5903,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
 
         // Draw Window
-        if (entity.bimType === 'window') {
+        if (isBIMModeEnabledRef.current && entity.bimType === 'window') {
           console.log("Drawing window:", entity);
           const entAsAny = (entity as any);
           const start = entAsAny.start || entAsAny.p1;
@@ -6231,7 +6286,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   }, [entities, layers, view, flashIds, flashIntensity, selectedParallelLine, blink, selectedEntityId, 
       positioningGroupId, positioningEntityId, selectedRaccordoLineIds, dragEntityIds, highlightedTrimLine, 
       highlightedTrimSegment, activeTool, specchioMode, specchioSelectedIds, copySourceEntityIds, eraserPos, 
-      tecnigrafoOrigin, tecnigrafoLock, manualRoomPoints, drawing, highlightedPoints]);
+      tecnigrafoOrigin, tecnigrafoLock, manualRoomPoints, drawing, highlightedPoints, isBIMModeEnabled]);
 
 
   // BASIC PAN/ZOOM HANDLING
@@ -6437,8 +6492,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                             if (now - lastErase > 450) {
                                 lastEraseTimeByPoint.current[pointKey] = now;
                                 pointHit = true;
-                                // Decrease opacity (alpha) of this freehand step by 0.35!
-                                const nextAlpha = Math.max(0, pt.alpha - 0.25);
+                                // Decrease opacity (alpha) of this freehand step by 0.55!
+                                const nextAlpha = Math.max(0, pt.alpha - 0.55);
                                 return { ...pt, alpha: nextAlpha };
                             }
                         }
@@ -6475,8 +6530,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                         // Fade inside segments
                         splitResult.inside.forEach((seg, i) => {
                             const currentOpacity = ent.opacity !== undefined ? ent.opacity : 1.0;
-                            const nextOpacity = currentOpacity - 0.35;
-                            if (nextOpacity > 0.1) {
+                            const nextOpacity = currentOpacity - 0.55;
+                            if (nextOpacity > 0.05) {
                                 newEntities.push({
                                     ...ent,
                                     id: ent.id + `_in_${i}_` + Math.random(),
@@ -6511,8 +6566,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                     // Inside parts are kept and faded by 0.35!
                     splitRes.inside.forEach((interval, i) => {
                         const currentOpacity = ent.opacity !== undefined ? ent.opacity : 1.0;
-                        const nextOpacity = currentOpacity - 0.35;
-                        if (nextOpacity > 0.1) {
+                        const nextOpacity = currentOpacity - 0.55;
+                        if (nextOpacity > 0.05) {
                             newEntities.push({
                                 ...ent,
                                 id: ent.id + `_arc_in_${i}_` + Math.random(),
@@ -6560,8 +6615,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                         });
                         splitResult.inside.forEach((seg, i) => {
                             const currentOpacity = ent.opacity !== undefined ? ent.opacity : 1.0;
-                            const nextOpacity = currentOpacity - 0.35;
-                            if (nextOpacity > 0.1) {
+                            const nextOpacity = currentOpacity - 0.55;
+                            if (nextOpacity > 0.05) {
                                 hitLinesResult.push({
                                     id: ent.id + `_rect_edge_${idx}_in_${i}_` + Math.random(),
                                     type: 'line',
@@ -6617,8 +6672,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                         lastEraseTimeByEntityId.current[ent.id] = now;
                         changed = true;
                         const currentOpacity = ent.opacity !== undefined ? ent.opacity : 1.0;
-                        const nextOpacity = currentOpacity - 0.35;
-                        if (nextOpacity > 0.1) {
+                        const nextOpacity = currentOpacity - 0.55;
+                        if (nextOpacity > 0.05) {
                             newEntities.push({
                                 ...ent,
                                 opacity: nextOpacity
@@ -6642,8 +6697,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                         lastEraseTimeByEntityId.current[ent.id] = now;
                         changed = true;
                         const currentOpacity = ent.opacity !== undefined ? ent.opacity : 1.0;
-                        const nextOpacity = currentOpacity - 0.35;
-                        if (nextOpacity > 0.1) {
+                        const nextOpacity = currentOpacity - 0.55;
+                        if (nextOpacity > 0.05) {
                             newEntities.push({
                                 ...ent,
                                 opacity: nextOpacity
@@ -6668,8 +6723,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                         lastEraseTimeByEntityId.current[ent.id] = now;
                         changed = true;
                         const currentOpacity = ent.opacity !== undefined ? ent.opacity : 1.0;
-                        const nextOpacity = currentOpacity - 0.35;
-                        if (nextOpacity > 0.1) {
+                        const nextOpacity = currentOpacity - 0.55;
+                        if (nextOpacity > 0.05) {
                             newEntities.push({
                                 ...ent,
                                 opacity: nextOpacity
@@ -8453,7 +8508,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             }
         }
         setManualRoomPoints(prev => [...prev, clickedPoint]);
-    } else if (activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra' || activeTool === 'BIM_Muro') {
+    } else if (activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra' || activeTool === 'BIM_Muro' || activeTool === 'Muro') {
         const found = getEntityAtPoint(rawPoint);
         if (found && found.isBIM && (found.bimType === 'door' || found.bimType === 'window')) {
             onSelect(found.id);
@@ -8464,14 +8519,14 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         if (!drawing) {
             setDrawing({ start: snapped.point, current: snapped.point });
         } else {
-            const isLineLikeTool = (activeTool as string) === 'Line' || (activeTool as string) === 'BIM_Porta' || (activeTool as string) === 'BIM_Finestra' || (activeTool as string) === 'BIM_Muro';
+            const isLineLikeTool = (activeTool as string) === 'Line' || (activeTool as string) === 'BIM_Porta' || (activeTool as string) === 'BIM_Finestra' || (activeTool as string) === 'BIM_Muro' || (activeTool as string) === 'Muro';
             const effectiveOrthoMode = isLineLikeTool && (orthoMode ? !isShiftPressedRef.current : isShiftPressedRef.current);
             const isOrthoHorizontal = isLineLikeTool && effectiveOrthoMode && 
                   Math.abs(snapped.point.x - drawing.start.x) >= Math.abs(snapped.point.y - drawing.start.y);
 
             let endPoint = drawing.current || snapped.point;
 
-            if (activeTool === 'BIM_Muro') {
+            if (activeTool === 'BIM_Muro' || activeTool === 'Muro') {
                 const thickness = bimWallThickness || 15;
                 const newElem: Entity = {
                     id: Date.now().toString(),
@@ -9624,7 +9679,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           // 1. Check for Snaps around raw mouse position
           let snapRes = getSnappedPoint(rawPoint, entities, activeTool, drawing as any);
           
-          const isOrthoTool = (activeTool as string) === 'Line' || (activeTool as string) === 'BIM_Porta' || (activeTool as string) === 'BIM_Finestra' || (activeTool as string) === 'BIM_Muro' || (activeTool as string) === 'Rectangle' || (activeTool as string) === 'Circle' || (activeTool as string) === 'Arc' || (activeTool as string) === 'Parallel';
+          const isOrthoTool = (activeTool as string) === 'Line' || (activeTool as string) === 'BIM_Porta' || (activeTool as string) === 'BIM_Finestra' || (activeTool as string) === 'BIM_Muro' || (activeTool as string) === 'Muro' || (activeTool as string) === 'Rectangle' || (activeTool as string) === 'Circle' || (activeTool as string) === 'Arc' || (activeTool as string) === 'Parallel';
           const effectiveOrthoMode = isOrthoTool && (orthoMode ? !isShiftPressedRef.current : isShiftPressedRef.current);
 
           // 2. If we have a standard strong snap (Endpoint, Midpoint, etc.), it WINS over Ortho
@@ -9902,7 +9957,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         activeTool === 'Dimension' || 
         activeTool === 'Move' || 
         activeTool === 'Copy' ||
-        activeTool === 'BIM_Muro' ||
+        activeTool === 'BIM_Muro' || activeTool === 'Muro' ||
         (activeTool as string) === 'BIM_Porta' ||
         activeTool === 'BIM_Finestra' ||
         activeTool === 'BIM_Symbol' ||
@@ -10356,7 +10411,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 });
             }
         } else if (!showManualInput && /^[0-9\.\-]$/.test(e.key)) {
-            if ((drawing && !drawing.isFreehand && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra' || activeTool === 'BIM_Muro'))) {
+            if ((drawing && !drawing.isFreehand && (activeTool === 'Line' || activeTool === 'Circle' || activeTool === 'Rectangle' || activeTool === 'BIM_Porta' || activeTool === 'BIM_Finestra' || activeTool === 'BIM_Muro' || activeTool === 'Muro'))) {
                 setShowManualInput(true);
             }
         }
@@ -10563,7 +10618,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         };
         setEntities(prev => { onCommitHistory?.(prev); return [...prev, newEntity]; });
         setDrawing(null);
-    } else if (tool === 'BIM_Porta' || tool === 'BIM_Finestra' || tool === 'BIM_Muro') {
+    } else if (tool === 'BIM_Porta' || tool === 'BIM_Finestra' || tool === 'BIM_Muro' || tool === 'Muro') {
         const L = data.val1;
         const H = data.val2 || 0;
         let finalPoint: Point;
@@ -10585,7 +10640,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
 
         let newEntity: Entity;
-        if (tool === 'BIM_Muro') {
+        if (tool === 'BIM_Muro' || tool === 'Muro') {
             const thickness = bimWallThickness || 15;
             newEntity = {
                 id: Date.now().toString(),
@@ -10595,6 +10650,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 bimName: `Muro sp.${thickness} cm`,
                 bimWidth: thickness,
                 bimHeight: bimWallHeight,
+                bimWallType: bimWallType,
                 start: drawing.start,
                 end: finalPoint,
                 color: '#4b5563',
@@ -10603,6 +10659,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 layer: 'BIM_Muri'
             } as any;
             localStorage.setItem('lastWallThickness', thickness.toString());
+            localStorage.setItem('lastWallHeight', bimWallHeight.toString());
+            localStorage.setItem('lastWallType', bimWallType);
         } else {
             const isDoor = tool === 'BIM_Porta';
             const height = isDoor ? (bimDoorHeight || 210) : (bimWindowHeight || 140);
@@ -10638,7 +10696,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
         setEntities(prev => { onCommitHistory?.(prev); return [...prev, newEntity]; });
         
-        if (tool === 'BIM_Muro') {
+        if (tool === 'BIM_Muro' || tool === 'Muro') {
             setDrawing({
                 start: finalPoint,
                 current: finalPoint,
