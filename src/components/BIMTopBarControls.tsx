@@ -61,8 +61,6 @@ interface BIMTopBarControlsProps {
   bimSymbolScale?: number;
   setBimSymbolScale?: (val: number) => void;
   setIsBIMFinestreOpen: (val: boolean) => void;
-  isBIMModeEnabled: boolean;
-  setIsBIMModeEnabled: (val: boolean) => void;
 }
 
 export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
@@ -89,9 +87,7 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
   setBimWindowHeight,
   bimSymbolScale = 1,
   setBimSymbolScale,
-  setIsBIMFinestreOpen,
-  isBIMModeEnabled,
-  setIsBIMModeEnabled
+  setIsBIMFinestreOpen
 }) => {
   const [activeDropdown, setActiveDropdown] = useState<
     'porte' | 'finestre' | 'arredi' | 'sanitari' | 'elettrico' | 'idraulico' | 'finiture' | null
@@ -618,17 +614,6 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
           </div>
         )}
       </div>
-
-      <div className="h-4 w-[1px] bg-neutral-300 mx-1" />
-
-      <button
-        onClick={() => setIsBIMModeEnabled(!isBIMModeEnabled)}
-        className={`px-3 py-1 rounded flex items-center gap-1.5 text-xs font-bold transition ${isBIMModeEnabled ? 'bg-indigo-600 text-white' : 'bg-neutral-200 text-neutral-700'}`}
-        title="Attiva/Disattiva Visualizzazione BIM"
-      >
-        <Building size={12} />
-        {isBIMModeEnabled ? 'BIM ON' : 'BIM OFF'}
-      </button>
 
       <div className="h-4 w-[1px] bg-neutral-300 mx-1" />
 

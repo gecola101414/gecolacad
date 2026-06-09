@@ -677,37 +677,8 @@ const getRgbaFromColor = (colorStr: string, alpha: number) => {
   return str;
 };
 
-const drawHatchPattern = (ctx: CanvasRenderingContext2D, entity: any, zoom: number, isBIMModeEnabled: boolean) => {
-    const { pattern, scale, angle, color, points, holes, sfumatura = 0, backgroundColor, isBIM } = entity;
-    
-    // In Normal Mode, do not draw BIM hatches, BUT draw the outline
-    if (!isBIMModeEnabled && (isBIM || entity.bimType)) {
-        ctx.save();
-        ctx.strokeStyle = '#cccccc'; // Subtle light gray for reference
-        ctx.lineWidth = Math.max(0.5, 0.8 / zoom);
-        ctx.beginPath();
-        if (points && points.length >= 3) {
-            ctx.moveTo(points[0].x, points[0].y);
-            for (let i = 1; i < points.length; i++) {
-                ctx.lineTo(points[i].x, points[i].y);
-            }
-            ctx.closePath();
-            if (holes) {
-                holes.forEach((hole: Point[]) => {
-                    if (hole.length < 3) return;
-                    ctx.moveTo(hole[0].x, hole[0].y);
-                    for (let i = 1; i < hole.length; i++) {
-                        ctx.lineTo(hole[i].x, hole[i].y);
-                    }
-                    ctx.closePath();
-                });
-            }
-        }
-        ctx.stroke();
-        ctx.restore();
-        return;
-    }
-    
+const drawHatchPattern = (ctx: CanvasRenderingContext2D, entity: any, zoom: number) => {
+    const { pattern, scale, angle, color, points, holes, sfumatura = 0, backgroundColor } = entity;
     if (!points || points.length < 3) return;
 
     ctx.save();
@@ -734,7 +705,7 @@ const drawHatchPattern = (ctx: CanvasRenderingContext2D, entity: any, zoom: numb
     ctx.clip('evenodd');
 
     // Draw background color if present (important for BIM areas)
-    if (backgroundColor && isBIMModeEnabled) {
+    if (backgroundColor) {
         ctx.fillStyle = backgroundColor;
         ctx.beginPath();
         ctx.moveTo(points[0].x, points[0].y);
@@ -2191,10 +2162,9 @@ interface CADCanvasProps {
   bimWindowHeight?: number;
   bimWallThickness?: number;
   bimWallType?: string;
-  isBIMModeEnabled?: boolean;
 }
 
-export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultHatchStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, eraserType = 'pencil', setEraserType, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, setOrthoMode, isContinuousMode = false, cancelTrigger = 0, parallelTrigger = 0, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, selectedBIMSymbolType, setSelectedBIMSymbolType, bimSymbolScale = 1, raccordoConfig, onEditRaccordo, onActionStart, onAreaDetected, highlightedPoints, bimWallHeight = 270, bimDoorHeight = 210, bimWindowHeight = 140, bimWallThickness = 15, bimWallType = 'Forati (Laterizio)', isBIMModeEnabled = true }, ref) => {
+export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entities, activeTool, setActiveTool, setEntities, setEntitiesSilent, onCommitHistory, onSelect, onContextMenu, activeLayerId, layers, defaultLineStyle, setDefaultLineStyle, defaultHatchStyle, defaultTextStyle = { fontFamily: 'sans-serif', fontSize: 14, fontWeight: 'normal', textAlign: 'left' }, eraserRadius, setEraserRadius, eraserType = 'pencil', setEraserType, onMouseMovePosition, rulerStyle = 'tecnigrafo', orthoMode = false, setOrthoMode, isContinuousMode = false, cancelTrigger = 0, parallelTrigger = 0, tavole, onUpdateTavole, onDoubleClickTavola, selectedTemplateId, selectedEntityId, selectedBIMSymbolType, setSelectedBIMSymbolType, bimSymbolScale = 1, raccordoConfig, onEditRaccordo, onActionStart, onAreaDetected, highlightedPoints, bimWallHeight = 270, bimDoorHeight = 210, bimWindowHeight = 140, bimWallThickness = 15, bimWallType = 'Forati (Laterizio)' }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const entitiesRef = useRef(entities);
   useEffect(() => {
@@ -2209,8 +2179,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
   const [hoveredTavolaPart, setHoveredTavolaPart] = useState<{ id: string; part: 'cartiglio' | 'badge' } | null>(null);
   const [manualRoomPoints, setManualRoomPoints] = useState<Point[]>([]);
-  const isBIMModeEnabledRef = useRef(isBIMModeEnabled);
-  useEffect(() => { isBIMModeEnabledRef.current = isBIMModeEnabled; }, [isBIMModeEnabled]);
 
   const getHoveredTavolaPart = (rawPoint: Point): { id: string; part: 'cartiglio' | 'badge' } | null => {
     if (!tavole) return null;
@@ -2993,7 +2961,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           angle: 0,
           lineWidth: 1,
           mode: 'pencil',
-          layer: 'BIM_Locali'
+          layer: activeLayerId
         } as any;
 
         newRoomEntities.push(newRoom);
@@ -3392,8 +3360,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     for (const ent of entitiesRef.current) {
       const layer = layerMapForSelection.get(ent.layer);
       if (layer && (!layer.visible || layer.frozen)) continue;
-
-      if ((ent as any).isBIM && !isBIMModeEnabledRef.current) continue;
 
       // Cheap bounding box culling
       if (ent.type === 'line') {
@@ -4359,16 +4325,14 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                   }
                   
                   // 1. Solid fill for wall 2D thickness
-                  if (isBIMModeEnabledRef.current) {
-                      ctx.fillStyle = 'rgba(75, 85, 99, 0.12)';
-                      ctx.beginPath();
-                      ctx.moveTo(startPlus.x, startPlus.y);
-                      ctx.lineTo(endPlus.x, endPlus.y);
-                      ctx.lineTo(endMinus.x, endMinus.y);
-                      ctx.lineTo(startMinus.x, startMinus.y);
-                      ctx.closePath();
-                      ctx.fill();
-                  }
+                  ctx.fillStyle = 'rgba(75, 85, 99, 0.12)';
+                  ctx.beginPath();
+                  ctx.moveTo(startPlus.x, startPlus.y);
+                  ctx.lineTo(endPlus.x, endPlus.y);
+                  ctx.lineTo(endMinus.x, endMinus.y);
+                  ctx.lineTo(startMinus.x, startMinus.y);
+                  ctx.closePath();
+                  ctx.fill();
 
                   // 2. Wall border lines
                   ctx.strokeStyle = isHighlighted ? highlightColor : '#374151';
@@ -4599,7 +4563,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             ctx.strokeRect(entity.point.x + offsetX - 4/view.zoom, entity.point.y - 4/view.zoom, maxW + 8/view.zoom, h + 8/view.zoom);
           }
         } else if (entity.type === 'hatch') {
-          drawHatchPattern(ctx, entity, view.zoom, isBIMModeEnabledRef.current);
+          drawHatchPattern(ctx, entity, view.zoom);
           ctx.beginPath();
           if ((selectedEntityId === entity.id || isFlashing) && entity.points && entity.points.length >= 3) {
             ctx.moveTo(entity.points[0].x, entity.points[0].y);
@@ -5736,15 +5700,14 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       // --- BIM OVERLAY RENDERING PASS (STARTS) ---
       entities.forEach(entity => {
         if (!entity.isBIM) return;
-        const layer = layers.find(l => l.id === entity.layer || l.name === entity.layer);
-        if (layer && !layer.visible) return;
 
         // Draw Room
-        if (isBIMModeEnabledRef.current && entity.bimType === 'room') {
+        if (entity.bimType === 'room') {
           const roomPoints = (entity as any).bimPoints || (entity as any).points;
           const roomHoles = (entity as any).holes;
           if (roomPoints && roomPoints.length > 2) {
             ctx.save();
+            ctx.fillStyle = getAreaColor((entity as any).bimAreaType) || 'rgba(16, 185, 129, 0.12)';
             ctx.beginPath();
             ctx.moveTo(roomPoints[0].x, roomPoints[0].y);
             for (let i = 1; i < roomPoints.length; i++) {
@@ -5760,6 +5723,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 });
             }
             
+            ctx.fill('evenodd');
+
             // Outline
             ctx.strokeStyle = 'rgba(16, 185, 129, 0.6)';
             ctx.lineWidth = 1.5 / view.zoom;
@@ -5846,7 +5811,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
 
         // Draw Door
-        if (isBIMModeEnabledRef.current && entity.bimType === 'door') {
+        if (entity.bimType === 'door') {
           const start = (entity as any).start;
           const end = (entity as any).end;
           if (start && end) {
@@ -5903,7 +5868,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         }
 
         // Draw Window
-        if (isBIMModeEnabledRef.current && entity.bimType === 'window') {
+        if (entity.bimType === 'window') {
           console.log("Drawing window:", entity);
           const entAsAny = (entity as any);
           const start = entAsAny.start || entAsAny.p1;
@@ -6286,7 +6251,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
   }, [entities, layers, view, flashIds, flashIntensity, selectedParallelLine, blink, selectedEntityId, 
       positioningGroupId, positioningEntityId, selectedRaccordoLineIds, dragEntityIds, highlightedTrimLine, 
       highlightedTrimSegment, activeTool, specchioMode, specchioSelectedIds, copySourceEntityIds, eraserPos, 
-      tecnigrafoOrigin, tecnigrafoLock, manualRoomPoints, drawing, highlightedPoints, isBIMModeEnabled]);
+      tecnigrafoOrigin, tecnigrafoLock, manualRoomPoints, drawing, highlightedPoints]);
 
 
   // BASIC PAN/ZOOM HANDLING

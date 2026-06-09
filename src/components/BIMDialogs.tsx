@@ -1112,8 +1112,7 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
           <div className="col-span-1">
             <label className="block text-[8px] text-slate-400 font-black uppercase tracking-widest mb-1 font-mono">Piano Z (m)</label>
             <input
-              type="number"
-              step="0.01"
+              type="text"
               value={zPlane}
               onChange={(e) => setZPlane(parseFloat(e.target.value) || 0)}
               className="w-full bg-white/5 border border-white/10 text-white rounded p-2 text-xs font-mono font-bold focus:outline-none focus:border-cyan-500"
@@ -1122,8 +1121,7 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
           <div className="col-span-1">
             <label className="block text-[8px] text-slate-400 font-black uppercase tracking-widest mb-1 font-mono">Elevaz. (m)</label>
             <input
-              type="number"
-              step="0.01"
+              type="text"
               value={zElevation}
               onChange={(e) => setZElevation(parseFloat(e.target.value) || 0)}
               className="w-full bg-white/5 border border-white/10 text-white rounded p-2 text-xs font-mono font-bold focus:outline-none focus:border-cyan-500"
@@ -1132,8 +1130,7 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
           <div className="col-span-1">
             <label className="block text-[8px] text-slate-400 font-black uppercase tracking-widest mb-1 font-mono">Altezza (cm)</label>
             <input
-              type="number"
-              step="1"
+              type="text"
               value={objectHeight}
               onChange={(e) => setObjectHeight(parseFloat(e.target.value) || 270)}
               className="w-full bg-white/5 border border-white/10 text-white rounded p-2 text-xs font-mono font-bold focus:outline-none focus:border-cyan-500"

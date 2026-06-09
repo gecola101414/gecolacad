@@ -252,7 +252,6 @@ const MASONRY_TYPES = [
   ]);
   const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere' | 'testo' | 'gemini' | 'manuale' | 'bim'>(() => (localStorage.getItem('activeSidebarTab') as any) || 'penne');
   const [isBIMAreaDialogOpen, setIsBIMAreaDialogOpen] = useState(false);
-  const [isBIMModeEnabled, setIsBIMModeEnabled] = useState(true);
   const [is3DViewOpen, setIs3DViewOpen] = useState(false);
   const [detectedAreaPoints, setDetectedAreaPoints] = useState<Point[] | { points: Point[], holes?: Point[][] } | null>(null);
   const [editingAreaId, setEditingAreaId] = useState<string | null>(null);
@@ -322,37 +321,7 @@ const MASONRY_TYPES = [
     return () => clearTimeout(timeoutId);
   }, [entities, fileHandle, layers, tavole, measurements]);
 
-  const bimVisibilityStateRef = useRef<Record<string, boolean>>({});
-
   // UI Persistence Effects
-  useEffect(() => {
-    setLayers(prev => {
-      if (!isBIMModeEnabled) {
-        // BIM mode turning OFF. Save current visibility of BIM layers and hide them.
-        const newOriginalVisibility: Record<string, boolean> = { ...bimVisibilityStateRef.current };
-        const newLayers = prev.map(layer => {
-          if (layer.id.startsWith("BIM_")) {
-            newOriginalVisibility[layer.id] = layer.visible;
-            return { ...layer, visible: false }; // Hide
-          }
-          return layer;
-        });
-        bimVisibilityStateRef.current = newOriginalVisibility;
-        return newLayers;
-      } else {
-        // BIM mode turning ON. Restore based on stored visibility.
-        return prev.map(layer => {
-          if (layer.id.startsWith("BIM_")) {
-            const originalVisibility = bimVisibilityStateRef.current[layer.id];
-            // Default to true if not found in ref
-            return { ...layer, visible: originalVisibility !== undefined ? originalVisibility : true };
-          }
-          return layer;
-        });
-      }
-    });
-  }, [isBIMModeEnabled]);
-
   useEffect(() => {
     localStorage.setItem('selectedTool', selectedTool || '');
   }, [selectedTool]);
@@ -390,12 +359,6 @@ const MASONRY_TYPES = [
   }, [favoritePanels]);
 
   useEffect(() => {
-    if (!isBIMModeEnabled && activeSidebarTab === 'bim') {
-      setActiveSidebarTab('penne');
-    }
-  }, [isBIMModeEnabled, activeSidebarTab]);
-
-  useEffect(() => {
     localStorage.setItem('activeSidebarTab', activeSidebarTab);
   }, [activeSidebarTab]);
 
@@ -417,7 +380,6 @@ const MASONRY_TYPES = [
       { id: "BIM_Impianti_Idraulici", name: "BIM_Impianti_Idraulici", visible: true, frozen: false },
       { id: "BIM_Finiture", name: "BIM_Finiture", visible: true, frozen: false },
       { id: "BIM_Legenda", name: "BIM_Legenda", visible: true, frozen: false },
-      { id: "BIM_Locali", name: "BIM_Locali", visible: true, frozen: false },
     ];
     setLayers(prev => {
       const updated = [...prev];
@@ -528,8 +490,7 @@ const MASONRY_TYPES = [
             pattern: areaData.hatch === 'NONE' ? 'SOLID' : areaData.hatch,
             bimHeight: areaData.objectHeight,
             bimZPlane: areaData.zPlane,
-            bimZElevation: areaData.zElevation,
-            isBIM: true
+            bimZElevation: areaData.zElevation
           };
         }
         return e;
@@ -548,7 +509,7 @@ const MASONRY_TYPES = [
         holes: hls,
         color: 'rgba(0,0,0,0.5)',
         strokeWidth: 1,
-        layer: 'BIM_Locali',
+        layer: 'BIM_Aree_Funzionali',
         isBIM: true,
         bimType: 'room',
         bimAreaType: areaData.type as any,
@@ -1640,7 +1601,6 @@ const MASONRY_TYPES = [
           <Sparkles size={16} className={showProperties && activeSidebarTab === 'gemini' ? "text-amber-500 animate-pulse" : "text-amber-500"} />
           <span className="text-[10px]">Gemini AI</span>
         </button>
-        {isBIMModeEnabled && (
         <button
           onClick={() => {
             handleGuideClick('BIM');
@@ -1658,7 +1618,6 @@ const MASONRY_TYPES = [
           <Building size={16} className={showProperties && activeSidebarTab === 'bim' ? "text-cyan-600 animate-pulse" : "text-cyan-600"} />
           <span className="text-[10px] font-bold">BIM</span>
         </button>
-        )}
         <div className="flex-1"></div>
         <button
           onClick={() => {
@@ -2070,6 +2029,9 @@ const MASONRY_TYPES = [
                   setActiveSidebarTab('testo');
                 } else if (ent && ent.isBIM) {
                   setActiveSidebarTab('bim');
+                  if (ent.bimType === 'room') {
+                    handleEditBIMArea(ent.id);
+                  }
                 } else {
                   setActiveSidebarTab('penne');
                 }
@@ -2088,7 +2050,6 @@ const MASONRY_TYPES = [
             orthoMode={orthoMode}
             setOrthoMode={setOrthoMode}
             isContinuousMode={isContinuousMode}
-            isBIMModeEnabled={isBIMModeEnabled}
             cancelTrigger={cancelTrigger}
             parallelTrigger={parallelTrigger}
             tavole={tavole}
@@ -2134,7 +2095,9 @@ const MASONRY_TYPES = [
                 type: (e as any).bimAreaType || 'stanza',
                 name: (e as any).bimName || '',
                 color: (e as any).backgroundColor || e.color,
-                height: (e as any).height || 2.70,
+                zPlane: (e as any).bimZPlane || 0,
+                zElevation: (e as any).bimZElevation || 0,
+                objectHeight: (e as any).bimHeight || 2.70,
                 hatch: (e as any).bimHatchPattern || 'SOLID'
               };
             })() : undefined}
@@ -2586,7 +2549,7 @@ const MASONRY_TYPES = [
             </h3>
 
             <div className="space-y-4 flex-1">
-              {activeSidebarTab === "bim" && isBIMModeEnabled ? (
+              {activeSidebarTab === "bim" ? (
                 <BIMWorkspacePanel
                   entities={entities}
                   selectedTool={selectedTool}
