@@ -190,10 +190,22 @@ export default function App() {
   });
   const [eraserRadius, setEraserRadius] = useState(() => Number(localStorage.getItem('eraserRadius')) || 4);
   const [eraserType, setEraserType] = useState<'pencil' | 'all'>(() => (localStorage.getItem('eraserType') as 'pencil' | 'all') || 'pencil');
-  const [favoritePanels, setFavoritePanels] = useState<Array<{ id: string; tools: string[]; x: number; y: number; isDocked: 'left' | 'right' | null }>>(() => {
+  const [favoritePanels, setFavoritePanels] = useState<Array<{ id: string; tools: string[]; x: number; y: number; isDocked: 'left' | 'right' | 'bottom' | null }>>(() => {
     const saved = localStorage.getItem('favoritePanels');
-    return saved ? JSON.parse(saved) : [
-      { id: "fav-1", tools: ["Line", "Circle", "Hatch", "Eraser"], x: 180, y: 120, isDocked: null }
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.some((p: any) => p.id === 'fav-left' || p.id === 'fav-right' || p.id === 'fav-bottom')) {
+          return parsed;
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+    return [
+      { id: "fav-left", tools: ["Orto", "Tecnigrafo", "Polilinea"], x: 10, y: 150, isDocked: 'left' },
+      { id: "fav-right", tools: ["Trim", "Eraser", "Cancella", "Move", "Copy", "Join"], x: 1200, y: 150, isDocked: 'right' },
+      { id: "fav-bottom", tools: ["Specchio", "Hatch", "Raccordo"], x: 450, y: 650, isDocked: 'bottom' }
     ];
   });
   const [activeDraggingId, setActiveDraggingId] = useState<string | null>(null);
@@ -1120,6 +1132,26 @@ const MASONRY_TYPES = [
       if (selectedTool === 'Template') {
         setSelectedTool('Select');
       }
+    } else if (tool === "Orto") {
+      setOrthoMode(prev => !prev);
+    } else if (tool === "Tecnigrafo") {
+      const next = !isTecnigrafoActive;
+      setIsTecnigrafoActive(next);
+      if (next) {
+        const event = new KeyboardEvent('keydown', { key: 'q', bubbles: true });
+        document.dispatchEvent(event);
+      } else {
+        const event = new KeyboardEvent('keyup', { key: 'q', bubbles: true });
+        document.dispatchEvent(event);
+      }
+    } else if (tool === "Polilinea") {
+      const next = !isContinuousMode;
+      setIsContinuousMode(next);
+      if (next) {
+        setOrthoMode(true);
+        setSelectedTool('Line');
+      }
+      setCancelTrigger(prev => prev + 1);
     } else {
       setSelectedTool(tool);
       // Ensure the correct sidebar tab opens for specific tools as requested
@@ -1192,6 +1224,9 @@ const MASONRY_TYPES = [
         { name: "Penne", icon: Pen },
         { name: "Maschere", icon: Square },
         { name: "Cancella", icon: Trash2 },
+        { name: "Orto", icon: OrthoIcon },
+        { name: "Tecnigrafo", icon: DraftingCompass },
+        { name: "Polilinea", icon: PenTool },
       ],
     },
     {
@@ -1247,13 +1282,15 @@ const MASONRY_TYPES = [
       const targetX = refData.posX + dx;
       const targetY = refData.posY + dy;
 
-      let isDocked: 'left' | 'right' | null = null;
+      let isDocked: 'left' | 'right' | 'bottom' | null = null;
 
       // Docking thresholds based on screen borders
       if (targetX < 45) {
         isDocked = 'left';
       } else if (window.innerWidth - moveEvent.clientX < 240) {
         isDocked = 'right';
+      } else if (window.innerHeight - moveEvent.clientY < 180) {
+        isDocked = 'bottom';
       }
 
       setFavoritePanels(prev => prev.map(p => {
@@ -1974,7 +2011,7 @@ const MASONRY_TYPES = [
             const y = e.clientY - rect.top;
 
             if (toolName) {
-              let isDocked: 'left' | 'right' | null = null;
+              let isDocked: 'left' | 'right' | 'bottom' | null = null;
               let finalX = x;
 
               if (x < 50) {
@@ -1983,6 +2020,8 @@ const MASONRY_TYPES = [
               } else if (window.innerWidth - e.clientX < 240) {
                 isDocked = 'right';
                 finalX = window.innerWidth - 60;
+              } else if (window.innerHeight - e.clientY < 185) {
+                isDocked = 'bottom';
               }
 
               const newPanelId = `fav-${Date.now()}`;
@@ -2029,9 +2068,6 @@ const MASONRY_TYPES = [
                   setActiveSidebarTab('testo');
                 } else if (ent && ent.isBIM) {
                   setActiveSidebarTab('bim');
-                  if (ent.bimType === 'room') {
-                    handleEditBIMArea(ent.id);
-                  }
                 } else {
                   setActiveSidebarTab('penne');
                 }
@@ -2095,9 +2131,9 @@ const MASONRY_TYPES = [
                 type: (e as any).bimAreaType || 'stanza',
                 name: (e as any).bimName || '',
                 color: (e as any).backgroundColor || e.color,
-                zPlane: (e as any).bimZPlane || 0,
-                zElevation: (e as any).bimZElevation || 0,
-                objectHeight: (e as any).bimHeight || 2.70,
+                zPlane: (e as any).zPlane || 0,
+                zElevation: (e as any).zElevation || 0,
+                objectHeight: (e as any).objectHeight || (e as any).height || 2.70,
                 hatch: (e as any).bimHatchPattern || 'SOLID'
               };
             })() : undefined}
@@ -2120,6 +2156,7 @@ const MASONRY_TYPES = [
             <BIM3DViewer 
               entities={entities} 
               onClose={() => setIs3DViewOpen(false)} 
+              setEntities={updateEntitiesWithHistory}
             />
           )}
           
@@ -2331,15 +2368,17 @@ const MASONRY_TYPES = [
               </div>
             </div>
           )}
-                 {/* Dynamic Floating/Docked Favorites Toolbars / Menu Speciali Preferiti */}
+          {/* Dynamic Floating/Docked Favorites Toolbars / Menu Speciali Preferiti */}
           {(() => {
             const leftDockedPanels = favoritePanels.filter(p => p.isDocked === 'left');
             const rightDockedPanels = favoritePanels.filter(p => p.isDocked === 'right');
+            const bottomDockedPanels = favoritePanels.filter(p => p.isDocked === 'bottom');
 
             return favoritePanels.map((panel) => {
               const isDocked = panel.isDocked;
               const leftIndex = leftDockedPanels.findIndex(p => p.id === panel.id);
               const rightIndex = rightDockedPanels.findIndex(p => p.id === panel.id);
+              const bottomIndex = bottomDockedPanels.findIndex(p => p.id === panel.id);
               const isDraggingThis = activeDraggingId === panel.id;
               
               // Dynamic placement coordinates with dampening transitions for satisfying dragging glide effect
@@ -2353,7 +2392,7 @@ const MASONRY_TYPES = [
 
               if (isDocked === 'left' && !isDraggingThis) {
                 placementStyle = {
-                  left: leftIndex * 58,
+                  left: leftIndex * 72,
                   top: '15%',
                   height: '70%',
                   maxHeight: '520px',
@@ -2361,10 +2400,18 @@ const MASONRY_TYPES = [
                 };
               } else if (isDocked === 'right' && !isDraggingThis) {
                 placementStyle = {
-                  right: rightIndex * 58,
+                  right: rightIndex * 72,
                   top: '15%',
                   height: '70%',
                   maxHeight: '520px',
+                  transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+                };
+              } else if (isDocked === 'bottom' && !isDraggingThis) {
+                placementStyle = {
+                  left: `calc(50% - ${110 + bottomIndex * 76}px)`,
+                  bottom: bottomIndex * 76 + 12,
+                  height: '72px',
+                  width: `${panel.tools.length * 64 + 58}px`,
                   transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
                 };
               }
@@ -2373,7 +2420,9 @@ const MASONRY_TYPES = [
                 <div
                   key={panel.id}
                   style={placementStyle}
-                  className={`absolute z-30 select-none bg-white/80 backdrop-blur-md border border-neutral-200/80 shadow-[0_12px_40px_rgba(0,0,0,0.06)] overflow-hidden flex flex-col pointer-events-auto ${
+                  className={`absolute z-30 select-none bg-white/80 backdrop-blur-md border border-neutral-200/80 shadow-[0_12px_40px_rgba(0,0,0,0.06)] overflow-hidden flex pointer-events-auto ${
+                    isDocked === 'bottom' ? 'flex-row items-center max-h-[72px]' : 'flex-col'
+                  } ${
                     isDraggingThis
                       ? "ring-2 ring-indigo-500/30 shadow-indigo-500/10 scale-[1.01] z-40" 
                       : ""
@@ -2382,7 +2431,9 @@ const MASONRY_TYPES = [
                       ? 'rounded-r-xl border-l-0' 
                       : isDocked === 'right' 
                         ? 'rounded-l-xl border-r-0' 
-                        : 'rounded-xl max-w-[70px]'
+                        : isDocked === 'bottom'
+                          ? 'rounded-t-xl border-b-0 max-w-none'
+                          : 'rounded-xl max-w-[85px]'
                   }`}
                 onDragOver={(e) => {
                   e.preventDefault();
@@ -2418,10 +2469,14 @@ const MASONRY_TYPES = [
                   }
                 }}
               >
-                {/* Vertical discrete drag handle at top or side */}
+                {/* Horizontal or vertical discrete drag handle at top or side */}
                 <div
                   onMouseDown={(e) => handleFavoritesMouseDown(e, panel.id)}
-                  className={`px-2 py-1.5 bg-neutral-100/90 hover:bg-neutral-200/50 text-neutral-600 flex items-center justify-between cursor-move text-[9px] uppercase font-mono font-bold tracking-wider border-b border-neutral-200/60 ${isDocked ? 'flex-col gap-1' : ''}`}
+                  className={`px-2 text-neutral-600 flex items-center justify-between cursor-move text-[9px] uppercase font-mono font-bold tracking-wider ${
+                    isDocked === 'bottom' 
+                      ? 'flex-col py-1 border-r border-neutral-200/60 h-full justify-center gap-1.5 min-w-[42px]' 
+                      : `py-1.5 border-b border-neutral-200/60 ${isDocked ? 'flex-col gap-1' : ''}`
+                  }`}
                   title="Trascina per spostare o sganciare"
                 >
                   <div className="flex flex-col items-center gap-0.5 pointer-events-none">
@@ -2448,8 +2503,12 @@ const MASONRY_TYPES = [
                   </button>
                 </div>
 
-                {/* Vertical list of tools */}
-                <div className={`p-1.5 flex flex-col gap-1.5 bg-white items-center min-w-[54px] justify-start overflow-y-auto ${isDocked ? 'h-full' : 'max-h-[360px]'}`}>
+                {/* Horizontal or Vertical list of tools */}
+                <div className={`p-1.5 flex bg-white items-center justify-start ${
+                  isDocked === 'bottom' 
+                    ? 'flex-row gap-1.5 h-full overflow-x-auto px-2' 
+                    : `flex-col gap-1.5 min-w-[72px] overflow-y-auto ${isDocked ? 'h-full' : 'max-h-[360px]'}`
+                }`}>
                   {panel.tools.length === 0 ? (
                     <div className="text-[8px] text-neutral-400 text-center w-full p-2">
                        Vuoto
@@ -2457,6 +2516,12 @@ const MASONRY_TYPES = [
                   ) : (
                     panel.tools.map((toolName) => {
                       const IconComp = getToolIcon(toolName);
+                      const isToolActive = 
+                        selectedTool === toolName ||
+                        (toolName === "Orto" && orthoMode) ||
+                        (toolName === "Tecnigrafo" && isTecnigrafoActive) ||
+                        (toolName === "Polilinea" && isContinuousMode);
+
                       return (
                         <div
                           key={toolName}
@@ -2469,13 +2534,15 @@ const MASONRY_TYPES = [
                         >
                           <button
                             onClick={() => handleToolClick(toolName)}
-                            className={`p-2 rounded-lg bg-neutral-50 border border-neutral-200/50 text-neutral-700 transition-all flex flex-col items-center justify-center gap-0.5 w-11 h-11 cursor-grab active:cursor-grabbing hover:bg-indigo-50/70 hover:text-indigo-950 hover:border-indigo-400/50 ${
-                              selectedTool === toolName ? "bg-indigo-50 border-indigo-400 text-indigo-950 font-bold shadow-xs" : ""
+                            className={`p-1 rounded-lg transition-all flex flex-col items-center justify-center gap-0.5 w-[58px] h-[58px] cursor-grab active:cursor-grabbing hover:scale-105 ${
+                              isToolActive 
+                                ? "bg-indigo-600 border-2 border-indigo-500 text-white font-bold shadow-[0_0_15px_rgba(79,70,229,0.6)] scale-[1.03]" 
+                                : "bg-neutral-50 border border-neutral-200/50 text-neutral-700 hover:bg-indigo-50/70 hover:text-indigo-950 hover:border-indigo-400/50"
                             }`}
                             title={`${toolName} - Trascina per spostare o rimuovere`}
                           >
-                            {IconComp ? <IconComp size={15} className="text-neutral-600 group-hover:text-indigo-600 transition-colors" /> : null}
-                            <span className="text-[7.5px] font-sans font-medium text-neutral-500 truncate w-full text-center tracking-tight leading-none">
+                            {IconComp ? <IconComp size={20} className={`${isToolActive ? "text-white" : "text-neutral-600 group-hover:text-indigo-600"} transition-colors`} /> : null}
+                            <span className={`text-[8.5px] font-sans font-semibold truncate w-full text-center tracking-tight leading-none ${isToolActive ? "text-white font-black" : "text-neutral-500"}`}>
                               {toolName}
                             </span>
                           </button>

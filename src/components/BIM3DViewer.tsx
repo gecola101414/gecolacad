@@ -4,11 +4,13 @@ import { OrbitControls, PerspectiveCamera, Grid, Stars, Float, Text, Html, Conta
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import { Entity, Point, LineEntity, RectEntity } from '../types';
-import { X, ZoomIn, ZoomOut, RotateCw, Box, Layers, Database, Maximize, Home, Compass, Eye, Info, Settings, MousePointer2, Move, Scissors, Play, Pause, RefreshCw, ArrowDown, ArrowUp } from 'lucide-react';
+import { X, ZoomIn, ZoomOut, RotateCw, Box, Layers, Database, Maximize, Home, Compass, Eye, Info, Settings, MousePointer2, Move, Scissors, Play, Pause, RefreshCw, ArrowDown, ArrowUp, Edit, Trash2 } from 'lucide-react';
+import { AreaFunzionaleDialog, PorteDialog, FinestreDialog } from './BIMDialogs';
 
 interface BIM3DViewerProps {
   entities: Entity[];
   onClose: () => void;
+  setEntities: React.Dispatch<React.SetStateAction<Entity[]>> | ((updater: (prev: Entity[]) => Entity[]) => void);
 }
 
 const Wall = ({ points, height, width, color, baseZ, clippingPlanes = [] }: { points: Point[], height: number, width?: number, color: string, baseZ: number, clippingPlanes?: THREE.Plane[] }) => {
@@ -239,17 +241,186 @@ const SceneAutoFit = ({ entities, resetTrigger }: { entities: Entity[], resetTri
       (controls as any).target.set(center.x, center.y, center.z);
       (controls as any).update();
     }
-  }, [entities, camera, controls, resetTrigger]);
+  }, [camera, controls, resetTrigger]);
 
   return null;
 };
 
-export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose }) => {
+export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose, setEntities }) => {
   const [resetTrigger, setResetTrigger] = useState(0);
   const [viewMode, setViewMode] = useState<'PERSPECTIVE' | 'TOP'>('PERSPECTIVE');
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  
+  // Dialog States
+  const [isAreaEditOpen, setIsAreaEditOpen] = useState(false);
+  const [isDoorEditOpen, setIsDoorEditOpen] = useState(false);
+  const [isWindowEditOpen, setIsWindowEditOpen] = useState(false);
+  const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
+
+  const handleDeleteEntity = (id: string) => {
+    setEntities(prev => prev.filter(e => e.id !== id));
+    setSelectedEntity(null);
+    setInspectorOpen(false);
+    setIsAreaEditOpen(false);
+    setIsDoorEditOpen(false);
+    setIsWindowEditOpen(false);
+    setEditingEntityId(null);
+  };
+
+  const handleOpenClickDialog = (entity: Entity) => {
+    const e = entity as any;
+    setEditingEntityId(entity.id);
+    if (e.bimType === 'door') {
+      setIsDoorEditOpen(true);
+    } else if (e.bimType === 'window') {
+      setIsWindowEditOpen(true);
+    } else {
+      setIsAreaEditOpen(true);
+    }
+  };
+
+  const handleConfirmAreaEdit = (areaData: {
+    type: string;
+    name: string;
+    color: string;
+    zPlane: number;
+    zElevation: number;
+    objectHeight: number;
+    hatch: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE';
+  }) => {
+    if (!editingEntityId) return;
+    setEntities(prev => prev.map(e => {
+      if (e.id === editingEntityId) {
+        return {
+          ...e,
+          bimAreaType: areaData.type as any,
+          bimName: areaData.name,
+          backgroundColor: areaData.color,
+          color: areaData.color,
+          bimHatchPattern: areaData.hatch,
+          pattern: areaData.hatch === 'NONE' ? 'SOLID' : areaData.hatch,
+          bimHeight: areaData.objectHeight,
+          height: areaData.objectHeight,
+          bimZPlane: areaData.zPlane,
+          bimZElevation: areaData.zElevation
+        };
+      }
+      return e;
+    }));
+
+    setSelectedEntity(prev => prev && prev.id === editingEntityId ? {
+      ...prev,
+      bimAreaType: areaData.type as any,
+      bimName: areaData.name,
+      backgroundColor: areaData.color,
+      color: areaData.color,
+      bimHatchPattern: areaData.hatch,
+      pattern: areaData.hatch === 'NONE' ? 'SOLID' : areaData.hatch,
+      bimHeight: areaData.objectHeight,
+      height: areaData.objectHeight,
+      bimZPlane: areaData.zPlane,
+      bimZElevation: areaData.zElevation
+    } : prev);
+
+    setIsAreaEditOpen(false);
+    setEditingEntityId(null);
+  };
+
+  const handleConfirmDoorEdit = (width: number, height: number, type: string, flip: boolean) => {
+    if (!editingEntityId) return;
+    setEntities(prev => prev.map(e => {
+      if (e.id === editingEntityId) {
+        const ent = e as any;
+        let nextEnd = ent.end;
+        if (ent.start && ent.end) {
+          const dx = ent.end.x - ent.start.x;
+          const dy = ent.end.y - ent.start.y;
+          const len = Math.sqrt(dx*dx + dy*dy);
+          if (len > 0) {
+            nextEnd = {
+              x: ent.start.x + (dx / len) * width,
+              y: ent.start.y + (dy / len) * width
+            };
+          }
+        }
+
+        return {
+          ...e,
+          bimName: `Porta ${width}`,
+          bimWidth: width,
+          bimHeight: height,
+          height: height,
+          bimDoorType: type,
+          end: nextEnd,
+          bimFlip: flip
+        };
+      }
+      return e;
+    }));
+
+    setSelectedEntity(prev => prev && prev.id === editingEntityId ? {
+      ...prev,
+      bimName: `Porta ${width}`,
+      bimWidth: width,
+      bimHeight: height,
+      height: height,
+      bimDoorType: type,
+      bimFlip: flip
+    } : prev);
+
+    setIsDoorEditOpen(false);
+    setEditingEntityId(null);
+  };
+
+  const handleConfirmWindowEdit = (width: number, height: number, type: string, trasmittanza: number, prezzario: string) => {
+    if (!editingEntityId) return;
+    setEntities(prev => prev.map(e => {
+      if (e.id === editingEntityId) {
+        const ent = e as any;
+        let nextEnd = ent.end;
+        if (ent.start && ent.end) {
+          const dx = ent.end.x - ent.start.x;
+          const dy = ent.end.y - ent.start.y;
+          const len = Math.sqrt(dx*dx + dy*dy);
+          if (len > 0) {
+            nextEnd = {
+              x: ent.start.x + (dx / len) * width,
+              y: ent.start.y + (dy / len) * width
+            };
+          }
+        }
+
+        return {
+          ...e,
+          bimName: `Finestra ${width}x${height}`,
+          bimWidth: width,
+          bimWindowHeight: height,
+          height: height,
+          bimWindowType: type,
+          end: nextEnd,
+          bimTrasmittanza: trasmittanza,
+          bimPrezzario: prezzario
+        };
+      }
+      return e;
+    }));
+
+    setSelectedEntity(prev => prev && prev.id === editingEntityId ? {
+      ...prev,
+      bimName: `Finestra ${width}x${height}`,
+      bimWidth: width,
+      bimWindowHeight: height,
+      height: height,
+      bimWindowType: type,
+      bimTrasmittanza: trasmittanza,
+      bimPrezzario: prezzario
+    } : prev);
+
+    setIsWindowEditOpen(false);
+    setEditingEntityId(null);
+  };
   
   useEffect(() => {
     resetCamera();
@@ -496,9 +667,21 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose }) =
                 </div>
               </div>
 
-              <button className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-slate-100">
-                Modifica Parametri
-              </button>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => handleOpenClickDialog(selectedEntity)}
+                  className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-slate-100 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Edit size={14} /> Modifica Parametri
+                </button>
+                <button 
+                  onClick={() => handleDeleteEntity(selectedEntity.id)}
+                  className="px-4 py-4 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-2xl font-black transition-all flex items-center justify-center cursor-pointer border border-rose-100"
+                  title="Elimina Oggetto"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -659,6 +842,7 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose }) =
                   onClick={(e) => {
                     e.stopPropagation();
                     handleSelect(entity);
+                    handleOpenClickDialog(entity);
                   }}
                   onPointerOver={(e) => { e.stopPropagation(); setHoveredId(entity.id); }}
                   onPointerOut={(e) => { e.stopPropagation(); setHoveredId(null); }}
@@ -698,6 +882,57 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose }) =
           </group>
         </Canvas>
       </div>
+
+      {/* Parameter Editing Dialogs */}
+      {isAreaEditOpen && selectedEntity && (
+        <AreaFunzionaleDialog
+          isOpen={isAreaEditOpen}
+          onClose={() => {
+            setIsAreaEditOpen(false);
+            setEditingEntityId(null);
+          }}
+          onConfirm={handleConfirmAreaEdit}
+          points={((selectedEntity as any).bimPoints || (selectedEntity as any).points || [])}
+          initialData={{
+            type: (selectedEntity as any).bimAreaType || 'stanza',
+            name: (selectedEntity as any).bimName || '',
+            color: (selectedEntity as any).backgroundColor || selectedEntity.color || '#3b82f6',
+            zPlane: (selectedEntity as any).bimZPlane || 0,
+            zElevation: (selectedEntity as any).bimZElevation || 0,
+            objectHeight: (selectedEntity as any).bimHeight || (selectedEntity as any).height || 270,
+            hatch: (selectedEntity as any).bimHatchPattern || 'SOLID'
+          }}
+          onDelete={() => handleDeleteEntity(selectedEntity.id)}
+        />
+      )}
+
+      {isDoorEditOpen && selectedEntity && (
+        <PorteDialog
+          isOpen={isDoorEditOpen}
+          onClose={() => {
+            setIsDoorEditOpen(false);
+            setEditingEntityId(null);
+          }}
+          lastDoorWidth={(selectedEntity as any).bimWidth || 80}
+          lastDoorHeight={(selectedEntity as any).bimHeight || (selectedEntity as any).height || 210}
+          onConfirmDoor={handleConfirmDoorEdit}
+          onDelete={() => handleDeleteEntity(selectedEntity.id)}
+        />
+      )}
+
+      {isWindowEditOpen && selectedEntity && (
+        <FinestreDialog
+          isOpen={isWindowEditOpen}
+          onClose={() => {
+            setIsWindowEditOpen(false);
+            setEditingEntityId(null);
+          }}
+          lastWindowWidth={(selectedEntity as any).bimWidth || 120}
+          lastWindowHeight={(selectedEntity as any).bimWindowHeight || (selectedEntity as any).height || 140}
+          onConfirmWindow={handleConfirmWindowEdit}
+          onDelete={() => handleDeleteEntity(selectedEntity.id)}
+        />
+      )}
 
       {/* Selection Glow Indicator */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
