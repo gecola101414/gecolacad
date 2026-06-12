@@ -1199,8 +1199,7 @@ const findBoundaryPolygon = (
   oCtx.scale(view.zoom, view.zoom);
 
   oCtx.strokeStyle = '#000000';
-  const physicalStrokeWidth = 2.0;
-  oCtx.lineWidth = physicalStrokeWidth / view.zoom; 
+  oCtx.lineWidth = Math.max(5.0, 5.0 / view.zoom); // Increased lineWidth
   oCtx.lineJoin = 'round';
   oCtx.lineCap = 'round';
 
@@ -1219,7 +1218,7 @@ const findBoundaryPolygon = (
     }
 
     if (ent.isBIM) {
-      if (ent.bimType !== 'door' && ent.bimType !== 'window' && ent.bimType !== 'wall') {
+      if (ent.bimType !== 'door' && ent.bimType !== 'window') {
         return;
       }
     }
@@ -1342,12 +1341,12 @@ const findBoundaryPolygon = (
     for (let i = 0; i < loop.length; i += step) downsampled.push(loop[i]);
     if (downsampled.length > 0) downsampled.push(downsampled[0]);
 
-    const simplified = simplifyPolygon(downsampled, 0.5);
+    const simplified = simplifyPolygon(downsampled, 0.05);
     if (simplified.length > 1) {
       const p1 = simplified[0], pE = simplified[simplified.length - 1];
       if (Math.sqrt((p1.x - pE.x)**2 + (p1.y - pE.y)**2) < 1e-3) simplified.pop();
     }
-    const expanded = expandPolygon(simplified, 1.0);
+    const expanded = expandPolygon(simplified, 1.2);
     const canvasPts = expanded.map(pt => screenToCanvas(pt.x, pt.y));
     const snapped = snapPolygonToGeometry(canvasPts, entities, layers);
     return cleanSnappedPolygon(snapped);
@@ -1366,8 +1365,7 @@ function snapPolygonToGeometry(polyPoints: Point[], entities: Entity[], layers: 
   
   // Exclude BIM elements, hatches, texts, and dimensions since they are not physical wall lines
   const physicalEntities = entities.filter(ent => {
-    if (ent.type === 'hatch' || ent.type === 'text' || ent.type === 'dimension') return false;
-    if (ent.isBIM && ent.bimType !== 'wall' && ent.bimType !== 'window' && ent.bimType !== 'door') return false;
+    if (ent.isBIM || ent.type === 'hatch' || ent.type === 'text' || ent.type === 'dimension') return false;
     const layer = layers.find(l => l.id === ent.layer);
     return !(layer && (!layer.visible || layer.frozen));
   });
@@ -9456,53 +9454,13 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         return;
     }
 
-    if ((positioningGroupId && positioningGroupStartPos) || (positioningEntityId && positioningEntityStartPos)) {
-        const isGroup = !!positioningGroupId;
-        const startPos = isGroup ? positioningGroupStartPos! : positioningEntityStartPos!;
-        let dx = rawPoint.x - startPos.x;
-        let dy = rawPoint.y - startPos.y;
-        
-        if (isGroup) {
-            setPositioningGroupStartPos(rawPoint);
-        } else {
-            setPositioningEntityStartPos(rawPoint);
-        }
-
-        const targetIds = isGroup 
-            ? entities.filter(e => e.groupId === positioningGroupId).map(e => e.id)
-            : [positioningEntityId!];
-
-        // Snapping logic (Smart Snap during Move)
-        const threshold = 15 / view.zoom;
-        const movedEntities = entities.filter(e => targetIds.includes(e.id));
-        const staticEntities = entities.filter(e => !targetIds.includes(e.id));
-        const bgSnaps = getSnapPoints(rawPoint, staticEntities, 'Move', null).filter(s => s.type === 'CAD');
-
-        let bestAdj = { x: 0, y: 0 };
-        let minSnapSq = Infinity;
-        let snapFound: Point | null = null;
-
-        for (const ent of movedEntities) {
-            const kps = getEntityKeyPoints(ent);
-            for (const kp of kps) {
-                const translatedKp = { x: kp.x + dx, y: kp.y + dy };
-                for (const snap of bgSnaps) {
-                    const distSq = (translatedKp.x - snap.point.x) ** 2 + (translatedKp.y - snap.point.y) ** 2;
-                    if (distSq < threshold * threshold && distSq < minSnapSq) {
-                        minSnapSq = distSq;
-                        bestAdj = { x: snap.point.x - translatedKp.x, y: snap.point.y - translatedKp.y };
-                        snapFound = snap.point;
-                    }
-                }
-            }
-        }
-
-        dx += bestAdj.x;
-        dy += bestAdj.y;
-        setActiveMoveSnapPoint(snapFound);
+    if (positioningGroupId && positioningGroupStartPos) {
+        const dx = rawPoint.x - positioningGroupStartPos.x;
+        const dy = rawPoint.y - positioningGroupStartPos.y;
+        setPositioningGroupStartPos(rawPoint);
 
         const updater = (prev: Entity[]) => prev.map(ent => {
-            if (targetIds.includes(ent.id)) {
+            if (ent.groupId === positioningGroupId) {
                 if (ent.type === 'line' || ent.type === 'dimension') {
                     return {
                         ...ent,
@@ -9526,7 +9484,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                         ...ent,
                         points: h.points ? h.points.map((p: Point) => ({ x: p.x + dx, y: p.y + dy })) : []
                     };
-                } else if (ent.type === 'point' || ent.type === 'text' || ent.type === 'image') {
+                } else if (ent.type === 'point' || ent.type === 'text') {
                     return {
                         ...ent,
                         point: { x: ent.point.x + dx, y: ent.point.y + dy }
@@ -9535,7 +9493,50 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             }
             return ent;
         });
-        
+        if (setEntitiesSilent) setEntitiesSilent(updater);
+        else setEntities(updater);
+        return;
+    }
+
+    if (positioningEntityId && positioningEntityStartPos) {
+        const dx = rawPoint.x - positioningEntityStartPos.x;
+        const dy = rawPoint.y - positioningEntityStartPos.y;
+        setPositioningEntityStartPos(rawPoint);
+
+        const updater = (prev: Entity[]) => prev.map(ent => {
+            if (ent.id === positioningEntityId) {
+                if (ent.type === 'line' || ent.type === 'dimension') {
+                    return {
+                        ...ent,
+                        start: { x: ent.start.x + dx, y: ent.start.y + dy },
+                        end: { x: ent.end.x + dx, y: ent.end.y + dy }
+                    };
+                } else if (ent.type === 'circle' || ent.type === 'arc') {
+                    return {
+                        ...ent,
+                        center: { x: ent.center.x + dx, y: ent.center.y + dy }
+                    };
+                } else if (ent.type === 'rectangle') {
+                    return {
+                        ...ent,
+                        p1: { x: ent.p1.x + dx, y: ent.p1.y + dy },
+                        p2: { x: ent.p2.x + dx, y: ent.p2.y + dy }
+                    };
+                } else if (ent.type === 'hatch') {
+                    const h = ent as any;
+                    return {
+                        ...ent,
+                        points: h.points ? h.points.map((p: Point) => ({ x: p.x + dx, y: p.y + dy })) : []
+                    };
+                } else if (ent.type === 'point') {
+                    return {
+                        ...ent,
+                        point: { x: ent.point.x + dx, y: ent.point.y + dy }
+                    };
+                }
+            }
+            return ent;
+        });
         if (setEntitiesSilent) setEntitiesSilent(updater);
         else setEntities(updater);
         return;

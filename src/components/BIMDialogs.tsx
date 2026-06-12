@@ -31,8 +31,7 @@ import {
   Siren,
   Sun,
   Phone,
-  Video,
-  Trash2
+  Video
 } from "lucide-react";
 import { Point, Entity } from '../types';
 import { TEMPLATES, Template } from '../data/templates';
@@ -234,15 +233,13 @@ interface PorteDialogProps {
   lastDoorWidth: number;
   lastDoorHeight: number;
   onConfirmDoor: (width: number, height: number, type: string, flip: boolean) => void;
-  onDelete?: () => void;
 }
 export const PorteDialog: React.FC<PorteDialogProps> = ({
   isOpen,
   onClose,
   lastDoorWidth,
   lastDoorHeight,
-  onConfirmDoor,
-  onDelete
+  onConfirmDoor
 }) => {
   const { position, handlePointerDown, handlePointerMove, handlePointerUp } = useDraggableDialog(isOpen, { x: 300, y: 120 });
   const [width, setWidth] = useState<number>(lastDoorWidth || 80);
@@ -344,24 +341,12 @@ export const PorteDialog: React.FC<PorteDialogProps> = ({
           </label>
         </div>
 
-        <div className="flex gap-2">
-          {onDelete && (
-            <button
-              type="button"
-              onClick={onDelete}
-              className="bg-red-600/10 hover:bg-red-600/20 text-red-500 font-black px-4 py-2.5 rounded-lg text-xs tracking-wider transition cursor-pointer flex items-center justify-center border border-red-500/20"
-              title="Cancella Oggetto"
-            >
-              <Trash2 size={16} />
-            </button>
-          )}
-          <button
-            type="submit"
-            className="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-black py-2.5 rounded-lg text-xs tracking-wider transition shadow-md cursor-pointer uppercase"
-          >
-            ATTIVA PORTA IN LOCAZIONE 🚪
-          </button>
-        </div>
+        <button
+          type="submit"
+          className="w-full bg-rose-600 hover:bg-rose-500 text-white font-black py-2.5 rounded-lg text-xs tracking-wider transition shadow-md cursor-pointer"
+        >
+          ATTIVA PORTA IN LOCAZIONE 🚪
+        </button>
       </form>
     </div>
   );
@@ -375,15 +360,13 @@ interface FinestreDialogProps {
   lastWindowWidth: number;
   lastWindowHeight: number;
   onConfirmWindow: (width: number, height: number, type: string, trasmittanza: number, prezzario: string) => void;
-  onDelete?: () => void;
 }
 export const FinestreDialog: React.FC<FinestreDialogProps> = ({
   isOpen,
   onClose,
   lastWindowWidth,
   lastWindowHeight,
-  onConfirmWindow,
-  onDelete
+  onConfirmWindow
 }) => {
   const { position, handlePointerDown, handlePointerMove, handlePointerUp } = useDraggableDialog(isOpen, { x: 300, y: 120 });
   const [width, setWidth] = useState<number>(lastWindowWidth || 120);
@@ -495,24 +478,12 @@ export const FinestreDialog: React.FC<FinestreDialogProps> = ({
           </div>
         </div>
 
-        <div className="flex gap-2">
-          {onDelete && (
-            <button
-              type="button"
-              onClick={onDelete}
-              className="bg-red-600/10 hover:bg-red-600/20 text-red-500 font-black px-4 py-2.5 rounded-lg text-xs tracking-wider transition cursor-pointer flex items-center justify-center border border-red-500/20"
-              title="Cancella Oggetto"
-            >
-              <Trash2 size={16} />
-            </button>
-          )}
-          <button
-            type="submit"
-            className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-black py-2.5 rounded-lg text-xs tracking-wider transition shadow-md cursor-pointer uppercase"
-          >
-            CONFERMA E POSIZIONA
-          </button>
-        </div>
+        <button
+          type="submit"
+          className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-2.5 rounded-lg text-xs tracking-wider transition shadow-md cursor-pointer"
+        >
+          CONFERMA E POSIZIONA
+        </button>
       </form>
     </div>
   );
@@ -979,7 +950,6 @@ interface AreaFunzionaleDialogProps {
     objectHeight: number;
     hatch: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE';
   };
-  onDelete?: () => void;
 }
 
 const AREA_COLORS = [
@@ -1012,8 +982,7 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
   onClose,
   onConfirm,
   points,
-  initialData,
-  onDelete
+  initialData
 }) => {
   const { position, handlePointerDown, handlePointerMove, handlePointerUp } = useDraggableDialog(isOpen, { x: 300, y: 130 });
   const [areaType, setAreaType] = useState<'stanza' | 'muro' | 'tramezzo' | 'giardino' | 'tetto' | 'altro'>('stanza');
@@ -1198,24 +1167,12 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
           </div>
         </div>
 
-        <div className="flex gap-2 mt-4">
-          {onDelete && (
-            <button
-              type="button"
-              onClick={onDelete}
-              className="bg-red-600/10 hover:bg-red-600/20 text-red-500 font-black px-4 py-3.5 rounded-lg text-xs tracking-widest transition-all cursor-pointer flex items-center justify-center border border-red-500/20 active:scale-[0.97]"
-              title="Cancella Oggetto"
-            >
-              <Trash2 size={16} />
-            </button>
-          )}
-          <button
-            type="submit"
-            className="flex-1 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-black py-3.5 rounded-lg text-xs tracking-widest transition-all shadow-lg cursor-pointer uppercase active:scale-[0.97]"
-          >
-            {initialData ? 'SALVA MODIFICHE ✅' : 'GENERA AREA FUNZIONALE ✅'}
-          </button>
-        </div>
+        <button
+          type="submit"
+          className="w-full bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-black py-3.5 rounded-lg text-xs tracking-widest transition-all shadow-lg cursor-pointer uppercase active:scale-[0.97]"
+        >
+          {initialData ? 'SALVA MODIFICHE ✅' : 'GENERA AREA FUNZIONALE ✅'}
+        </button>
       </form>
     </div>
   );

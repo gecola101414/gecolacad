@@ -1,6 +1,6 @@
 {
-  "name": "Gecolacad 20_1 deve funzioanre tutto",
-  "description": "1. all\u0027inizio devono apparire dei menu definiti piu funzioannti e gia ai lati   disegno copia ecc",
+  "name": "Gecolacad 20_0 deve funzioanre tutto",
+  "description": "parallele funzionano perfettamnete e con il tasto shfr    diventano multiple....adesso proviamo a perfezionare automatismo de i tagli degli spigoli o allumanti",
   "requestFramePermissions": [
     "microphone"
   ],
