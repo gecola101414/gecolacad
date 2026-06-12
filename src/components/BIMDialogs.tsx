@@ -968,7 +968,6 @@ interface AreaFunzionaleDialogProps {
     zElevation: number;
     objectHeight: number;
     hatch: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE';
-    cadVisible?: boolean;
   }) => void;
   points?: Point[] | { points: Point[], holes?: Point[][] };
   initialData?: {
@@ -979,7 +978,6 @@ interface AreaFunzionaleDialogProps {
     zElevation: number;
     objectHeight: number;
     hatch: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE';
-    cadVisible?: boolean;
   };
   onDelete?: () => void;
 }
@@ -1025,7 +1023,6 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
   const [zElevation, setZElevation] = useState(0);
   const [objectHeight, setObjectHeight] = useState(2.70);
   const [hatch, setHatch] = useState<'SOLID' | 'ANSI31' | 'CROSS' | 'NONE'>('SOLID');
-  const [cadVisible, setCadVisible] = useState(true);
 
   useEffect(() => {
     if (isOpen) {
@@ -1037,7 +1034,6 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
         setZElevation(initialData.zElevation);
         setObjectHeight(initialData.objectHeight);
         setHatch(initialData.hatch);
-        setCadVisible(initialData.cadVisible !== false);
       } else {
         // Reset to defaults for new area
         setAreaType('stanza');
@@ -1047,7 +1043,6 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
         setZElevation(parseFloat(localStorage.getItem('last_bim_zElevation') || '0'));
         setObjectHeight(parseFloat(localStorage.getItem('last_bim_height') || '270'));
         setHatch('SOLID');
-        setCadVisible(true);
       }
     }
   }, [isOpen, initialData]);
@@ -1073,7 +1068,7 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
     localStorage.setItem('last_bim_zPlane', zPlane.toString());
     localStorage.setItem('last_bim_zElevation', zElevation.toString());
     localStorage.setItem('last_bim_height', objectHeight.toString());
-    onConfirm({ type: areaType, name, color, zPlane, zElevation, objectHeight: parseFloat(objectHeight.toString()), hatch, cadVisible });
+    onConfirm({ type: areaType, name, color, zPlane, zElevation, objectHeight: parseFloat(objectHeight.toString()), hatch });
   };
 
   return (
@@ -1172,20 +1167,6 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
               className="w-full bg-white/5 border border-white/10 text-white rounded p-2 text-xs font-mono font-bold focus:outline-none focus:border-cyan-500"
             />
           </div>
-        </div>
-        
-        <div className="flex items-center gap-2 mt-2 bg-white/5 border border-white/10 rounded-lg p-2.5">
-          <label className="flex items-center cursor-pointer gap-2 flex-1">
-            <div className="relative">
-              <input type="checkbox" className="sr-only" checked={cadVisible} onChange={(e) => setCadVisible(e.target.checked)} />
-              <div className={`block w-8 h-4.5 rounded-full transition-colors ${cadVisible ? 'bg-cyan-500' : 'bg-slate-600'}`}></div>
-              <div className={`dot absolute left-0.5 top-0.5 bg-white w-3.5 h-3.5 rounded-full transition-transform ${cadVisible ? 'transform translate-x-3.5' : ''}`}></div>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-[10px] font-bold text-white uppercase tracking-widest font-mono">Visibilità CAD Layer 2D</span>
-              <span className="text-[8px] text-slate-400 leading-tight">Nascondi in pianta mantenendo l'oggetto nel modello 3D</span>
-            </div>
-          </label>
         </div>
         </div>
 

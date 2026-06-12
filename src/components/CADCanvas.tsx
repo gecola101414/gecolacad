@@ -3600,11 +3600,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       points.push({ x: entity.point.x, y: entity.point.y + entity.height });
       points.push({ x: entity.point.x + entity.width, y: entity.point.y + entity.height });
       points.push({ x: entity.point.x + entity.width / 2, y: entity.point.y + entity.height / 2 });
-    } else if (entity.type === 'hatch') {
-      const h = entity as any;
-      if (h.points) {
-        points.push(...h.points);
-      }
     }
     return points;
   };
@@ -3977,7 +3972,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       const others: Entity[] = [];
       
       for (const entity of entities) {
-        if (entity.cadVisible === false) continue;
         const layer = layerMap.get(entity.layer);
         if (layer && !layer.visible) continue;
 
@@ -5708,7 +5702,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       // --- BIM OVERLAY RENDERING PASS (STARTS) ---
       entities.forEach(entity => {
         if (!entity.isBIM) return;
-        if (entity.cadVisible === false) return;
 
         // Draw Room
         if (entity.bimType === 'room') {
@@ -5748,6 +5741,73 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             cx /= roomPoints.length;
             cy /= roomPoints.length;
 
+            // Compute Area using shoelace formula (subtract holes if present)
+            let area = 0;
+            const len = roomPoints.length;
+            for (let i = 0; i < len; i++) {
+              const p1 = roomPoints[i];
+              const p2 = roomPoints[(i + 1) % len];
+              area += p1.x * p2.y - p2.x * p1.y;
+            }
+            area = Math.abs(area) / 2;
+            
+            if (roomHoles) {
+                roomHoles.forEach((hole: Point[]) => {
+                    let holeArea = 0;
+                    for (let i = 0; i < hole.length; i++) {
+                        const p1 = hole[i];
+                        const p2 = hole[(i + 1) % hole.length];
+                        holeArea += p1.x * p2.y - p2.x * p1.y;
+                    }
+                    area -= Math.abs(holeArea) / 2;
+                });
+            }
+
+            const areaMq = Math.max(0, area / 10000);
+            const perimeterM = roomPoints.reduce((acc: number, p: Point, idx: number) => {
+              const nextP = roomPoints[(idx + 1) % len];
+              const dist = Math.sqrt((nextP.x - p.x)**2 + (nextP.y - p.y)**2);
+              return acc + dist;
+            }, 0) / 100; // Assuming 1 unit = 1 cm
+
+            const textSz = Math.max(8, Math.min(13, 11 / view.zoom));
+            const padding = 6 / view.zoom;
+
+            ctx.font = `bold ${textSz}px sans-serif`;
+            const nameLabel = `${entity.bimName || 'Stanza'}`;
+            const areaLabel = `${areaMq.toFixed(2)} mq`;
+            const perimeterLabel = `P: ${perimeterM.toFixed(2)} m`;
+            const volLabel = entity.bimHeight ? `V: ${(areaMq * entity.bimHeight).toFixed(1)} mc` : '';
+
+            const nameW = ctx.measureText(nameLabel).width;
+            const areaW = ctx.measureText(areaLabel).width;
+            const perW = ctx.measureText(perimeterLabel).width;
+            const maxW = Math.max(nameW, areaW, perW);
+            
+            const lineCount = entity.bimHeight ? 4 : 3;
+            const boxH = lineCount * textSz + 2 * padding;
+            const boxW = maxW + 2 * padding;
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.strokeStyle = '#10b981';
+            ctx.lineWidth = 1 / view.zoom;
+            
+            ctx.fillRect(cx - boxW/2, cy - boxH/2, boxW, boxH);
+            ctx.strokeRect(cx - boxW/2, cy - boxH/2, boxW, boxH);
+
+            ctx.fillStyle = '#065f46';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            
+            ctx.fillText(nameLabel, cx, cy - boxH/2 + padding);
+            ctx.fillStyle = '#111827';
+            ctx.font = `${textSz * 0.9}px sans-serif`;
+            ctx.fillText(areaLabel, cx, cy - boxH/2 + padding + textSz * 1.1);
+            ctx.fillStyle = '#4b5563';
+            ctx.fillText(perimeterLabel, cx, cy - boxH/2 + padding + textSz * 2.1);
+            if (entity.bimHeight) {
+              ctx.fillText(volLabel, cx, cy - boxH/2 + padding + textSz * 3.1);
+            }
             ctx.restore();
           }
         }
@@ -9401,6 +9461,12 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         const startPos = isGroup ? positioningGroupStartPos! : positioningEntityStartPos!;
         let dx = rawPoint.x - startPos.x;
         let dy = rawPoint.y - startPos.y;
+        
+        if (isGroup) {
+            setPositioningGroupStartPos(rawPoint);
+        } else {
+            setPositioningEntityStartPos(rawPoint);
+        }
 
         const targetIds = isGroup 
             ? entities.filter(e => e.groupId === positioningGroupId).map(e => e.id)
@@ -9410,6 +9476,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         const threshold = 15 / view.zoom;
         const movedEntities = entities.filter(e => targetIds.includes(e.id));
         const staticEntities = entities.filter(e => !targetIds.includes(e.id));
+        const bgSnaps = getSnapPoints(rawPoint, staticEntities, 'Move', null).filter(s => s.type === 'CAD');
 
         let bestAdj = { x: 0, y: 0 };
         let minSnapSq = Infinity;
@@ -9419,10 +9486,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             const kps = getEntityKeyPoints(ent);
             for (const kp of kps) {
                 const translatedKp = { x: kp.x + dx, y: kp.y + dy };
-                // Get snaps near THIS keypoint!
-                const localSnaps = getSnapPoints(translatedKp, staticEntities, 'Move', null).filter(s => s.type === 'CAD');
-                
-                for (const snap of localSnaps) {
+                for (const snap of bgSnaps) {
                     const distSq = (translatedKp.x - snap.point.x) ** 2 + (translatedKp.y - snap.point.y) ** 2;
                     if (distSq < threshold * threshold && distSq < minSnapSq) {
                         minSnapSq = distSq;
@@ -9436,12 +9500,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         dx += bestAdj.x;
         dy += bestAdj.y;
         setActiveMoveSnapPoint(snapFound);
-
-        if (isGroup) {
-            setPositioningGroupStartPos({ x: rawPoint.x + bestAdj.x, y: rawPoint.y + bestAdj.y });
-        } else {
-            setPositioningEntityStartPos({ x: rawPoint.x + bestAdj.x, y: rawPoint.y + bestAdj.y });
-        }
 
         const updater = (prev: Entity[]) => prev.map(ent => {
             if (targetIds.includes(ent.id)) {

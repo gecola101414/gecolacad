@@ -44,7 +44,6 @@ export interface CADEntity {
   bimDescription?: string;
   bimMarmo?: string;
   bimTrasmittanza?: number;
-  cadVisible?: boolean;
 }
 
 export interface LineEntity extends CADEntity {

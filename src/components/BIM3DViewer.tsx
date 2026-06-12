@@ -915,7 +915,7 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose, set
               const isSelected = selectedEntity?.id === entity.id;
               const isHovered = hoveredId === entity.id;
               const color = isSelected ? '#06b6d4' : (entity.color || (isMuro ? '#f8fafc' : '#3b82f6'));
-              const entityOpacity = transparentEntities.has(entity.id) ? 0.3 : ((entity as any).cadVisible === false ? 0.05 : 1);
+              const entityOpacity = transparentEntities.has(entity.id) ? 0.3 : 1;
 
               return (
                 <group 

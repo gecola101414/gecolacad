@@ -472,7 +472,6 @@ const MASONRY_TYPES = [
     setDetectedAreaPoints(result);
     setEditingAreaId(null);
     setIsBIMAreaDialogOpen(true);
-    setShowProperties(false);
   };
 
   const handleEditBIMArea = (areaId: string) => {
@@ -485,10 +484,9 @@ const MASONRY_TYPES = [
     });
     setEditingAreaId(areaId);
     setIsBIMAreaDialogOpen(true);
-    setShowProperties(false);
   };
 
-  const handleConfirmArea = (areaData: { type: string; name: string; color: string; zPlane: number; zElevation: number; objectHeight: number; hatch: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE'; cadVisible?: boolean }) => {
+  const handleConfirmArea = (areaData: { type: string; name: string; color: string; zPlane: number; zElevation: number; objectHeight: number; hatch: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE' }) => {
     if (!detectedAreaPoints) return;
 
     if (editingAreaId) {
@@ -504,8 +502,7 @@ const MASONRY_TYPES = [
             pattern: areaData.hatch === 'NONE' ? 'SOLID' : areaData.hatch,
             bimHeight: areaData.objectHeight,
             bimZPlane: areaData.zPlane,
-            bimZElevation: areaData.zElevation,
-            cadVisible: areaData.cadVisible !== false
+            bimZElevation: areaData.zElevation
           };
         }
         return e;
@@ -535,7 +532,6 @@ const MASONRY_TYPES = [
         bimHeight: areaData.objectHeight,
         bimZPlane: areaData.zPlane,
         bimZElevation: areaData.zElevation,
-        cadVisible: areaData.cadVisible !== false,
         timestamp: Date.now()
       } as any;
 
@@ -1451,8 +1447,8 @@ const MASONRY_TYPES = [
 
   // Auto-show properties when entity selected
   useEffect(() => {
-    if (selectedId && !isBIMAreaDialogOpen) setShowProperties(true);
-  }, [selectedId, isBIMAreaDialogOpen]);
+    if (selectedId) setShowProperties(true);
+  }, [selectedId]);
 
   const selectedCategoryTools =
     categories.find((c) => c.name === selectedCategory)?.tools || [];
@@ -2135,11 +2131,10 @@ const MASONRY_TYPES = [
                 type: (e as any).bimAreaType || 'stanza',
                 name: (e as any).bimName || '',
                 color: (e as any).backgroundColor || e.color,
-                zPlane: (e as any).bimZPlane || 0,
-                zElevation: (e as any).bimZElevation || 0,
-                objectHeight: (e as any).bimHeight || 2.70,
-                hatch: (e as any).bimHatchPattern || 'SOLID',
-                cadVisible: (e as any).cadVisible !== false
+                zPlane: (e as any).zPlane || 0,
+                zElevation: (e as any).zElevation || 0,
+                objectHeight: (e as any).objectHeight || (e as any).height || 2.70,
+                hatch: (e as any).bimHatchPattern || 'SOLID'
               };
             })() : undefined}
           />
