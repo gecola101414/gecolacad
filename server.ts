@@ -8,6 +8,42 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function startServer() {
   const app = express();
+  
+  // ==========================================
+  // MILITARY SECURITY: IP WHITELISTING MIDDLEWARE
+  // ==========================================
+  app.use((req, res, next) => {
+    // In produzione leggi le variabili d'ambiente. Se mancano, usa un fallback sicuro.
+    const whitelistEnabled = process.env.ENABLE_IP_WHITELIST === 'true';
+    if (!whitelistEnabled) {
+      return next(); // Bypass se la whitelist non è attiva
+    }
+
+    // Estrai la lista di IP consentiti dalla variabile d'ambiente
+    const allowedIps = (process.env.ALLOWED_IPS || "82.180.59.135")
+      .split(',')
+      .map(ip => ip.trim());
+
+    // Ottieni l'IP del client (essenziale per ambienti dietro reverse proxy come nginx / Cloud Run)
+    const rawIp = req.header('x-forwarded-for') || req.socket.remoteAddress || "";
+    const clientIp = rawIp.split(',')[0].trim(); // Prendi il primo IP se c'è una catena di forwarding
+
+    // Controlla se l'IP è autorizzato
+    if (allowedIps.includes(clientIp) || clientIp === "::1" || clientIp === "127.0.0.1") {
+      return next(); // IP autorizzato -> procedi
+    }
+
+    // IP NON AUTORIZZATO -> Blocca la richiesta
+    console.warn(`[SECURITY] Tentativo di accesso bloccato dall'IP: ${clientIp}`);
+    return res.status(403).send(`
+      <div style="font-family: monospace; padding: 20px; color: #dc2626;">
+        <h1>403 - Forbidden</h1>
+        <p><b>Accesso negato - Rete non autorizzata.</b></p>
+        <p>Il tuo indirizzo IP (${clientIp}) non compare nella whitelist della rete militare.</p>
+      </div>
+    `);
+  });
+
   app.use(express.json());
   const PORT = 3000;
 

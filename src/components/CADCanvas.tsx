@@ -1199,7 +1199,8 @@ const findBoundaryPolygon = (
   oCtx.scale(view.zoom, view.zoom);
 
   oCtx.strokeStyle = '#000000';
-  oCtx.lineWidth = Math.max(5.0, 5.0 / view.zoom); // Increased lineWidth
+  const physicalStrokeWidth = 2.0;
+  oCtx.lineWidth = physicalStrokeWidth / view.zoom; 
   oCtx.lineJoin = 'round';
   oCtx.lineCap = 'round';
 
@@ -1218,7 +1219,7 @@ const findBoundaryPolygon = (
     }
 
     if (ent.isBIM) {
-      if (ent.bimType !== 'door' && ent.bimType !== 'window') {
+      if (ent.bimType !== 'door' && ent.bimType !== 'window' && ent.bimType !== 'wall') {
         return;
       }
     }
@@ -1341,12 +1342,12 @@ const findBoundaryPolygon = (
     for (let i = 0; i < loop.length; i += step) downsampled.push(loop[i]);
     if (downsampled.length > 0) downsampled.push(downsampled[0]);
 
-    const simplified = simplifyPolygon(downsampled, 0.05);
+    const simplified = simplifyPolygon(downsampled, 0.5);
     if (simplified.length > 1) {
       const p1 = simplified[0], pE = simplified[simplified.length - 1];
       if (Math.sqrt((p1.x - pE.x)**2 + (p1.y - pE.y)**2) < 1e-3) simplified.pop();
     }
-    const expanded = expandPolygon(simplified, 1.2);
+    const expanded = expandPolygon(simplified, 1.0);
     const canvasPts = expanded.map(pt => screenToCanvas(pt.x, pt.y));
     const snapped = snapPolygonToGeometry(canvasPts, entities, layers);
     return cleanSnappedPolygon(snapped);
@@ -1365,7 +1366,8 @@ function snapPolygonToGeometry(polyPoints: Point[], entities: Entity[], layers: 
   
   // Exclude BIM elements, hatches, texts, and dimensions since they are not physical wall lines
   const physicalEntities = entities.filter(ent => {
-    if (ent.isBIM || ent.type === 'hatch' || ent.type === 'text' || ent.type === 'dimension') return false;
+    if (ent.type === 'hatch' || ent.type === 'text' || ent.type === 'dimension') return false;
+    if (ent.isBIM && ent.bimType !== 'wall' && ent.bimType !== 'window' && ent.bimType !== 'door') return false;
     const layer = layers.find(l => l.id === ent.layer);
     return !(layer && (!layer.visible || layer.frozen));
   });
@@ -3598,6 +3600,11 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       points.push({ x: entity.point.x, y: entity.point.y + entity.height });
       points.push({ x: entity.point.x + entity.width, y: entity.point.y + entity.height });
       points.push({ x: entity.point.x + entity.width / 2, y: entity.point.y + entity.height / 2 });
+    } else if (entity.type === 'hatch') {
+      const h = entity as any;
+      if (h.points) {
+        points.push(...h.points);
+      }
     }
     return points;
   };
@@ -3970,6 +3977,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       const others: Entity[] = [];
       
       for (const entity of entities) {
+        if (entity.cadVisible === false) continue;
         const layer = layerMap.get(entity.layer);
         if (layer && !layer.visible) continue;
 
@@ -5700,6 +5708,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       // --- BIM OVERLAY RENDERING PASS (STARTS) ---
       entities.forEach(entity => {
         if (!entity.isBIM) return;
+        if (entity.cadVisible === false) return;
 
         // Draw Room
         if (entity.bimType === 'room') {
@@ -5739,73 +5748,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             cx /= roomPoints.length;
             cy /= roomPoints.length;
 
-            // Compute Area using shoelace formula (subtract holes if present)
-            let area = 0;
-            const len = roomPoints.length;
-            for (let i = 0; i < len; i++) {
-              const p1 = roomPoints[i];
-              const p2 = roomPoints[(i + 1) % len];
-              area += p1.x * p2.y - p2.x * p1.y;
-            }
-            area = Math.abs(area) / 2;
-            
-            if (roomHoles) {
-                roomHoles.forEach((hole: Point[]) => {
-                    let holeArea = 0;
-                    for (let i = 0; i < hole.length; i++) {
-                        const p1 = hole[i];
-                        const p2 = hole[(i + 1) % hole.length];
-                        holeArea += p1.x * p2.y - p2.x * p1.y;
-                    }
-                    area -= Math.abs(holeArea) / 2;
-                });
-            }
-
-            const areaMq = Math.max(0, area / 10000);
-            const perimeterM = roomPoints.reduce((acc: number, p: Point, idx: number) => {
-              const nextP = roomPoints[(idx + 1) % len];
-              const dist = Math.sqrt((nextP.x - p.x)**2 + (nextP.y - p.y)**2);
-              return acc + dist;
-            }, 0) / 100; // Assuming 1 unit = 1 cm
-
-            const textSz = Math.max(8, Math.min(13, 11 / view.zoom));
-            const padding = 6 / view.zoom;
-
-            ctx.font = `bold ${textSz}px sans-serif`;
-            const nameLabel = `${entity.bimName || 'Stanza'}`;
-            const areaLabel = `${areaMq.toFixed(2)} mq`;
-            const perimeterLabel = `P: ${perimeterM.toFixed(2)} m`;
-            const volLabel = entity.bimHeight ? `V: ${(areaMq * entity.bimHeight).toFixed(1)} mc` : '';
-
-            const nameW = ctx.measureText(nameLabel).width;
-            const areaW = ctx.measureText(areaLabel).width;
-            const perW = ctx.measureText(perimeterLabel).width;
-            const maxW = Math.max(nameW, areaW, perW);
-            
-            const lineCount = entity.bimHeight ? 4 : 3;
-            const boxH = lineCount * textSz + 2 * padding;
-            const boxW = maxW + 2 * padding;
-
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-            ctx.strokeStyle = '#10b981';
-            ctx.lineWidth = 1 / view.zoom;
-            
-            ctx.fillRect(cx - boxW/2, cy - boxH/2, boxW, boxH);
-            ctx.strokeRect(cx - boxW/2, cy - boxH/2, boxW, boxH);
-
-            ctx.fillStyle = '#065f46';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'top';
-            
-            ctx.fillText(nameLabel, cx, cy - boxH/2 + padding);
-            ctx.fillStyle = '#111827';
-            ctx.font = `${textSz * 0.9}px sans-serif`;
-            ctx.fillText(areaLabel, cx, cy - boxH/2 + padding + textSz * 1.1);
-            ctx.fillStyle = '#4b5563';
-            ctx.fillText(perimeterLabel, cx, cy - boxH/2 + padding + textSz * 2.1);
-            if (entity.bimHeight) {
-              ctx.fillText(volLabel, cx, cy - boxH/2 + padding + textSz * 3.1);
-            }
             ctx.restore();
           }
         }
@@ -9454,13 +9396,55 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         return;
     }
 
-    if (positioningGroupId && positioningGroupStartPos) {
-        const dx = rawPoint.x - positioningGroupStartPos.x;
-        const dy = rawPoint.y - positioningGroupStartPos.y;
-        setPositioningGroupStartPos(rawPoint);
+    if ((positioningGroupId && positioningGroupStartPos) || (positioningEntityId && positioningEntityStartPos)) {
+        const isGroup = !!positioningGroupId;
+        const startPos = isGroup ? positioningGroupStartPos! : positioningEntityStartPos!;
+        let dx = rawPoint.x - startPos.x;
+        let dy = rawPoint.y - startPos.y;
+
+        const targetIds = isGroup 
+            ? entities.filter(e => e.groupId === positioningGroupId).map(e => e.id)
+            : [positioningEntityId!];
+
+        // Snapping logic (Smart Snap during Move)
+        const threshold = 15 / view.zoom;
+        const movedEntities = entities.filter(e => targetIds.includes(e.id));
+        const staticEntities = entities.filter(e => !targetIds.includes(e.id));
+
+        let bestAdj = { x: 0, y: 0 };
+        let minSnapSq = Infinity;
+        let snapFound: Point | null = null;
+
+        for (const ent of movedEntities) {
+            const kps = getEntityKeyPoints(ent);
+            for (const kp of kps) {
+                const translatedKp = { x: kp.x + dx, y: kp.y + dy };
+                // Get snaps near THIS keypoint!
+                const localSnaps = getSnapPoints(translatedKp, staticEntities, 'Move', null).filter(s => s.type === 'CAD');
+                
+                for (const snap of localSnaps) {
+                    const distSq = (translatedKp.x - snap.point.x) ** 2 + (translatedKp.y - snap.point.y) ** 2;
+                    if (distSq < threshold * threshold && distSq < minSnapSq) {
+                        minSnapSq = distSq;
+                        bestAdj = { x: snap.point.x - translatedKp.x, y: snap.point.y - translatedKp.y };
+                        snapFound = snap.point;
+                    }
+                }
+            }
+        }
+
+        dx += bestAdj.x;
+        dy += bestAdj.y;
+        setActiveMoveSnapPoint(snapFound);
+
+        if (isGroup) {
+            setPositioningGroupStartPos({ x: rawPoint.x + bestAdj.x, y: rawPoint.y + bestAdj.y });
+        } else {
+            setPositioningEntityStartPos({ x: rawPoint.x + bestAdj.x, y: rawPoint.y + bestAdj.y });
+        }
 
         const updater = (prev: Entity[]) => prev.map(ent => {
-            if (ent.groupId === positioningGroupId) {
+            if (targetIds.includes(ent.id)) {
                 if (ent.type === 'line' || ent.type === 'dimension') {
                     return {
                         ...ent,
@@ -9484,7 +9468,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                         ...ent,
                         points: h.points ? h.points.map((p: Point) => ({ x: p.x + dx, y: p.y + dy })) : []
                     };
-                } else if (ent.type === 'point' || ent.type === 'text') {
+                } else if (ent.type === 'point' || ent.type === 'text' || ent.type === 'image') {
                     return {
                         ...ent,
                         point: { x: ent.point.x + dx, y: ent.point.y + dy }
@@ -9493,50 +9477,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             }
             return ent;
         });
-        if (setEntitiesSilent) setEntitiesSilent(updater);
-        else setEntities(updater);
-        return;
-    }
-
-    if (positioningEntityId && positioningEntityStartPos) {
-        const dx = rawPoint.x - positioningEntityStartPos.x;
-        const dy = rawPoint.y - positioningEntityStartPos.y;
-        setPositioningEntityStartPos(rawPoint);
-
-        const updater = (prev: Entity[]) => prev.map(ent => {
-            if (ent.id === positioningEntityId) {
-                if (ent.type === 'line' || ent.type === 'dimension') {
-                    return {
-                        ...ent,
-                        start: { x: ent.start.x + dx, y: ent.start.y + dy },
-                        end: { x: ent.end.x + dx, y: ent.end.y + dy }
-                    };
-                } else if (ent.type === 'circle' || ent.type === 'arc') {
-                    return {
-                        ...ent,
-                        center: { x: ent.center.x + dx, y: ent.center.y + dy }
-                    };
-                } else if (ent.type === 'rectangle') {
-                    return {
-                        ...ent,
-                        p1: { x: ent.p1.x + dx, y: ent.p1.y + dy },
-                        p2: { x: ent.p2.x + dx, y: ent.p2.y + dy }
-                    };
-                } else if (ent.type === 'hatch') {
-                    const h = ent as any;
-                    return {
-                        ...ent,
-                        points: h.points ? h.points.map((p: Point) => ({ x: p.x + dx, y: p.y + dy })) : []
-                    };
-                } else if (ent.type === 'point') {
-                    return {
-                        ...ent,
-                        point: { x: ent.point.x + dx, y: ent.point.y + dy }
-                    };
-                }
-            }
-            return ent;
-        });
+        
         if (setEntitiesSilent) setEntitiesSilent(updater);
         else setEntities(updater);
         return;

@@ -4,7 +4,7 @@ import { OrbitControls, PerspectiveCamera, Grid, Stars, Float, Text, Html, Conta
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import { Entity, Point, LineEntity, RectEntity } from '../types';
-import { X, ZoomIn, ZoomOut, RotateCw, Box, Layers, Database, Maximize, Home, Compass, Eye, Info, Settings, MousePointer2, Move, Scissors, Play, Pause, RefreshCw, ArrowDown, ArrowUp, Edit, Trash2 } from 'lucide-react';
+import { X, ZoomIn, ZoomOut, RotateCw, Box, Layers, Database, Maximize, Home, Compass, Eye, EyeOff, Info, Settings, MousePointer2, Move, Scissors, Play, Pause, RefreshCw, ArrowDown, ArrowUp, Edit, Trash2, Wand2 } from 'lucide-react';
 import { AreaFunzionaleDialog, PorteDialog, FinestreDialog } from './BIMDialogs';
 
 interface BIM3DViewerProps {
@@ -13,7 +13,7 @@ interface BIM3DViewerProps {
   setEntities: React.Dispatch<React.SetStateAction<Entity[]>> | ((updater: (prev: Entity[]) => Entity[]) => void);
 }
 
-const Wall = ({ points, height, width, color, baseZ, clippingPlanes = [] }: { points: Point[], height: number, width?: number, color: string, baseZ: number, clippingPlanes?: THREE.Plane[] }) => {
+const Wall = ({ points, height, width, color, baseZ, clippingPlanes = [], opacity = 1 }: { points: Point[], height: number, width?: number, color: string, baseZ: number, clippingPlanes?: THREE.Plane[], opacity?: number }) => {
   const segments = useMemo(() => {
     const result = [];
     const h = height / 100; // Convert to meters
@@ -46,6 +46,8 @@ const Wall = ({ points, height, width, color, baseZ, clippingPlanes = [] }: { po
           <boxGeometry args={seg.args} />
           <meshStandardMaterial 
             color={color} 
+            transparent={opacity < 1}
+            opacity={opacity}
             metalness={0.15} 
             roughness={0.4} 
             envMapIntensity={1}
@@ -59,15 +61,15 @@ const Wall = ({ points, height, width, color, baseZ, clippingPlanes = [] }: { po
   );
 };
 
-const Room = ({ points, holes, height, color, name, areaType, baseZ, clippingPlanes = [] }: { points: Point[], holes?: Point[][], height: number, color: string, name?: string, areaType?: string, baseZ: number, clippingPlanes?: THREE.Plane[] }) => {
+const Room = ({ points, holes, height, color, name, areaType, baseZ, clippingPlanes = [], opacity = 1 }: { points: Point[], holes?: Point[][], height: number, color: string, name?: string, areaType?: string, baseZ: number, clippingPlanes?: THREE.Plane[], opacity?: number }) => {
   const h = height / 100; // Convert to meters
   const zBase = baseZ / 100;
   const shape = useMemo(() => {
     if (!points || points.length < 3) return null;
     const s = new THREE.Shape();
-    s.moveTo(points[0].x / 100, -points[0].y / 100);
+    s.moveTo(points[0].x / 100, points[0].y / 100);
     for (let i = 1; i < points.length; i++) {
-        s.lineTo(points[i].x / 100, -points[i].y / 100);
+        s.lineTo(points[i].x / 100, points[i].y / 100);
     }
     s.closePath();
 
@@ -75,9 +77,9 @@ const Room = ({ points, holes, height, color, name, areaType, baseZ, clippingPla
       holes.forEach(holePoints => {
         if (holePoints.length < 3) return;
         const holePath = new THREE.Path();
-        holePath.moveTo(holePoints[0].x / 100, -holePoints[0].y / 100);
+        holePath.moveTo(holePoints[0].x / 100, holePoints[0].y / 100);
         for (let i = 1; i < holePoints.length; i++) {
-          holePath.lineTo(holePoints[i].x / 100, -holePoints[i].y / 100);
+          holePath.lineTo(holePoints[i].x / 100, holePoints[i].y / 100);
         }
         holePath.closePath();
         s.holes.push(holePath);
@@ -102,6 +104,8 @@ const Room = ({ points, holes, height, color, name, areaType, baseZ, clippingPla
   }, [points, h, zBase]);
 
   const isWall = areaType === 'muro';
+  const finalOpacity = opacity < 1 ? opacity : (isWall ? 0.95 : 0.25);
+  const finalFloorOpacity = opacity < 1 ? Math.min(opacity, 0.4) : 0.4;
 
   return (
     <group position={[0, zBase, 0]}>
@@ -109,8 +113,8 @@ const Room = ({ points, holes, height, color, name, areaType, baseZ, clippingPla
         <extrudeGeometry args={[shape, extrudeSettings]} />
         <meshStandardMaterial 
           color={color} 
-          transparent={!isWall} 
-          opacity={isWall ? 0.95 : 0.25} 
+          transparent={!isWall || opacity < 1} 
+          opacity={finalOpacity} 
           metalness={isWall ? 0.3 : 0.1}
           roughness={isWall ? 0.4 : 0.3}
           envMapIntensity={1.2}
@@ -127,7 +131,7 @@ const Room = ({ points, holes, height, color, name, areaType, baseZ, clippingPla
           <meshStandardMaterial 
             color={color} 
             transparent 
-            opacity={0.4} 
+            opacity={finalFloorOpacity} 
             clippingPlanes={clippingPlanes}
           />
         </mesh>
@@ -151,7 +155,7 @@ const Room = ({ points, holes, height, color, name, areaType, baseZ, clippingPla
   );
 };
 
-const BIMSymbol = ({ entity, onPointerOver, onPointerOut, clippingPlanes = [] }: { entity: any, onPointerOver?: () => void, onPointerOut?: () => void, clippingPlanes?: THREE.Plane[] }) => {
+const BIMSymbol = ({ entity, onPointerOver, onPointerOut, clippingPlanes = [], opacity = 1 }: { entity: any, onPointerOver?: () => void, onPointerOut?: () => void, clippingPlanes?: THREE.Plane[], opacity?: number }) => {
   const { bimType, bimZPlane = 0, bimZElevation = 0, points, point, bimHeight = 210, bimWidth = 90, bimWindowHeight = 120, isHovered } = entity;
   const p = point || (points && points[0]);
   if (!p) return null;
@@ -174,7 +178,7 @@ const BIMSymbol = ({ entity, onPointerOver, onPointerOut, clippingPlanes = [] }:
       <meshStandardMaterial 
         color={color} 
         transparent 
-        opacity={isHovered ? 0.9 : 0.6} 
+        opacity={(isHovered ? 0.9 : 0.6) * opacity} 
         metalness={0.4} 
         roughness={0.3} 
         emissive={isHovered ? color : '#000000'}
@@ -187,6 +191,44 @@ const BIMSymbol = ({ entity, onPointerOver, onPointerOut, clippingPlanes = [] }:
   );
 };
 
+
+const ReferencePlan = ({ entities }: { entities: Entity[] }) => {
+  const lineEntities = entities.filter(e => !e.isBIM && (e.type === 'line' || e.type === 'rectangle'));
+  
+  if (lineEntities.length === 0) return null;
+
+  return (
+    <group position={[0, -0.01, 0]}>
+      {lineEntities.map(entity => {
+        let points: Point[] = [];
+        if (entity.type === 'line') {
+          points = [(entity as LineEntity).start, (entity as LineEntity).end];
+        } else if (entity.type === 'rectangle') {
+          const r = entity as RectEntity;
+          points = [
+            r.p1,
+            { x: r.p2.x, y: r.p1.y },
+            r.p2,
+            { x: r.p1.x, y: r.p2.y },
+            r.p1
+          ];
+        }
+
+        if (points.length < 2) return null;
+
+        const pts = points.map(p => new THREE.Vector3(p.x / 100, 0, -p.y / 100));
+        const geometry = new THREE.BufferGeometry().setFromPoints(pts);
+
+        return (
+          <line key={entity.id}>
+            <primitive object={geometry} attach="geometry" />
+            <lineBasicMaterial attach="material" color={entity.color || '#94a3b8'} opacity={0.4} transparent linewidth={1} />
+          </line>
+        );
+      })}
+    </group>
+  );
+};
 
 const SceneAutoFit = ({ entities, resetTrigger }: { entities: Entity[], resetTrigger: number }) => {
   const { camera, controls } = useThree();
@@ -258,6 +300,17 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose, set
   const [isDoorEditOpen, setIsDoorEditOpen] = useState(false);
   const [isWindowEditOpen, setIsWindowEditOpen] = useState(false);
   const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
+  const [isRealistic, setIsRealistic] = useState(false);
+  const [transparentEntities, setTransparentEntities] = useState<Set<string>>(new Set());
+
+  const toggleTransparency = (id: string) => {
+    setTransparentEntities(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const handleDeleteEntity = (id: string) => {
     setEntities(prev => prev.filter(e => e.id !== id));
@@ -525,8 +578,18 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose, set
 
         <div className="w-px h-8 bg-slate-200 mx-1" />
         
-        {/* SLICING CONTROLS */}
+        {/* REALISTIC AND SLICING CONTROLS */}
         <div className="flex items-center gap-1.5 bg-slate-50/50 p-1 rounded-xl border border-slate-200/50">
+          <button 
+            onClick={() => setIsRealistic(!isRealistic)}
+            className={`p-2.5 rounded-lg transition-all ${isRealistic ? 'bg-amber-500 text-white shadow-lg shadow-amber-200' : 'hover:bg-white text-slate-400'}`}
+            title="Render Realistico"
+          >
+            <Wand2 size={20} />
+          </button>
+          
+          <div className="w-px h-6 bg-slate-200/50 mx-1" />
+
           <button 
             onClick={() => setIsSlicing(!isSlicing)}
             className={`p-2.5 rounded-lg transition-all ${isSlicing ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-200' : 'hover:bg-white text-slate-400'}`}
@@ -675,6 +738,17 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose, set
                   <Edit size={14} /> Modifica Parametri
                 </button>
                 <button 
+                  onClick={() => toggleTransparency(selectedEntity.id)}
+                  className={`px-4 py-4 rounded-2xl font-black transition-all flex items-center justify-center cursor-pointer border ${
+                    transparentEntities.has(selectedEntity.id) 
+                    ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border-indigo-100' 
+                    : 'bg-white hover:bg-slate-50 text-slate-400 border-slate-200 shadow-sm'
+                  }`}
+                  title="Trasparente"
+                >
+                  {transparentEntities.has(selectedEntity.id) ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+                <button 
                   onClick={() => handleDeleteEntity(selectedEntity.id)}
                   className="px-4 py-4 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-2xl font-black transition-all flex items-center justify-center cursor-pointer border border-rose-100"
                   title="Elimina Oggetto"
@@ -720,9 +794,13 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose, set
       </div>
 
       {/* 3D SCENE CANVAS */}
-      <div className="flex-1 cursor-crosshair">
+      <div className={`flex-1 cursor-crosshair transition-colors duration-1000 ${isRealistic ? 'bg-gradient-to-b from-sky-100 to-white' : 'bg-[#fdfdfd]'}`}>
         <Canvas shadows dpr={[1, 2]} gl={{ antialias: true, alpha: true, localClippingEnabled: true }}>
-          <Environment preset="city" />
+          {isRealistic ? (
+             <Environment preset="apartment" background blur={0.8} />
+          ) : (
+             <Environment preset="city" />
+          )}
           <PerspectiveCamera 
             makeDefault 
             position={[10, 10, 10]} 
@@ -739,12 +817,13 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose, set
             makeDefault
           />
           
-          <ambientLight intensity={0.4} />
+          <ambientLight intensity={isRealistic ? 0.6 : 0.4} />
           <directionalLight 
             position={[10, 20, 15]} 
-            intensity={1.2} 
+            intensity={isRealistic ? 2.0 : 1.2} 
             castShadow 
             shadow-mapSize={[2048, 2048]}
+            shadow-bias={-0.0001}
           />
 
           {isSlicing && (
@@ -811,6 +890,7 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose, set
           />
           
           <group>
+            <ReferencePlan entities={entities} />
             <SceneAutoFit entities={bimEntities} resetTrigger={resetTrigger} />
             {bimEntities.map((entity) => {
               let points: Point[] = [];
@@ -835,6 +915,7 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose, set
               const isSelected = selectedEntity?.id === entity.id;
               const isHovered = hoveredId === entity.id;
               const color = isSelected ? '#06b6d4' : (entity.color || (isMuro ? '#f8fafc' : '#3b82f6'));
+              const entityOpacity = transparentEntities.has(entity.id) ? 0.3 : ((entity as any).cadVisible === false ? 0.05 : 1);
 
               return (
                 <group 
@@ -854,9 +935,9 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose, set
                     
                     if (isMuro) {
                       return points.length >= 3 && (entity as any).type === 'hatch' ? (
-                        <Room points={points} holes={e.holes} height={heightValue} color={color} areaType="muro" baseZ={baseZ} clippingPlanes={clippingPlanes} />
+                        <Room points={points} holes={e.holes} height={heightValue} color={color} areaType="muro" baseZ={baseZ} clippingPlanes={clippingPlanes} opacity={entityOpacity} />
                       ) : (
-                        <Wall points={points} height={heightValue} width={e.bimWidth} color={color} baseZ={baseZ} clippingPlanes={clippingPlanes} />
+                        <Wall points={points} height={heightValue} width={e.bimWidth} color={color} baseZ={baseZ} clippingPlanes={clippingPlanes} opacity={entityOpacity} />
                       );
                     } else if (entity.bimType === 'room') {
                       return (
@@ -868,10 +949,11 @@ export const BIM3DViewer: React.FC<BIM3DViewerProps> = ({ entities, onClose, set
                           name={e.bimName}
                           baseZ={baseZ}
                           clippingPlanes={clippingPlanes}
+                          opacity={entityOpacity}
                         />
                       );
                     } else if (entity.bimType === 'door' || entity.bimType === 'window') {
-                      return <BIMSymbol entity={{ ...entity, color, isHovered }} clippingPlanes={clippingPlanes} />;
+                      return <BIMSymbol entity={{ ...entity, color, isHovered }} clippingPlanes={clippingPlanes} opacity={entityOpacity} />;
                     }
                     return null;
                   })()}
