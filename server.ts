@@ -13,20 +13,23 @@ async function startServer() {
   // MILITARY SECURITY: IP WHITELISTING MIDDLEWARE
   // ==========================================
   app.use((req, res, next) => {
-    // In produzione leggi le variabili d'ambiente. Se mancano, usa un fallback sicuro.
-    const whitelistEnabled = process.env.ENABLE_IP_WHITELIST === 'true';
+    // Di default la whitelist è ATTIVATA, a meno che non venga esplicitamente disabilitata
+    const whitelistEnabled = process.env.ENABLE_IP_WHITELIST !== 'false';
     if (!whitelistEnabled) {
-      return next(); // Bypass se la whitelist non è attiva
+      return next(); 
     }
 
-    // Estrai la lista di IP consentiti dalla variabile d'ambiente
+    // Estrai la lista di IP consentiti dalla variabile d'ambiente (fallback all'IP dell'ufficio)
     const allowedIps = (process.env.ALLOWED_IPS || "82.180.59.135")
       .split(',')
       .map(ip => ip.trim());
 
-    // Ottieni l'IP del client (essenziale per ambienti dietro reverse proxy come nginx / Cloud Run)
+    // Ottieni l'IP del client
     const rawIp = req.header('x-forwarded-for') || req.socket.remoteAddress || "";
-    const clientIp = rawIp.split(',')[0].trim(); // Prendi il primo IP se c'è una catena di forwarding
+    const clientIp = rawIp.split(',')[0].trim(); 
+
+    // Log per debug lato server (visibile nei log del backend)
+    console.log(`[SECURITY CHECK] Connessione in ingresso da IP: ${clientIp} - Raw: ${rawIp}`);
 
     // Controlla se l'IP è autorizzato
     if (allowedIps.includes(clientIp) || clientIp === "::1" || clientIp === "127.0.0.1") {
