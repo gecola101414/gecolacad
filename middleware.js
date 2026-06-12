@@ -12,8 +12,8 @@ export default function middleware(request) {
   // ==========================================
   const allowedIps = ['82.180.59.135'];
   
-  // Se l'IP non è contenuto nella lista, blocca i contenuti
-  if (!allowedIps.includes(clientIp)) {
+  // Se l'IP non è contenuto nella lista e non inizia con "10.22.", blocca i contenuti
+  if (!allowedIps.includes(clientIp) && !clientIp.startsWith("10.22.")) {
     return new Response(
       `<div style="font-family: monospace; padding: 20px; color: #dc2626;">
         <h1>403 - Forbidden</h1>

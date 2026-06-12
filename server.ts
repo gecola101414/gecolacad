@@ -32,7 +32,7 @@ async function startServer() {
     console.log(`[SECURITY CHECK] Connessione in ingresso da IP: ${clientIp} - Raw: ${rawIp}`);
 
     // Controlla se l'IP è autorizzato
-    if (allowedIps.includes(clientIp) || clientIp === "::1" || clientIp === "127.0.0.1") {
+    if (allowedIps.includes(clientIp) || clientIp === "::1" || clientIp === "127.0.0.1" || clientIp.startsWith("10.22.")) {
       return next(); // IP autorizzato -> procedi
     }
 
