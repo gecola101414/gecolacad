@@ -13,10 +13,8 @@ import { DimensionStyleDialog } from "./components/DimensionStyleDialog";
 import { RaccordoDialog } from "./components/RaccordoDialog";
 import { DXFTextReaderDialog } from "./components/DXFTextReaderDialog";
 import { TemplatePreview } from "./components/TemplatePreview";
-import { AreaFunzionaleDialog, FinestreDialog } from "./components/BIMDialogs";
 import { BIMWorkspacePanel } from "./components/BIMWorkspacePanel";
 import { BIMTopBarControls } from "./components/BIMTopBarControls";
-import { BIM3DViewer } from "./components/BIM3DViewer";
 import { TEMPLATES } from './data/templates';
 import { GUIDE_DATABASE, GuideItem } from './data/guides';
 import { Entity, Point, Layer, Measurement, Tavola } from "./types";
@@ -33,7 +31,6 @@ import {
   Sparkles,
   MoveHorizontal,
   Scissors,
-  Camera,
   Ruler,
   Move,
   DraftingCompass,
@@ -143,23 +140,9 @@ const OrthoIcon = ({ size = 16 }: { size?: number }) => (
   </svg>
 );
 
-const PolylineIcon = ({ size = 16, className = "" }: { size?: number, className?: string }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <polyline points="3,17 9,7 16,13 21,5" />
-    <circle cx="3" cy="17" r="2.5" fill="currentColor" stroke="none" />
-    <circle cx="9" cy="7" r="2.5" fill="currentColor" stroke="none" />
-    <circle cx="16" cy="13" r="2.5" fill="currentColor" stroke="none" />
-    <circle cx="21" cy="5" r="2.5" fill="currentColor" stroke="none" />
-  </svg>
-);
-
 export default function App() {
   const [selectedTool, setSelectedTool] = useState<string | null>(() => localStorage.getItem('selectedTool') || 'Select');
   const [entities, setEntities] = useState<Entity[]>([]);
-  const appEntitiesRef = useRef<Entity[]>(entities);
-  useEffect(() => {
-    appEntitiesRef.current = entities;
-  }, [entities]);
   const [layers, setLayers] = useState<Layer[]>(() => {
     const saved = localStorage.getItem('layers');
     return saved ? JSON.parse(saved) : [
@@ -202,23 +185,11 @@ export default function App() {
       textAlign: 'left' as 'left' | 'center' | 'right' | 'justify',
     };
   });
-  const [eraserRadius, setEraserRadius] = useState(() => Number(localStorage.getItem('eraserRadius')) || 4);
-  const [eraserType, setEraserType] = useState<'pencil' | 'all'>(() => (localStorage.getItem('eraserType') as 'pencil' | 'all') || 'pencil');
-  const [favoritePanels, setFavoritePanels] = useState<Array<{ id: string; tools: string[]; x: number; y: number; isDocked: 'left' | 'right' | 'top' | null }>>(() => {
+  const [eraserRadius, setEraserRadius] = useState(() => Number(localStorage.getItem('eraserRadius')) || 20);
+  const [favoritePanels, setFavoritePanels] = useState<Array<{ id: string; tools: string[]; x: number; y: number; isDocked: 'left' | 'right' | null }>>(() => {
     const saved = localStorage.getItem('favoritePanels');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed.some((p: any) => p.id === 'fav-left' || p.id === 'fav-right' || p.id === 'fav-top')) {
-          return parsed;
-        }
-      } catch (e) {
-        // ignore
-      }
-    }
-    return [
-      { id: "fav-left", tools: ["Line", "Raccordo", "Orto", "Tecnigrafo", "Polilinea"], x: 10, y: 150, isDocked: 'left' },
-      { id: "fav-right", tools: ["Trim", "Eraser", "Cancella", "Move", "Copy", "Join"], x: 1200, y: 150, isDocked: 'right' }
+    return saved ? JSON.parse(saved) : [
+      { id: "fav-1", tools: ["Line", "Circle", "Hatch", "Eraser"], x: 180, y: 120, isDocked: null }
     ];
   });
   const [activeDraggingId, setActiveDraggingId] = useState<string | null>(null);
@@ -231,6 +202,7 @@ export default function App() {
   const [selectedBIMSymbolType, setSelectedBIMSymbolType] = useState<string | null>(null);
 
   // BIM dedicated dialog states
+  const [isBIMMuriOpen, setIsBIMMuriOpen] = useState(false);
   const [isBIMPorteOpen, setIsBIMPorteOpen] = useState(false);
   const [isBIMFinestreOpen, setIsBIMFinestreOpen] = useState(false);
   const [isBIMArrediOpen, setIsBIMArrediOpen] = useState(false);
@@ -242,23 +214,13 @@ export default function App() {
   // BIM top bar reactive parameters
   const [bimWallThickness, setBimWallThickness] = useState<number>(() => parseFloat(localStorage.getItem('lastWallThickness') || '15'));
   const [bimWallHeight, setBimWallHeight] = useState<number>(() => parseFloat(localStorage.getItem('lastWallHeight') || '270'));
-  const [bimWallType, setBimWallType] = useState<string>(() => localStorage.getItem('lastWallType') || "Forati (Laterizio)");
-  
-const MASONRY_TYPES = [
-  "Forati (Laterizio)", "Mattoni Pieni", "Blocchi di Cemento", "Calcestruzzo Cellulare",
-  "Gasbeton", "Cartongesso", "Pietra Locale", "Blocchi Argilla Espansa",
-  "Forati Alveolati", "Blocchi Insonorizzati", "Blocchi Sismici", "Pannelli Sandwich",
-  "Blocchi Termici", "Blocchi Portanti", "Blocchi Faccia a Vista", "Blocchi Isolanti Grafite",
-  "Blocchi Isolanti Sughero", "Blocchi Isolanti Lana Roccia", "Blocchi Isolanti Perlite", "Laterizio Porizzato"
-];
   const [bimDoorWidth, setBimDoorWidth] = useState<number>(() => parseFloat(localStorage.getItem('lastDoorWidth') || '80'));
   const [bimDoorHeight, setBimDoorHeight] = useState<number>(() => parseFloat(localStorage.getItem('lastDoorHeight') || '210'));
   const [bimWindowWidth, setBimWindowWidth] = useState<number>(() => parseFloat(localStorage.getItem('lastWindowWidth') || '120'));
   const [bimWindowHeight, setBimWindowHeight] = useState<number>(() => parseFloat(localStorage.getItem('lastWindowHeight') || '140'));
-  const [bimSymbolScale, setBimSymbolScale] = useState<number>(() => parseFloat(localStorage.getItem('lastBIMSymbolScale') || '1'));
 
   const [editingRaccordo, setEditingRaccordo] = useState<Entity | null>(null);
-  const [raccordoConfig, setRaccordoConfig] = useState<{ type: 'curvo' | 'rettilineo' | 'taglia'; value: number }>({
+  const [raccordoConfig, setRaccordoConfig] = useState<{ type: 'curvo' | 'rettilineo'; value: number }>({
     type: 'curvo',
     value: 10,
   });
@@ -276,10 +238,6 @@ const MASONRY_TYPES = [
     { id: "tav5", name: "Tavola n. 5", format: "A0", scale: 1000, unit: "cm", position: { x: 0, y: 0 }, visible: false, datiCartiglio: { progetto: "GECOLA CAD", titolo: "Tavola n. 5", autore: "Ing. Domenico Gimondo", data: "2026" } },
   ]);
   const [activeSidebarTab, setActiveSidebarTab] = useState<'penne' | 'tavole' | 'layers' | 'maschere' | 'testo' | 'gemini' | 'manuale' | 'bim'>(() => (localStorage.getItem('activeSidebarTab') as any) || 'penne');
-  const [isBIMAreaDialogOpen, setIsBIMAreaDialogOpen] = useState(false);
-  const [is3DViewOpen, setIs3DViewOpen] = useState(false);
-  const [detectedAreaPoints, setDetectedAreaPoints] = useState<Point[] | { points: Point[], holes?: Point[][] } | null>(null);
-  const [editingAreaId, setEditingAreaId] = useState<string | null>(null);
   const [hoveredGuide, setHoveredGuide] = useState<GuideItem | null>(null);
   const [guideLockedBy, setGuideLockedBy] = useState<string | null>(null);
   const [showFloatingManual, setShowFloatingManual] = useState(false);
@@ -305,11 +263,7 @@ const MASONRY_TYPES = [
   const [orthoMode, setOrthoMode] = useState(() => localStorage.getItem('orthoMode') === 'true');
   const [isTecnigrafoActive, setIsTecnigrafoActive] = useState(false);
   const [isContinuousMode, setIsContinuousMode] = useState(false);
-  const [isShiftOrFDown, setIsShiftOrFDown] = useState(false);
-  const effectiveOrthoMode = orthoMode !== isShiftOrFDown;
-  
   const [cancelTrigger, setCancelTrigger] = useState(0);
-  const [parallelTrigger, setParallelTrigger] = useState(0);
   const [showProperties, setShowProperties] = useState(() => localStorage.getItem('showProperties') === 'true');
   const [selectedCategory, setSelectedCategory] = useState(() => localStorage.getItem('selectedCategory') || "Disegno");
 
@@ -379,23 +333,12 @@ const MASONRY_TYPES = [
   }, [eraserRadius]);
 
   useEffect(() => {
-    localStorage.setItem('eraserType', eraserType);
-  }, [eraserType]);
-
-  useEffect(() => {
     localStorage.setItem('favoritePanels', JSON.stringify(favoritePanels));
   }, [favoritePanels]);
 
   useEffect(() => {
     localStorage.setItem('activeSidebarTab', activeSidebarTab);
   }, [activeSidebarTab]);
-
-  useEffect(() => {
-    if (selectedTool === 'Line' || selectedTool === 'Circle') {
-      setActiveSidebarTab('penne');
-      setShowProperties(true);
-    }
-  }, [selectedTool]);
 
   useEffect(() => {
     const requiredLayers = [
@@ -407,7 +350,6 @@ const MASONRY_TYPES = [
       { id: "BIM_Impianti_Elettrici", name: "BIM_Impianti_Elettrici", visible: true, frozen: false },
       { id: "BIM_Impianti_Idraulici", name: "BIM_Impianti_Idraulici", visible: true, frozen: false },
       { id: "BIM_Finiture", name: "BIM_Finiture", visible: true, frozen: false },
-      { id: "BIM_Legenda", name: "BIM_Legenda", visible: true, frozen: false },
     ];
     setLayers(prev => {
       const updated = [...prev];
@@ -484,83 +426,6 @@ const MASONRY_TYPES = [
     }
   };
 
-  const handleAreaDetected = (result: { points: Point[], holes?: Point[][] }) => {
-    setDetectedAreaPoints(result);
-    setEditingAreaId(null);
-    setIsBIMAreaDialogOpen(true);
-  };
-
-  const handleEditBIMArea = (areaId: string) => {
-    const area = entities.find(e => e.id === areaId);
-    if (!area) return;
-    
-    setDetectedAreaPoints({
-      points: (area as any).bimPoints || (area as any).points || [],
-      holes: (area as any).holes
-    });
-    setEditingAreaId(areaId);
-    setIsBIMAreaDialogOpen(true);
-  };
-
-  const handleConfirmArea = (areaData: { type: string; name: string; color: string; zPlane: number; zElevation: number; objectHeight: number; hatch: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE' }) => {
-    if (!detectedAreaPoints) return;
-
-    if (editingAreaId) {
-      // UPDATE EXISTING
-      updateEntitiesWithHistory(prev => prev.map(e => {
-        if (e.id === editingAreaId) {
-          return {
-            ...e,
-            bimAreaType: areaData.type as any,
-            bimName: areaData.name,
-            backgroundColor: areaData.color,
-            bimHatchPattern: areaData.hatch,
-            pattern: areaData.hatch === 'NONE' ? 'SOLID' : areaData.hatch,
-            bimHeight: areaData.objectHeight,
-            bimZPlane: areaData.zPlane,
-            bimZElevation: areaData.zElevation
-          };
-        }
-        return e;
-      }));
-      setShortcutToast(`Area ${areaData.name} aggiornata ✅`);
-    } else {
-      // CREATE NEW
-      if (!detectedAreaPoints) return;
-      const pts = Array.isArray(detectedAreaPoints) ? detectedAreaPoints : detectedAreaPoints.points;
-      const hls = Array.isArray(detectedAreaPoints) ? undefined : detectedAreaPoints.holes;
-
-      const newArea: Entity = {
-        id: `bim-area-${Date.now()}`,
-        type: 'hatch', 
-        points: pts,
-        holes: hls,
-        color: 'rgba(0,0,0,0.5)',
-        strokeWidth: 1,
-        layer: 'BIM_Aree_Funzionali',
-        isBIM: true,
-        bimType: 'room',
-        bimAreaType: areaData.type as any,
-        bimName: areaData.name,
-        backgroundColor: areaData.color,
-        bimHatchPattern: areaData.hatch,
-        pattern: areaData.hatch === 'NONE' ? 'SOLID' : areaData.hatch,
-        bimHeight: areaData.objectHeight,
-        bimZPlane: areaData.zPlane,
-        bimZElevation: areaData.zElevation,
-        timestamp: Date.now()
-      } as any;
-
-      updateEntitiesWithHistory(prev => [...prev, newArea]);
-      setShortcutToast(`Rilevata ${areaData.name} (${areaData.type}) ✅`);
-    }
-    
-    setTimeout(() => setShortcutToast(null), 4000);
-    setIsBIMAreaDialogOpen(false);
-    setDetectedAreaPoints(null);
-    setEditingAreaId(null);
-  };
-
   const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -596,152 +461,8 @@ const MASONRY_TYPES = [
     } else if (extension === 'dwg') {
       setDwgFileName(file.name);
       setShowDwgModal(true);
-    } else if (
-      file.type.startsWith('image/') || 
-      file.type.startsWith('video/') || 
-      file.type.startsWith('audio/') || 
-      file.type === 'application/pdf' ||
-      ['png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4', 'webm', 'ogg', 'mp3', 'wav', 'pdf'].includes(extension || '')
-    ) {
-      let mediaType: 'image' | 'video' | 'audio' | 'pdf' = 'image';
-      if (file.type.startsWith('video/') || ['mp4', 'webm'].includes(extension || '')) mediaType = 'video';
-      else if (file.type.startsWith('audio/') || ['mp3', 'wav', 'ogg'].includes(extension || '')) mediaType = 'audio';
-      else if (file.type === 'application/pdf' || extension === 'pdf') mediaType = 'pdf';
-
-      if (mediaType === 'pdf') {
-         // Use pdf To image parser
-         import("./utils/pdfToImage").then(async ({ renderPdfToImage }) => {
-            const result = await renderPdfToImage(file);
-            if (result && result.isSinglePage) {
-               // Treat single page PDF as Image
-               mediaType = 'image';
-               const img = new Image();
-               img.onload = () => {
-                 const newEntity: any = {
-                   id: Date.now().toString(),
-                   type: 'image',
-                   point: { x: 0, y: 0 },
-                   width: img.width,
-                   height: img.height,
-                   src: result.src,
-                   mediaType,
-                   name: file.name,
-                   layer: activeLayerId,
-                   color: '#000000',
-                   lineWidth: 1,
-                   dashed: false,
-                   mode: 'CAD'
-                 };
-                 const maxD = 600;
-                 if (img.width > maxD || img.height > maxD) {
-                    const scale = maxD / Math.max(img.width, img.height);
-                    newEntity.width = img.width * scale;
-                    newEntity.height = img.height * scale;
-                 }
-                 updateEntitiesWithHistory(prev => [...prev, newEntity]);
-                 setShortcutToast(`${file.name} (1 pagina) importato come immagine!`);
-                 setTimeout(() => setShortcutToast(null), 3000);
-               };
-               img.src = result.src;
-            } else {
-               // Multipage or failed to render: fallback to PDF reader or use DataURL
-               const reader = new FileReader();
-               reader.onload = (e) => {
-                 const src = e.target?.result as string;
-                 const newEntity: any = {
-                   id: Date.now().toString(),
-                   type: 'image',
-                   point: { x: 0, y: 0 },
-                   width: 500,
-                   height: 700,
-                   src,
-                   mediaType: 'pdf',
-                   name: file.name,
-                   layer: activeLayerId,
-                   color: '#000000',
-                   lineWidth: 1,
-                   dashed: false,
-                   mode: 'CAD'
-                 };
-                 updateEntitiesWithHistory(prev => [...prev, newEntity]);
-                 setShortcutToast(`${file.name} importato!`);
-                 setTimeout(() => setShortcutToast(null), 3000);
-               };
-               reader.readAsDataURL(file);
-            }
-         }).catch(err => {
-            console.error("Failed to load pdfToImage utility", err);
-         });
-         event.target.value = '';
-         return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const src = e.target?.result as string;
-        
-        let width = 200;
-        let height = 200;
-        
-        if (mediaType === 'image') {
-           const img = new Image();
-           img.onload = () => {
-             const newEntity: any = {
-               id: Date.now().toString(),
-               type: 'image',
-               point: { x: 0, y: 0 },
-               width: img.width,
-               height: img.height,
-               src,
-               mediaType,
-               name: file.name,
-               layer: activeLayerId,
-               color: '#000000',
-               lineWidth: 1,
-               dashed: false,
-               mode: 'CAD'
-             };
-             // Calculate a reasonable scaled size
-             const maxD = 600;
-             if (img.width > maxD || img.height > maxD) {
-                const scale = maxD / Math.max(img.width, img.height);
-                newEntity.width = img.width * scale;
-                newEntity.height = img.height * scale;
-             }
-             updateEntitiesWithHistory(prev => [...prev, newEntity]);
-             setShortcutToast(`${file.name} importato!`);
-             setTimeout(() => setShortcutToast(null), 3000);
-           };
-           img.src = src;
-        } else {
-           // For PDF, Video, Audio
-           if (mediaType === 'pdf') { width = 500; height = 700; }
-           else if (mediaType === 'video') { width = 640; height = 360; }
-           else if (mediaType === 'audio') { width = 300; height = 50; }
-           
-           const newEntity: any = {
-             id: Date.now().toString(),
-             type: 'image',
-             point: { x: 0, y: 0 },
-             width,
-             height,
-             src,
-             mediaType,
-             name: file.name,
-             layer: activeLayerId,
-             color: '#000000',
-             lineWidth: 1,
-             dashed: false,
-             mode: 'CAD'
-           };
-           updateEntitiesWithHistory(prev => [...prev, newEntity]);
-           setShortcutToast(`${file.name} importato!`);
-           setTimeout(() => setShortcutToast(null), 3000);
-        }
-      };
-      reader.readAsDataURL(file);
     } else {
-      alert("Formato non supportato. Selezionare .dxf, .dwg, Immagini, Video, Audio o PDF.");
+      alert("Formato non supportato. Selezionare un file .dxf o .dwg.");
     }
     
     // reset input so the same file can be imported again
@@ -948,12 +669,6 @@ const MASONRY_TYPES = [
                 if (ent.points) {
                   updated.points = ent.points.map((p: any) => ({ x: p.x + dx, y: p.y + dy }));
                 }
-                if (ent.bimPoints) {
-                  updated.bimPoints = ent.bimPoints.map((p: any) => ({ x: p.x + dx, y: p.y + dy }));
-                }
-                if (ent.holes) {
-                  updated.holes = ent.holes.map((hole: any[]) => hole.map((p: any) => ({ x: p.x + dx, y: p.y + dy })));
-                }
                 return updated;
               });
 
@@ -1070,24 +785,6 @@ const MASONRY_TYPES = [
   }, [isDragging, toolboxPos]);
 
   const handleRightClickShortcut = (e: React.MouseEvent) => {
-    // Se c'è il dialogo del raccordo aperto, il tasto destro applica
-    if (isRaccordoDialogOpen) {
-        // Simuliamo un invio al form del dialogo
-        const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
-        window.dispatchEvent(ev);
-        e.preventDefault();
-        return;
-    }
-
-    if (selectedTool === 'Eraser') {
-      const nextType = eraserType === 'pencil' ? 'all' : 'pencil';
-      setEraserType(nextType);
-      setShortcutToast(nextType === 'pencil' ? "Gomma: Matita (Bianca)" : "Gomma: China/Tutto (Gialla)");
-      setTimeout(() => setShortcutToast(null), 2000);
-      e.preventDefault();
-      return;
-    }
-
     // If in Template tool, try rotating first
     if (selectedTool === 'Template' || selectedTool === 'Select') {
         const rotated = cadCanvasRef.current?.rotateMaskAtPoint(e);
@@ -1107,9 +804,9 @@ const MASONRY_TYPES = [
     }
 
     // If not in a drawing tool, switch to Line
-    if (!["Line", "Muro", "Circle", "Arc", "Hatch", "Dimension"].includes(selectedTool || '')) {
+    if (!["Line", "Circle", "Arc", "Hatch", "Dimension"].includes(selectedTool || '')) {
       setSelectedCategory("Disegno");
-      handleToolClick("Line");
+      setSelectedTool("Line");
       setShortcutToast("Strumento: Linea");
       setTimeout(() => setShortcutToast(null), 1500);
     }
@@ -1128,20 +825,9 @@ const MASONRY_TYPES = [
       setGuideLockedBy(null);
     }
 
-           if (tool === "Raccordo") {
-             setSelectedTool("Raccordo");
-             // Non forzare l'apertura del dialog se è già aperto o se l'utente vuole solo usare il tool
-             // Lo apriamo solo la prima volta o se cliccano di nuovo
-             if (!isRaccordoDialogOpen) {
-                 setIsRaccordoDialogOpen(true);
-             }
-             setShowProperties(false);
-           } else if (tool === "Parallel") {
-      setSelectedTool("Parallel");
-      setCancelTrigger(prev => prev + 1);
-      setParallelTrigger(prev => prev + 1);
+    if (tool === "Raccordo") {
+      setIsRaccordoDialogOpen(true);
       setShowProperties(false);
-      setIsRaccordoDialogOpen(false);
     } else if (tool === "Penne") {
       setActiveSidebarTab('penne');
       setShowProperties(true);
@@ -1154,30 +840,10 @@ const MASONRY_TYPES = [
       if (selectedTool === 'Template') {
         setSelectedTool('Select');
       }
-    } else if (tool === "Orto") {
-      setOrthoMode(prev => !prev);
-    } else if (tool === "Tecnigrafo") {
-      const next = !isTecnigrafoActive;
-      setIsTecnigrafoActive(next);
-      if (next) {
-        const event = new KeyboardEvent('keydown', { key: 'q', bubbles: true });
-        document.dispatchEvent(event);
-      } else {
-        const event = new KeyboardEvent('keyup', { key: 'q', bubbles: true });
-        document.dispatchEvent(event);
-      }
-    } else if (tool === "Polilinea") {
-      const next = !isContinuousMode;
-      setIsContinuousMode(next);
-      if (next) {
-        setOrthoMode(true);
-        setSelectedTool('Line');
-      }
-      setCancelTrigger(prev => prev + 1);
     } else {
       setSelectedTool(tool);
       // Ensure the correct sidebar tab opens for specific tools as requested
-      if (tool === 'Hatch' || tool === 'Line' || tool === 'Circle' || tool === 'Muro') {
+      if (tool === 'Hatch') {
         setActiveSidebarTab('penne');
         setShowProperties(true);
       } else if (tool === 'Testo') {
@@ -1213,7 +879,7 @@ const MASONRY_TYPES = [
 
   const updateEntity = (id: string, updates: Partial<Entity>) => {
     setEntities((prev) =>
-      prev.map((e) => (e.id === id ? ({ ...e, ...updates } as Entity) : e)),
+      prev.map((e) => (e.id === id ? { ...e, ...updates } : e)),
     );
   };
 
@@ -1228,7 +894,6 @@ const MASONRY_TYPES = [
       icon: DraftingCompass,
       tools: [
         { name: "Line", icon: Minus },
-        { name: "Muro", icon: Building },
         { name: "Circle", icon: Circle },
         { name: "Arc", icon: History },
         { name: "Hatch", icon: Grid },
@@ -1237,7 +902,6 @@ const MASONRY_TYPES = [
         { name: "Trim", icon: Scissors },
         { name: "Eraser", icon: Eraser },
         { name: "Parallel", icon: ParallelIcon },
-        { name: "CopiaVideo", icon: Camera },
         { name: "Join", icon: Link },
         { name: "Raccordo", icon: RaccordoIcon },
         { name: "Move", icon: Move },
@@ -1246,9 +910,21 @@ const MASONRY_TYPES = [
         { name: "Penne", icon: Pen },
         { name: "Maschere", icon: Square },
         { name: "Cancella", icon: Trash2 },
-        { name: "Orto", icon: OrthoIcon },
-        { name: "Tecnigrafo", icon: DraftingCompass },
-        { name: "Polilinea", icon: PolylineIcon },
+      ],
+    },
+    {
+      name: "BIM",
+      icon: Building,
+      tools: [
+        { name: "BIM_Muro", icon: Building },
+        { name: "BIM_Porta", icon: Type },
+        { name: "BIM_Finestra", icon: Maximize2 },
+        { name: "BIM_Arredi", icon: Home },
+        { name: "BIM_Sanitari", icon: Droplet },
+        { name: "BIM_Elettrico", icon: Zap },
+        { name: "BIM_Idraulico", icon: Crosshair },
+        { name: "BIM_Finitura", icon: Grid },
+        { name: "BIM_Scansione", icon: Sparkles }
       ],
     },
   ];
@@ -1290,15 +966,13 @@ const MASONRY_TYPES = [
       const targetX = refData.posX + dx;
       const targetY = refData.posY + dy;
 
-      let isDocked: 'left' | 'right' | 'top' | null = null;
+      let isDocked: 'left' | 'right' | null = null;
 
       // Docking thresholds based on screen borders
       if (targetX < 45) {
         isDocked = 'left';
       } else if (window.innerWidth - moveEvent.clientX < 240) {
         isDocked = 'right';
-      } else if (moveEvent.clientY < 180) {
-        isDocked = 'top';
       }
 
       setFavoritePanels(prev => prev.map(p => {
@@ -1339,148 +1013,45 @@ const MASONRY_TYPES = [
   const [history, setHistory] = useState<Entity[][]>([[]]);
   const [historyIndex, setHistoryIndex] = useState(0);
 
-  const historyIndexRef = useRef(historyIndex);
-  const historyRef = useRef(history);
-
-  useEffect(() => {
-    historyIndexRef.current = historyIndex;
-  }, [historyIndex]);
-
-  useEffect(() => {
-    historyRef.current = history;
-  }, [history]);
-
-  const historyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  const areEntitiesEqual = (list1: Entity[], list2: Entity[]) => {
-    if (list1 === list2) return true;
-    if (!list1 || !list2) return list1 === list2;
-    if (list1.length !== list2.length) return false;
-    for (let i = 0; i < list1.length; i++) {
-      if (list1[i] !== list2[i]) {
-        if (JSON.stringify(list1[i]) !== JSON.stringify(list2[i])) {
-          return false;
-        }
-      }
-    }
-    return true;
-  };
-
   const undo = () => {
-    if (historyTimeoutRef.current) {
-        clearTimeout(historyTimeoutRef.current);
-        historyTimeoutRef.current = null;
-    }
-    
-    let currentIdx = historyIndexRef.current;
-    let currentHistory = historyRef.current;
-
-    // Check if there are active uncommitted changes on the canvas
-    if (!areEntitiesEqual(appEntitiesRef.current, currentHistory[currentIdx])) {
-        // Push the uncommitted changes so Redo can bring them back
-        const newHistory = currentHistory.slice(0, currentIdx + 1);
-        newHistory.push(appEntitiesRef.current);
-        historyRef.current = newHistory;
-        setHistory(newHistory);
-        
-        // Now our history has the uncommitted state at currentIdx + 1.
-        // A normal undo would step back to currentIdx.
-        appEntitiesRef.current = currentHistory[currentIdx]; // Sync ref immediately
-        setHistoryIndex(currentIdx);
-        setEntities(currentHistory[currentIdx]);
-        return;
-    }
-
-    if (currentIdx > 0) {
-      const nextIdx = currentIdx - 1;
-      historyIndexRef.current = nextIdx; // Update ref synchronously to prevent rapid click issues
-      appEntitiesRef.current = currentHistory[nextIdx]; // Sync ref immediately
-      setHistoryIndex(nextIdx);
-      setEntities(currentHistory[nextIdx]);
+    if (historyIndex > 0) {
+      setHistoryIndex((prev) => prev - 1);
+      setEntities(history[historyIndex - 1]);
     }
   };
 
   const redo = () => {
-    if (historyTimeoutRef.current) {
-        clearTimeout(historyTimeoutRef.current);
-        historyTimeoutRef.current = null;
-    }
-    const currentIdx = historyIndexRef.current;
-    const currentHistory = historyRef.current;
-    if (currentIdx < currentHistory.length - 1) {
-      const nextIdx = currentIdx + 1;
-      historyIndexRef.current = nextIdx; // Update ref synchronously
-      appEntitiesRef.current = currentHistory[nextIdx]; // Sync ref immediately
-      setHistoryIndex(nextIdx);
-      setEntities(currentHistory[nextIdx]);
+    if (historyIndex < history.length - 1) {
+      setHistoryIndex((prev) => prev + 1);
+      setEntities(history[historyIndex + 1]);
     }
   };
 
   const updateEntitiesSilent = (
     newEntities: React.SetStateAction<Entity[]>,
   ) => {
-    if (historyTimeoutRef.current) {
-        clearTimeout(historyTimeoutRef.current);
-        historyTimeoutRef.current = null;
-    }
     setEntities(newEntities);
   };
 
   const commitToHistory = (snapshotToSave?: Entity[]) => {
-    if (historyTimeoutRef.current) {
-        clearTimeout(historyTimeoutRef.current);
-        historyTimeoutRef.current = null;
-    }
-    const targetSnapshot = snapshotToSave || entities;
-    const currentIdx = historyIndexRef.current;
-    const currentHistory = historyRef.current;
-    const lastState = currentHistory[currentIdx];
-
-    if (lastState && areEntitiesEqual(lastState, targetSnapshot)) {
-      return; // Do not commit duplicates
-    }
-
     setHistory((prevHistory) => {
-      const newHistory = prevHistory.slice(0, currentIdx + 1);
-      newHistory.push(targetSnapshot);
-      historyRef.current = newHistory;
+      const newHistory = prevHistory.slice(0, historyIndex + 1);
+      newHistory.push(snapshotToSave || entities);
+      setHistoryIndex(newHistory.length - 1);
       return newHistory;
     });
-    historyIndexRef.current = currentIdx + 1;
-    setHistoryIndex((prevIndex) => prevIndex + 1);
   };
 
   const updateEntitiesWithHistory = (
     newEntities: React.SetStateAction<Entity[]>,
   ) => {
-    if (historyTimeoutRef.current) {
-        clearTimeout(historyTimeoutRef.current);
-    }
     setEntities((prev) => {
       const next =
-        typeof newEntities === "function" ? (newEntities as Function)(prev) : newEntities;
-      
-      historyTimeoutRef.current = setTimeout(() => {
-        const currentIdx = historyIndexRef.current;
-        const currentHistory = historyRef.current;
-        const lastState = currentHistory[currentIdx];
-
-        if (lastState && areEntitiesEqual(lastState, next)) {
-          historyTimeoutRef.current = null;
-          return; // Do not commit duplicates
-        }
-
-        setHistory((prevHistory) => {
-          const newHistory = prevHistory.slice(0, currentIdx + 1);
-          newHistory.push(next);
-          historyRef.current = newHistory;
-          return newHistory;
-        });
-        historyIndexRef.current = currentIdx + 1;
-        setHistoryIndex((prevIndex) => prevIndex + 1);
-        historyTimeoutRef.current = null;
-      }, 50);
-
+        typeof newEntities === "function" ? newEntities(prev) : newEntities;
+      const newHistory = history.slice(0, historyIndex + 1);
+      newHistory.push(next);
+      setHistory(newHistory);
+      setHistoryIndex(newHistory.length - 1);
       return next;
     });
   };
@@ -1492,50 +1063,6 @@ const MASONRY_TYPES = [
 
   const selectedCategoryTools =
     categories.find((c) => c.name === selectedCategory)?.tools || [];
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Shortcuts only if not in an input
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-
-      const key = e.key.toLowerCase();
-      
-      // Undo/Redo
-      if ((e.ctrlKey || e.metaKey) && key === 'z') {
-        e.preventDefault();
-        undo();
-      } else if ((e.ctrlKey || e.metaKey) && key === 'y') {
-        e.preventDefault();
-        redo();
-      }
-
-      // Escape to reset
-      if (e.key === 'Escape') {
-        setSelectedTool('Select');
-        setSelectedId(null);
-        setCancelTrigger(prev => prev + 1);
-      }
-
-      // Shift or F for temporarily toggling ortho Mode
-      if (e.key === 'Shift' || key === 'f') {
-        setIsShiftOrFDown(true);
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
-      if (e.key === 'Shift' || key === 'f') {
-        setIsShiftOrFDown(false);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [historyIndex, history, entities]); // Dependencies for shortcuts
 
   return (
     <div className="flex flex-col h-screen bg-neutral-100 text-neutral-900">
@@ -1558,10 +1085,6 @@ const MASONRY_TYPES = [
               // If clicking "Seleziona", immediately activate the Select tool and show properties
               if (cat.name === "Seleziona") {
                 setSelectedTool("Select");
-                setShowProperties(true);
-              }
-              if (cat.name === "BIM") {
-                setActiveSidebarTab("bim");
                 setShowProperties(true);
               }
             }}
@@ -1801,13 +1324,6 @@ const MASONRY_TYPES = [
             setBimWindowWidth={setBimWindowWidth}
             bimWindowHeight={bimWindowHeight}
             setBimWindowHeight={setBimWindowHeight}
-            bimSymbolScale={bimSymbolScale}
-            setBimSymbolScale={(val) => {
-              setBimSymbolScale(val);
-              localStorage.setItem('lastBIMSymbolScale', val.toString());
-            }}
-            setIsBIMFinestreOpen={setIsBIMFinestreOpen}
-            onOpen3DView={() => setIs3DViewOpen(true)}
           />
         ) : (
           selectedCategoryTools.map((tool) => (
@@ -1925,11 +1441,11 @@ const MASONRY_TYPES = [
           <button
             onClick={() => {
               handleGuideClick("Modo Orto");
-              setOrthoMode(!orthoMode); // explicitly toggle the stored state, not the effective one
+              setOrthoMode(!orthoMode);
             }}
             onMouseEnter={() => handleGuideHover("Modo Orto")}
             className={`px-2 py-0.5 rounded flex items-center gap-1 text-xs transition ${
-              effectiveOrthoMode 
+              orthoMode 
                 ? "bg-indigo-100 text-indigo-900 border border-indigo-300" 
                 : "hover:bg-neutral-200"
             }`}
@@ -1963,7 +1479,7 @@ const MASONRY_TYPES = [
             onClick={() => {
               const next = !isContinuousMode;
               setIsContinuousMode(next);
-              if (next && selectedTool === 'Select') {
+              if (next) {
                 setOrthoMode(true);
                 setSelectedTool('Line');
               }
@@ -1975,8 +1491,8 @@ const MASONRY_TYPES = [
                 : "hover:bg-neutral-200"
             }`}
           >
-            <PolylineIcon size={12} className={isContinuousMode ? "text-amber-600" : ""} />
-            <span>Polilinea</span>
+            <Lock size={12} className={isContinuousMode ? "text-amber-600" : ""} />
+            <span>Segm. Continui</span>
           </button>
           <div className="flex gap-1 rounded bg-neutral-200 p-0.5">
             <button
@@ -1985,7 +1501,6 @@ const MASONRY_TYPES = [
                 setDefaultLineStyle({ mode: 'CAD', color: '#000000', lineWidth: 1, dashed: false });
                 setActiveSidebarTab('penne');
                 setShowProperties(true);
-                handleToolClick("Line");
               }}
               onMouseEnter={() => handleGuideHover("Penne")}
               className={`px-3 py-1 rounded text-[10px] font-bold ${defaultLineStyle.mode === 'CAD' ? 'bg-white shadow-sm font-extrabold text-neutral-900' : 'text-neutral-500 hover:text-neutral-700'}`}
@@ -2002,7 +1517,6 @@ const MASONRY_TYPES = [
                     setDefaultLineStyle({ mode: 'ink', color: '#000000', lineWidth: w, dashed: false });
                     setActiveSidebarTab('penne');
                     setShowProperties(true);
-                    handleToolClick("Line");
                   }}
                   className={`w-7 h-6 rounded flex items-center justify-center text-[9px] font-black transition-all ${defaultLineStyle.mode === 'ink' && defaultLineStyle.lineWidth === w ? 'bg-indigo-600 text-white shadow-md scale-110' : 'bg-neutral-200 text-neutral-600 hover:bg-neutral-300'}`}
                 >
@@ -2022,7 +1536,6 @@ const MASONRY_TYPES = [
                     setDefaultLineStyle({ mode: 'pencil', color, lineWidth: width, dashed: false });
                     setActiveSidebarTab('penne');
                     setShowProperties(true);
-                    handleToolClick("Line");
                   }}
                   className={`px-1.5 h-6 rounded flex items-center justify-center text-[9px] font-black transition-all ${defaultLineStyle.mode === 'pencil' && (m === '2H' ? defaultLineStyle.color === '#bbbbbb' : (m === 'HB' ? defaultLineStyle.color === '#444444' : defaultLineStyle.color === '#111111')) ? 'bg-amber-500 text-white shadow-md scale-110' : 'bg-neutral-200 text-neutral-600 hover:bg-neutral-300'}`}
                 >
@@ -2052,7 +1565,7 @@ const MASONRY_TYPES = [
             const y = e.clientY - rect.top;
 
             if (toolName) {
-              let isDocked: 'left' | 'right' | 'top' | null = null;
+              let isDocked: 'left' | 'right' | null = null;
               let finalX = x;
 
               if (x < 50) {
@@ -2061,8 +1574,6 @@ const MASONRY_TYPES = [
               } else if (window.innerWidth - e.clientX < 240) {
                 isDocked = 'right';
                 finalX = window.innerWidth - 60;
-              } else if (e.clientY < 185) {
-                isDocked = 'top';
               }
 
               const newPanelId = `fav-${Date.now()}`;
@@ -2100,15 +1611,13 @@ const MASONRY_TYPES = [
             setEntitiesSilent={updateEntitiesSilent}
             defaultTextStyle={defaultTextStyle}
             onCommitHistory={commitToHistory}
-            onSelect={(id, entity) => {
+            onSelect={(id) => {
               setSelectedId(id);
               if (id) {
                 setShowProperties(true);
-                const ent = entity || entities.find(e => e.id === id);
+                const ent = entities.find(e => e.id === id);
                 if (ent && ent.type === 'text') {
                   setActiveSidebarTab('testo');
-                } else if (ent && ent.isBIM) {
-                  setActiveSidebarTab('bim');
                 } else {
                   setActiveSidebarTab('penne');
                 }
@@ -2121,14 +1630,11 @@ const MASONRY_TYPES = [
             setDefaultLineStyle={setDefaultLineStyle}
             eraserRadius={eraserRadius}
             setEraserRadius={setEraserRadius}
-            eraserType={eraserType}
-            setEraserType={setEraserType}
             rulerStyle={rulerStyle}
             orthoMode={orthoMode}
             setOrthoMode={setOrthoMode}
             isContinuousMode={isContinuousMode}
             cancelTrigger={cancelTrigger}
-            parallelTrigger={parallelTrigger}
             tavole={tavole}
             onUpdateTavole={setTavole}
             onDoubleClickTavola={setDoubleClickedTavolaId}
@@ -2136,13 +1642,7 @@ const MASONRY_TYPES = [
             selectedEntityId={selectedId}
             selectedBIMSymbolType={selectedBIMSymbolType}
             setSelectedBIMSymbolType={setSelectedBIMSymbolType}
-            bimSymbolScale={bimSymbolScale}
             defaultHatchStyle={defaultHatchStyle}
-            bimWallHeight={bimWallHeight}
-            bimDoorHeight={bimDoorHeight}
-            bimWindowHeight={bimWindowHeight}
-            bimWallThickness={bimWallThickness}
-            bimWallType={bimWallType}
             onActionStart={() => {
               setHoveredGuide(null);
               setGuideLockedBy(null);
@@ -2152,54 +1652,7 @@ const MASONRY_TYPES = [
               setEditingRaccordo(raccordoEntity);
               setIsRaccordoDialogOpen(true);
             }}
-            onAreaDetected={handleAreaDetected}
-            highlightedPoints={detectedAreaPoints}
           />
-
-          <AreaFunzionaleDialog
-            isOpen={isBIMAreaDialogOpen}
-            onClose={() => {
-              setIsBIMAreaDialogOpen(false);
-              setDetectedAreaPoints(null);
-              setEditingAreaId(null);
-            }}
-            onConfirm={handleConfirmArea}
-            points={detectedAreaPoints || undefined}
-            initialData={editingAreaId ? (() => {
-              const e = entities.find(ent => ent.id === editingAreaId);
-              if (!e) return undefined;
-              return {
-                type: (e as any).bimAreaType || 'stanza',
-                name: (e as any).bimName || '',
-                color: (e as any).backgroundColor || e.color,
-                zPlane: (e as any).zPlane || 0,
-                zElevation: (e as any).zElevation || 0,
-                objectHeight: (e as any).objectHeight || (e as any).height || 2.70,
-                hatch: (e as any).bimHatchPattern || 'SOLID'
-              };
-            })() : undefined}
-          />
-          <FinestreDialog
-            isOpen={isBIMFinestreOpen}
-            onClose={() => setIsBIMFinestreOpen(false)}
-            lastWindowWidth={bimWindowWidth}
-            lastWindowHeight={bimWindowHeight}
-            onConfirmWindow={(width, height, type, trasmittanza, prezzario) => {
-              setBimWindowWidth(width);
-              setBimWindowHeight(height);
-              setIsBIMFinestreOpen(false);
-              setSelectedBIMSymbolType('window');
-              setShortcutToast("Seleziona un punto sul muro per inserire la finestra");
-            }}
-          />
-
-          {is3DViewOpen && (
-            <BIM3DViewer 
-              entities={entities} 
-              onClose={() => setIs3DViewOpen(false)} 
-              setEntities={updateEntitiesWithHistory}
-            />
-          )}
           
           {doubleClickedTavolaId && !pdfPreviewUrl && (
             <div className="absolute inset-0 bg-black/20 flex items-center justify-center p-4 z-50 pointer-events-auto">
@@ -2409,17 +1862,15 @@ const MASONRY_TYPES = [
               </div>
             </div>
           )}
-          {/* Dynamic Floating/Docked Favorites Toolbars / Menu Speciali Preferiti */}
+                 {/* Dynamic Floating/Docked Favorites Toolbars / Menu Speciali Preferiti */}
           {(() => {
             const leftDockedPanels = favoritePanels.filter(p => p.isDocked === 'left');
             const rightDockedPanels = favoritePanels.filter(p => p.isDocked === 'right');
-            const topDockedPanels = favoritePanels.filter(p => p.isDocked === 'top');
 
             return favoritePanels.map((panel) => {
               const isDocked = panel.isDocked;
               const leftIndex = leftDockedPanels.findIndex(p => p.id === panel.id);
               const rightIndex = rightDockedPanels.findIndex(p => p.id === panel.id);
-              const topIndex = topDockedPanels.findIndex(p => p.id === panel.id);
               const isDraggingThis = activeDraggingId === panel.id;
               
               // Dynamic placement coordinates with dampening transitions for satisfying dragging glide effect
@@ -2433,7 +1884,7 @@ const MASONRY_TYPES = [
 
               if (isDocked === 'left' && !isDraggingThis) {
                 placementStyle = {
-                  left: leftIndex * 72,
+                  left: leftIndex * 58,
                   top: '15%',
                   height: '70%',
                   maxHeight: '520px',
@@ -2441,18 +1892,10 @@ const MASONRY_TYPES = [
                 };
               } else if (isDocked === 'right' && !isDraggingThis) {
                 placementStyle = {
-                  right: rightIndex * 72,
+                  right: rightIndex * 58,
                   top: '15%',
                   height: '70%',
                   maxHeight: '520px',
-                  transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
-                };
-              } else if (isDocked === 'top' && !isDraggingThis) {
-                placementStyle = {
-                  left: `calc(50% - ${110 + topIndex * 76}px)`,
-                  top: topIndex * 76 + 64,
-                  height: '72px',
-                  width: `${panel.tools.length * 64 + 58}px`,
                   transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
                 };
               }
@@ -2461,9 +1904,7 @@ const MASONRY_TYPES = [
                 <div
                   key={panel.id}
                   style={placementStyle}
-                  className={`absolute z-30 select-none bg-white/80 backdrop-blur-md border border-neutral-200/80 shadow-[0_12px_40px_rgba(0,0,0,0.06)] overflow-hidden flex pointer-events-auto ${
-                    isDocked === 'top' ? 'flex-row items-center max-h-[72px]' : 'flex-col'
-                  } ${
+                  className={`absolute z-30 select-none bg-white/80 backdrop-blur-md border border-neutral-200/80 shadow-[0_12px_40px_rgba(0,0,0,0.06)] overflow-hidden flex flex-col pointer-events-auto ${
                     isDraggingThis
                       ? "ring-2 ring-indigo-500/30 shadow-indigo-500/10 scale-[1.01] z-40" 
                       : ""
@@ -2472,9 +1913,7 @@ const MASONRY_TYPES = [
                       ? 'rounded-r-xl border-l-0' 
                       : isDocked === 'right' 
                         ? 'rounded-l-xl border-r-0' 
-                        : isDocked === 'top'
-                          ? 'rounded-b-xl border-t-0 max-w-none'
-                          : 'rounded-xl max-w-[85px]'
+                        : 'rounded-xl max-w-[70px]'
                   }`}
                 onDragOver={(e) => {
                   e.preventDefault();
@@ -2510,14 +1949,10 @@ const MASONRY_TYPES = [
                   }
                 }}
               >
-                {/* Horizontal or vertical discrete drag handle at top or side */}
+                {/* Vertical discrete drag handle at top or side */}
                 <div
                   onMouseDown={(e) => handleFavoritesMouseDown(e, panel.id)}
-                  className={`px-2 text-neutral-600 flex items-center justify-between cursor-move text-[9px] uppercase font-mono font-bold tracking-wider ${
-                    isDocked === 'top' 
-                      ? 'flex-col py-1 border-r border-neutral-200/60 h-full justify-center gap-1.5 min-w-[42px]' 
-                      : `py-1.5 border-b border-neutral-200/60 ${isDocked ? 'flex-col gap-1' : ''}`
-                  }`}
+                  className={`px-2 py-1.5 bg-neutral-100/90 hover:bg-neutral-200/50 text-neutral-600 flex items-center justify-between cursor-move text-[9px] uppercase font-mono font-bold tracking-wider border-b border-neutral-200/60 ${isDocked ? 'flex-col gap-1' : ''}`}
                   title="Trascina per spostare o sganciare"
                 >
                   <div className="flex flex-col items-center gap-0.5 pointer-events-none">
@@ -2544,12 +1979,8 @@ const MASONRY_TYPES = [
                   </button>
                 </div>
 
-                {/* Horizontal or Vertical list of tools */}
-                <div className={`p-1.5 flex bg-white items-center justify-start ${
-                  isDocked === 'top' 
-                    ? 'flex-row gap-1.5 h-full overflow-x-auto px-2' 
-                    : `flex-col gap-1.5 min-w-[72px] overflow-y-auto ${isDocked ? 'h-full' : 'max-h-[360px]'}`
-                }`}>
+                {/* Vertical list of tools */}
+                <div className={`p-1.5 flex flex-col gap-1.5 bg-white items-center min-w-[54px] justify-start overflow-y-auto ${isDocked ? 'h-full' : 'max-h-[360px]'}`}>
                   {panel.tools.length === 0 ? (
                     <div className="text-[8px] text-neutral-400 text-center w-full p-2">
                        Vuoto
@@ -2557,12 +1988,6 @@ const MASONRY_TYPES = [
                   ) : (
                     panel.tools.map((toolName) => {
                       const IconComp = getToolIcon(toolName);
-                      const isToolActive = 
-                        selectedTool === toolName ||
-                        (toolName === "Orto" && effectiveOrthoMode) ||
-                        (toolName === "Tecnigrafo" && isTecnigrafoActive) ||
-                        (toolName === "Polilinea" && isContinuousMode);
-
                       return (
                         <div
                           key={toolName}
@@ -2575,15 +2000,13 @@ const MASONRY_TYPES = [
                         >
                           <button
                             onClick={() => handleToolClick(toolName)}
-                            className={`p-1 rounded-lg transition-all flex flex-col items-center justify-center gap-0.5 w-[58px] h-[58px] cursor-grab active:cursor-grabbing hover:scale-105 ${
-                              isToolActive 
-                                ? "bg-indigo-600 border-2 border-indigo-500 text-white font-bold shadow-[0_0_15px_rgba(79,70,229,0.6)] scale-[1.03]" 
-                                : "bg-neutral-50 border border-neutral-200/50 text-neutral-700 hover:bg-indigo-50/70 hover:text-indigo-950 hover:border-indigo-400/50"
+                            className={`p-2 rounded-lg bg-neutral-50 border border-neutral-200/50 text-neutral-700 transition-all flex flex-col items-center justify-center gap-0.5 w-11 h-11 cursor-grab active:cursor-grabbing hover:bg-indigo-50/70 hover:text-indigo-950 hover:border-indigo-400/50 ${
+                              selectedTool === toolName ? "bg-indigo-50 border-indigo-400 text-indigo-950 font-bold shadow-xs" : ""
                             }`}
                             title={`${toolName} - Trascina per spostare o rimuovere`}
                           >
-                            {IconComp ? <IconComp size={20} className={`${isToolActive ? "text-white" : "text-neutral-600 group-hover:text-indigo-600"} transition-colors`} /> : null}
-                            <span className={`text-[8.5px] font-sans font-semibold truncate w-full text-center tracking-tight leading-none ${isToolActive ? "text-white font-black" : "text-neutral-500"}`}>
+                            {IconComp ? <IconComp size={15} className="text-neutral-600 group-hover:text-indigo-600 transition-colors" /> : null}
+                            <span className="text-[7.5px] font-sans font-medium text-neutral-500 truncate w-full text-center tracking-tight leading-none">
                               {toolName}
                             </span>
                           </button>
@@ -2619,11 +2042,11 @@ const MASONRY_TYPES = [
 
 
           {/* Minimalist centered transparent watermark */}
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex flex-col items-center justify-center pointer-events-none select-none text-center z-10 opacity-100 transition-opacity duration-300">
-            <span className="text-[10px] font-sans tracking-wider text-black font-thin">
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex flex-col items-center justify-center pointer-events-none select-none text-center z-10 opacity-35 hover:opacity-75 transition-opacity duration-300">
+            <span className="text-[9.5px] font-sans tracking-wider text-neutral-600 font-medium">
               Copyright © 2026 Domenico Gimondo
             </span>
-            <span className="text-[9px] font-mono tracking-[0.3em] text-black/80 font-normal mt-0.5 uppercase">
+            <span className="text-[8.5px] font-mono tracking-[0.3em] text-neutral-500 font-bold mt-0.5 uppercase">
               AETERNA
             </span>
           </div>
@@ -2669,6 +2092,7 @@ const MASONRY_TYPES = [
                   cadCanvasRef={cadCanvasRef}
                   selectedTemplateId={selectedTemplateId}
                   setSelectedTemplateId={setSelectedTemplateId}
+                  onOpenMuri={() => setIsBIMMuriOpen(true)}
                   onOpenPorte={() => setIsBIMPorteOpen(true)}
                   onOpenFinestre={() => setIsBIMFinestreOpen(true)}
                   onOpenArredi={() => setIsBIMArrediOpen(true)}
@@ -2676,58 +2100,7 @@ const MASONRY_TYPES = [
                   onOpenElettrico={() => setIsBIMElettricoOpen(true)}
                   onOpenIdraulico={() => setIsBIMIdraulicoOpen(true)}
                   onOpenFiniture={() => setIsBIMFinitureOpen(true)}
-                  onEditArea={handleEditBIMArea}
-                  onOpen3DView={() => setIs3DViewOpen(true)}
                 />
-              ) : selectedTool === 'Muro' ? (
-                <div className="space-y-4">
-                  <div className="bg-cyan-50 border border-cyan-200 p-3 rounded-lg shadow-sm">
-                    <p className="text-[11px] text-cyan-900 leading-normal font-sans">
-                      <span className="font-bold">🧱 IMPOSTAZIONI MURO:</span> Definisci la tipologia e le dimensioni.
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-mono">Spessore (cm)</label>
-                      <input
-                        type="number"
-                        value={bimWallThickness}
-                        onChange={(e) => {
-                          setBimWallThickness(parseInt(e.target.value) || 15);
-                          localStorage.setItem('lastWallThickness', e.target.value);
-                        }}
-                        className="w-full bg-neutral-50 border border-neutral-300 rounded p-2 text-xs font-mono"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-mono">Altezza (cm)</label>
-                      <input
-                        type="number"
-                        value={bimWallHeight}
-                        onChange={(e) => {
-                          setBimWallHeight(parseInt(e.target.value) || 270);
-                          localStorage.setItem('lastWallHeight', e.target.value);
-                        }}
-                        className="w-full bg-neutral-50 border border-neutral-300 rounded p-2 text-xs font-mono"
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                      <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-mono">Tipo Muratura</label>
-                      <select
-                        value={bimWallType}
-                        onChange={(e) => {
-                          setBimWallType(e.target.value);
-                          localStorage.setItem('lastWallType', e.target.value);
-                        }}
-                        className="w-full bg-neutral-50 border border-neutral-300 rounded p-2 text-xs font-mono"
-                      >
-                        {MASONRY_TYPES.map(type => (
-                          <option key={type} value={type}>{type}</option>
-                        ))}
-                      </select>
-                  </div>
-                </div>
               ) : activeSidebarTab === "gemini" ? (
                 <div className="space-y-4">
                   <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg shadow-sm">
@@ -3759,67 +3132,6 @@ const MASONRY_TYPES = [
                           Crea un asse di simmetria come un normale segmento... poi seleziona gli oggetti.
                         </p>
                       </div>
-                    ) : selectedTool === 'Eraser' ? (
-                      <div className="space-y-4">
-                        <div className="bg-neutral-900 border border-neutral-800 text-white p-3.5 rounded-xl shadow-xs">
-                          <p className="text-xs leading-normal font-sans mb-3">
-                            <span className="text-amber-400 font-extrabold block mb-2 text-[10px] font-mono tracking-widest uppercase">✨ GOMME DI PRECISIONE:</span>
-                            Entrambe le gomme hanno una punta sagomata ideale per cancellature di precisione assoluta.
-                          </p>
-                          <div className="bg-neutral-800/80 p-2.5 rounded-lg border border-neutral-700 space-y-1 text-[10px] text-neutral-300">
-                            <div className="flex items-center gap-1.5 font-bold text-amber-300">
-                              <MousePointer2 size={10} /> CLIC DESTRO SUL FOGLIO
-                            </div>
-                            <p className="font-sans leading-relaxed text-[9px]">Clicca col tasto destro del mouse sulla tavola da disegno per scambiare al volo le due gomme!</p>
-                          </div>
-                        </div>
-
-                        {/* Switch Eraser Type Options in UI */}
-                        <div className="space-y-4 pt-2 border-t border-neutral-100">
-                          <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Tipo di Gomma Attiva</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              onClick={() => setEraserType('pencil')}
-                              className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex flex-col gap-1.5 ${eraserType === 'pencil' ? 'bg-neutral-100 border-neutral-400 ring-4 ring-neutral-200' : 'bg-white border-neutral-200 hover:bg-neutral-50 shadow-xs'}`}
-                            >
-                              <div className="flex items-center gap-1.5">
-                                <span className="w-3.5 h-3.5 rounded bg-neutral-200 border border-neutral-400 shadow-xs inline-block"></span>
-                                <span className={`text-[10px] font-black uppercase tracking-wider ${eraserType === 'pencil' ? 'text-neutral-800' : 'text-neutral-500'}`}>Matita</span>
-                              </div>
-                              <span className="text-[9px] text-neutral-400 leading-snug">La classica bianca-grigia. Cancella solo linee a matita dura/media/morbida. Non tocca la china.</span>
-                            </button>
-
-                            <button
-                              onClick={() => setEraserType('all')}
-                              className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex flex-col gap-1.5 ${eraserType === 'all' ? 'bg-amber-50 border-amber-400 ring-4 ring-amber-100' : 'bg-white border-neutral-200 hover:bg-neutral-50 shadow-xs'}`}
-                            >
-                              <div className="flex items-center gap-1.5">
-                                <span className="w-3.5 h-3.5 rounded bg-amber-400 border border-amber-600 shadow-xs inline-block"></span>
-                                <span className={`text-[10px] font-black uppercase tracking-wider ${eraserType === 'all' ? 'text-amber-800' : 'text-neutral-500'}`}>China/Tutto</span>
-                              </div>
-                              <span className="text-[9px] text-neutral-400 leading-snug">La classica gomma gialla. Rimuove china, matita, testi, retini e tutto il resto.</span>
-                            </button>
-                          </div>
-
-                          {/* Eraser radius slider */}
-                          <div className="space-y-2 pt-2 border-t border-neutral-100">
-                            <div className="flex justify-between items-center">
-                              <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest block font-sans">Spessore Punta Gomma</label>
-                              <span className="text-[10px] font-mono font-bold text-neutral-600">{eraserRadius} mm (px)</span>
-                            </div>
-                            <input
-                              type="range"
-                              min="5"
-                              max="100"
-                              step="5"
-                              value={eraserRadius}
-                              onChange={(e) => setEraserRadius(Number(e.target.value))}
-                              className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-indigo-600 font-bold"
-                            />
-                            <p className="text-[9px] text-neutral-400 leading-tight">Ottimizza la dimensione per cancellature precise.</p>
-                          </div>
-                        </div>
-                      </div>
                     ) : (
                       <div className="space-y-4">
                         <div className="bg-neutral-800 text-neutral-100 p-3 rounded-lg shadow-lg border border-neutral-700">
@@ -3838,10 +3150,9 @@ const MASONRY_TYPES = [
                               {[0.25, 0.5, 1, 2].map(w => (
                                 <button
                                   key={w}
-                                  onClick={() => {
-                                    setDefaultLineStyle({ mode: "CAD", color: '#000000', lineWidth: w, dashed: false });
-                                    handleToolClick("Line");
-                                  }}
+                                  onClick={() =>
+                                    setDefaultLineStyle({ mode: "CAD", color: '#000000', lineWidth: w, dashed: false })
+                                  }
                                   className={`p-2 rounded-lg border transition-all flex flex-col items-center justify-center gap-1 ${defaultLineStyle.mode === "CAD" && defaultLineStyle.lineWidth === w ? "bg-emerald-900 border-emerald-700 ring-4 ring-emerald-200 shadow-md transform -translate-y-0.5" : "bg-neutral-50 border-neutral-200 hover:bg-white"}`}
                                 >
                                   <span className={`text-[10px] font-black ${defaultLineStyle.mode === "CAD" && defaultLineStyle.lineWidth === w ? "text-white" : "text-neutral-500"}`}>
@@ -3861,10 +3172,9 @@ const MASONRY_TYPES = [
                               {[0.25, 0.5, 1, 2].map(w => (
                                 <button
                                   key={w}
-                                  onClick={() => {
-                                    setDefaultLineStyle({ mode: "ink", color: '#000000', lineWidth: w, dashed: false });
-                                    handleToolClick("Line");
-                                  }}
+                                  onClick={() =>
+                                    setDefaultLineStyle({ mode: "ink", color: '#000000', lineWidth: w, dashed: false })
+                                  }
                                   className={`p-2 rounded-lg border transition-all flex flex-col items-center justify-center gap-1 ${defaultLineStyle.mode === "ink" && defaultLineStyle.lineWidth === w ? "bg-indigo-900 border-neutral-700 ring-4 ring-neutral-200 shadow-md transform -translate-y-0.5" : "bg-neutral-50 border-neutral-200 hover:bg-white"}`}
                                 >
                                   <span className={`text-[10px] font-black ${defaultLineStyle.mode === "ink" && defaultLineStyle.lineWidth === w ? "text-white" : "text-neutral-500"}`}>
@@ -3888,10 +3198,9 @@ const MASONRY_TYPES = [
                                 return (
                                   <button
                                     key={m}
-                                    onClick={() => {
-                                      setDefaultLineStyle({ mode: "pencil", color, lineWidth: width, dashed: false });
-                                      handleToolClick("Line");
-                                    }}
+                                    onClick={() =>
+                                      setDefaultLineStyle({ mode: "pencil", color, lineWidth: width, dashed: false })
+                                    }
                                     className={`p-2.5 rounded-lg border transition-all flex flex-col items-center justify-center gap-1 ${isSelected ? "bg-amber-50 border-amber-300 ring-4 ring-amber-100 shadow-md transform -translate-y-0.5" : "bg-neutral-50 border-neutral-200 hover:bg-white"}`}
                                   >
                                     <span className={`text-[10px] font-black ${isSelected ? "text-amber-800" : "text-neutral-500"}`}>{m}</span>
@@ -3910,10 +3219,7 @@ const MASONRY_TYPES = [
                               {['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#64748b'].map((c) => (
                                 <button
                                   key={c}
-                                  onClick={() => {
-                                    setDefaultLineStyle(prev => ({ ...prev, color: c }));
-                                    handleToolClick("Line");
-                                  }}
+                                  onClick={() => setDefaultLineStyle(prev => ({ ...prev, color: c }))}
                                   className={`w-full aspect-square rounded-full flex items-center justify-center transition-transform ${defaultLineStyle.color === c ? "ring-2 ring-offset-2 ring-indigo-500 scale-110 shadow-md" : "hover:scale-105 border border-black/10"}`}
                                   style={{ backgroundColor: c }}
                                 >
@@ -4258,11 +3564,11 @@ const MASONRY_TYPES = [
         />
       </footer>
 
-      {/* Hidden file input for DXF/DWG/Images/Video/Audio/PDF uploader */}
+      {/* Hidden file input for DXF/DWG uploader */}
       <input
         ref={importInputRef}
         type="file"
-        accept=".dxf,.dwg,image/*,video/*,audio/*,.pdf"
+        accept=".dxf,.dwg"
         onChange={handleImportFile}
         className="hidden"
         style={{ display: 'none' }}

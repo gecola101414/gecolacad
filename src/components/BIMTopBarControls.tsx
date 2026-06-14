@@ -10,29 +10,7 @@ import {
   Maximize2, 
   Crosshair, 
   Check, 
-  CornerDownRight,
-  Lightbulb,
-  Plug,
-  Power,
-  Repeat,
-  Server,
-  Tv,
-  Wifi,
-  ToggleRight,
-  Shuffle,
-  CircleDot,
-  ArrowDownToLine,
-  Box,
-  Bell,
-  Volume2,
-  Thermometer,
-  Flashlight,
-  Siren,
-  Sun,
-  Phone,
-  Video,
-  Cuboid,
-  Square
+  CornerDownRight 
 } from 'lucide-react';
 import { TEMPLATES, Template } from '../data/templates';
 
@@ -60,10 +38,6 @@ interface BIMTopBarControlsProps {
   setBimWindowWidth: (val: number) => void;
   bimWindowHeight: number;
   setBimWindowHeight: (val: number) => void;
-  bimSymbolScale?: number;
-  setBimSymbolScale?: (val: number) => void;
-  setIsBIMFinestreOpen: (val: boolean) => void;
-  onOpen3DView?: () => void;
 }
 
 export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
@@ -87,15 +61,11 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
   bimWindowWidth,
   setBimWindowWidth,
   bimWindowHeight,
-  setBimWindowHeight,
-  bimSymbolScale = 1,
-  setBimSymbolScale,
-  setIsBIMFinestreOpen,
-  onOpen3DView
+  setBimWindowHeight
 }) => {
-   const [activeDropdown, setActiveDropdown] = useState<
-     'porte' | 'finestre' | 'arredi' | 'sanitari' | 'elettrico' | 'idraulico' | 'finiture' | 'vani' | null
-   >(null);
+  const [activeDropdown, setActiveDropdown] = useState<
+    'muri' | 'porte' | 'finestre' | 'arredi' | 'sanitari' | 'elettrico' | 'idraulico' | 'finiture' | null
+  >(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -115,6 +85,18 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
   };
 
   // Sync canvas defaults
+  const handleWallThicknessChange = (w: number) => {
+    setBimWallThickness(w);
+    localStorage.setItem('lastWallThickness', w.toString());
+    cadCanvasRef.current?.setBIMDefaults(w, bimWallHeight, 'wall');
+  };
+
+  const handleWallHeightChange = (h: number) => {
+    setBimWallHeight(h);
+    localStorage.setItem('lastWallHeight', h.toString());
+    cadCanvasRef.current?.setBIMDefaults(bimWallThickness, h, 'wall');
+  };
+
   const handleDoorSpecsChange = (w: number, h: number) => {
     setBimDoorWidth(w);
     setBimDoorHeight(h);
@@ -130,6 +112,10 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
     localStorage.setItem('lastWindowHeight', h.toString());
     cadCanvasRef.current?.setBIMDefaults(w, h, 'window');
   };
+
+  // Preset constants
+  const wallThicknessPresets = [10, 15, 30, 40];
+  const wallHeightPresets = [270, 300, 350];
 
   const doorPresets = [
     { w: 70, h: 210, label: '70 x 210' },
@@ -152,27 +138,11 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
 
   // Symbols
   const electricSymbols = [
-    { type: 'punto_luce', label: 'Punto Luce', icon: Lightbulb },
-    { type: 'presa_standard', label: 'Presa 10/16A', icon: Plug },
-    { type: 'presa_schuko', label: 'Presa Schuko', icon: Zap },
-    { type: 'presa_tv', label: 'Presa TV', icon: Tv },
-    { type: 'presa_dati', label: 'Presa Dati/LAN', icon: Wifi },
-    { type: 'interruttore', label: 'Interruttore', icon: Power },
-    { type: 'interruttore_bipolare', label: 'Int. Bipolare', icon: ToggleRight },
-    { type: 'deviatore', label: 'Deviatore', icon: Repeat },
-    { type: 'invertitore', label: 'Invertitore', icon: Shuffle },
-    { type: 'pulsante', label: 'Pulsante', icon: CircleDot },
-    { type: 'pulsante_tirante', label: 'Tirante', icon: ArrowDownToLine },
-    { type: 'quadro', label: 'Quadro Elet.', icon: Server },
-    { type: 'scatola_derivazione', label: 'Scatola Deriv.', icon: Box },
-    { type: 'suoneria', label: 'Suoneria', icon: Bell },
-    { type: 'ronzatore', label: 'Ronzatore', icon: Volume2 },
-    { type: 'termostato', label: 'Termostato', icon: Thermometer },
-    { type: 'faretto', label: 'Faretto Incasso', icon: Flashlight },
-    { type: 'lampada_emergenza', label: 'Lamp. Emergenza', icon: Siren },
-    { type: 'applique', label: 'Applique', icon: Sun },
-    { type: 'citofono', label: 'Citofono', icon: Phone },
-    { type: 'videocitofono', label: 'Videocitofono', icon: Video }
+    { type: 'punto_luce', label: '💡 Punto Luce' },
+    { type: 'presa_standard', label: '🔌 Presa Standard' },
+    { type: 'interruttore', label: '🎛️ Interruttore' },
+    { type: 'deviatore', label: '🔄 Deviatore' },
+    { type: 'quadro', label: '🔲 Quadro Elettrico' }
   ];
 
   const hydraulicSymbols = [
@@ -193,74 +163,100 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
   return (
     <div ref={containerRef} className="flex items-center gap-1.5 w-full text-neutral-800">
       
-
-      {/* 1. ROOMS (VANI) BUTTON & DROPDOWN */}
+      {/* 1. WALLS BUTTON & DROPDOWN */}
       <div className="relative flex items-center">
         <button
           onClick={() => {
-            setSelectedTool('BIM_RilevaStanza');
+            cadCanvasRef.current?.setBIMDefaults(bimWallThickness, bimWallHeight, 'wall');
+            setSelectedTool('BIM_Muro');
           }}
           className={`px-2 py-0.5 rounded-l flex items-center gap-1 text-xs border border-r-0 transition ${
-            selectedTool === 'BIM_RilevaStanza' || selectedTool === 'BIM_DisegnaStanza'
+            selectedTool === 'BIM_Muro' 
               ? 'bg-cyan-100 text-cyan-950 font-bold border-cyan-300 shadow-sm' 
               : 'hover:bg-neutral-100 border-neutral-300 bg-white'
           }`}
-          title="Rilevamento e Tracciamento dei vani/locali"
+          title="Disegna segmenti di muro continui (con Orto e Snap!)"
         >
-          <span className="text-cyan-600 font-bold text-[10px]">📐</span>
-          <span>
-            {selectedTool === 'BIM_DisegnaStanza' ? 'Traccia Volume' : 'Rileva Volume'}
-          </span>
+          <Building size={12} className="text-cyan-600" />
+          <span>Muro ({bimWallThickness}cm)</span>
         </button>
         <button
-          onClick={() => toggleDropdown('vani')}
+          onClick={() => toggleDropdown('muri')}
           className={`px-1 py-1 rounded-r border transition text-neutral-500 hover:text-neutral-900 ${
-            activeDropdown === 'vani' ? 'bg-cyan-50 border-cyan-300 pointer-events-auto' : 'hover:bg-neutral-100 border-neutral-300 bg-white'
+            activeDropdown === 'muri' ? 'bg-cyan-50 border-cyan-300' : 'hover:bg-neutral-100 border-neutral-300 bg-white'
           }`}
-          title="Seleziona modalità rilevamento volumi"
         >
           <ChevronDown size={11} />
         </button>
 
-        {activeDropdown === 'vani' && (
-          <div className="absolute top-7 left-0 w-52 bg-white rounded-lg shadow-xl border border-neutral-200 p-2 z-50 animate-fade-in text-xs space-y-1">
-            <span className="font-semibold text-[10px] uppercase text-neutral-400 block px-2 py-1 border-b">Modalità Rilievo Volumi</span>
+        {activeDropdown === 'muri' && (
+          <div className="absolute top-7 left-0 w-52 bg-white rounded-lg shadow-xl border border-neutral-200 p-3 z-50 animate-fade-in text-xs space-y-3">
+            <div>
+              <span className="font-semibold text-[10px] uppercase text-neutral-400 block mb-1">Spessore Muro</span>
+              <div className="grid grid-cols-4 gap-1 mb-2">
+                {wallThicknessPresets.map(w => (
+                  <button
+                    key={w}
+                    onClick={() => handleWallThicknessChange(w)}
+                    className={`py-1 rounded text-[10px] font-mono font-bold border transition ${
+                      bimWallThickness === w 
+                        ? 'bg-cyan-50 border-cyan-500 text-cyan-800' 
+                        : 'bg-neutral-50 border-neutral-200 text-neutral-600 hover:border-neutral-300'
+                    }`}
+                  >
+                    {w}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="number"
+                min="1"
+                max="120"
+                value={bimWallThickness}
+                onChange={(e) => handleWallThicknessChange(parseInt(e.target.value) || 15)}
+                className="w-full bg-neutral-50 border border-neutral-200 text-neutral-800 rounded p-1 text-[11px] font-mono focus:outline-none focus:border-cyan-400"
+              />
+            </div>
+
+            <div>
+              <span className="font-semibold text-[10px] uppercase text-neutral-400 block mb-1">Altezza Muro (cm)</span>
+              <div className="grid grid-cols-3 gap-1 mb-2">
+                {wallHeightPresets.map(h => (
+                  <button
+                    key={h}
+                    onClick={() => handleWallHeightChange(h)}
+                    className={`py-0.5 rounded text-[10px] font-mono font-bold border transition ${
+                      bimWallHeight === h 
+                        ? 'bg-cyan-50 border-cyan-500 text-cyan-800' 
+                        : 'bg-neutral-50 border-neutral-200 text-neutral-600 hover:border-neutral-300'
+                    }`}
+                  >
+                    {h}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="number"
+                min="100"
+                max="600"
+                value={bimWallHeight}
+                onChange={(e) => handleWallHeightChange(parseInt(e.target.value) || 270)}
+                className="w-full bg-neutral-50 border border-neutral-200 text-neutral-800 rounded p-1 text-[11px] font-mono"
+              />
+            </div>
             
             <button
               onClick={() => {
-                setSelectedTool('BIM_RilevaStanza');
+                setSelectedTool('BIM_Muro');
                 setActiveDropdown(null);
               }}
-              className={`w-full text-left px-2 py-1.5 hover:bg-neutral-50 transition rounded text-[11px] font-medium flex items-center gap-2 ${
-                selectedTool === 'BIM_RilevaStanza' ? 'bg-cyan-50 text-cyan-800 font-bold' : 'text-neutral-700'
-              }`}
+              className="w-full py-1 text-center bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded text-[10px] uppercase tracking-wider"
             >
-              <Sparkles size={13} className="text-cyan-600" />
-              <div className="flex flex-col text-left">
-                <span>Rileva con punto interno</span>
-                <span className="text-[9px] text-neutral-400 font-normal">Sotto-muro automatico con 1 click</span>
-              </div>
-            </button>
-
-            <button
-              onClick={() => {
-                setSelectedTool('BIM_DisegnaStanza');
-                setActiveDropdown(null);
-              }}
-              className={`w-full text-left px-2 py-1.5 hover:bg-neutral-50 transition rounded text-[11px] font-medium flex items-center gap-2 ${
-                selectedTool === 'BIM_DisegnaStanza' ? 'bg-indigo-50 text-indigo-800 font-bold' : 'text-neutral-700'
-              }`}
-            >
-              <Square size={13} className="text-indigo-600" />
-              <div className="flex flex-col text-left">
-                <span>Traccia punti esterni</span>
-                <span className="text-[9px] text-neutral-400 font-normal">Disegno manuale vertici</span>
-              </div>
+              Attiva Disegno Muri
             </button>
           </div>
         )}
       </div>
-
 
       {/* 2. DOORS BUTTON & DROPDOWN */}
       <div className="relative flex items-center">
@@ -351,7 +347,6 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
         <button
           onClick={() => {
             cadCanvasRef.current?.setBIMDefaults(bimWindowWidth, bimWindowHeight, 'window');
-            setIsBIMFinestreOpen(true);
             setSelectedTool('BIM_Finestra');
           }}
           className={`px-2 py-0.5 rounded-l flex items-center gap-1 text-xs border border-r-0 transition ${
@@ -529,25 +524,8 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
         </button>
 
         {activeDropdown === 'elettrico' && (
-          <div className="absolute top-7 left-0 w-48 bg-white rounded-lg shadow-xl border border-neutral-200 p-2 z-50 animate-fade-in text-xs max-h-72 overflow-y-auto">
-            <span className="font-semibold text-[10px] uppercase text-neutral-400 block px-2 py-1 mb-1 border-b">Impianto Elettrico</span>
-            
-            <div className="px-2 py-2 border-b border-neutral-100 mb-1">
-              <label className="flex justify-between text-[10px] text-neutral-500 mb-1">
-                <span>Scala Simboli</span>
-                <span>{bimSymbolScale}x</span>
-              </label>
-              <input 
-                type="range" 
-                min="0.1" 
-                max="10" 
-                step="0.1"
-                value={bimSymbolScale}
-                onChange={(e) => setBimSymbolScale?.(parseFloat(e.target.value))}
-                className="w-full accent-slate-600"
-              />
-            </div>
-
+          <div className="absolute top-7 left-0 w-48 bg-white rounded-lg shadow-xl border border-neutral-200 p-2 z-50 animate-fade-in text-xs max-h-56 overflow-y-auto">
+            <span className="font-semibold text-[10px] uppercase text-neutral-400 block px-2 py-1 border-b">Impianto Elettrico</span>
             {electricSymbols.map(sym => (
               <button
                 key={sym.type}
@@ -562,11 +540,8 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
                     : 'text-neutral-700'
                 }`}
               >
-                <span className="flex items-center gap-1.5">
-                  <sym.icon size={12} className={selectedBIMSymbolType === sym.type ? "text-slate-800" : "text-slate-500"} />
-                  {sym.label}
-                </span>
-                {selectedBIMSymbolType === sym.type && selectedTool === 'BIM_Symbol' && <Check size={10} className="text-slate-800" />}
+                <span>{sym.label}</span>
+                {selectedBIMSymbolType === sym.type && selectedTool === 'BIM_Symbol' && <Check size={10} className="text-yellow-600" />}
               </button>
             ))}
           </div>
@@ -589,25 +564,8 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
         </button>
 
         {activeDropdown === 'idraulico' && (
-          <div className="absolute top-7 left-0 w-48 bg-white rounded-lg shadow-xl border border-neutral-200 p-2 z-50 animate-fade-in text-xs max-h-72 overflow-y-auto">
-            <span className="font-semibold text-[10px] uppercase text-neutral-400 block px-2 py-1 mb-1 border-b">Impianto Idraulico</span>
-            
-            <div className="px-2 py-2 border-b border-neutral-100 mb-1">
-              <label className="flex justify-between text-[10px] text-neutral-500 mb-1">
-                <span>Scala Simboli</span>
-                <span>{bimSymbolScale}x</span>
-              </label>
-              <input 
-                type="range" 
-                min="0.1" 
-                max="10" 
-                step="0.1"
-                value={bimSymbolScale}
-                onChange={(e) => setBimSymbolScale?.(parseFloat(e.target.value))}
-                className="w-full accent-slate-600"
-              />
-            </div>
-
+          <div className="absolute top-7 left-0 w-48 bg-white rounded-lg shadow-xl border border-neutral-200 p-2 z-50 animate-fade-in text-xs max-h-56 overflow-y-auto">
+            <span className="font-semibold text-[10px] uppercase text-neutral-400 block px-2 py-1 border-b">Impianto Idraulico</span>
             {hydraulicSymbols.map(sym => (
               <button
                 key={sym.type}
@@ -689,13 +647,16 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
 
       <div className="h-4 w-[1px] bg-neutral-300 mx-1" />
 
-      {/* 9. THE 3D VISUALIZATION INTEGRATION */}
+      {/* 9. THE SCANSIONE PLANIMETRICA INTEGRATION */}
       <button
-        onClick={onOpen3DView}
-        className="w-7 h-7 rounded-lg bg-gradient-to-br from-cyan-600 to-cyan-500 hover:from-cyan-700 hover:to-cyan-600 text-white font-extrabold flex justify-center items-center shadow-md transition hover:scale-105 cursor-pointer ml-2"
-        title="Apri Visualizzazione 3D BIM"
+        onClick={() => {
+          cadCanvasRef?.current?.autoScanBIM();
+        }}
+        className="px-3 py-0.5 rounded bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-700 hover:to-cyan-600 text-white font-extrabold text-xs flex items-center gap-1 shadow-xs transition hover:scale-[1.02] cursor-pointer"
+        title="Software scansione automatica: Trova spazi chiusi per calcolare locali e generare etichette BIM"
       >
-        <Cuboid size={14} className="text-white drop-shadow-sm" />
+        <Sparkles size={11} className="text-yellow-200 animate-pulse" />
+        <span>Scansione Planimetria 🤖</span>
       </button>
 
     </div>

@@ -17,7 +17,6 @@ import {
   RotateCw,
   Copy as CopyIcon,
   Maximize2,
-  Edit,
   Zap,
   Droplet,
   Grid,
@@ -25,95 +24,10 @@ import {
   User,
   TreePine,
   Car,
-  ChevronRight,
-  // Systems icons
-  Lightbulb,
-  Plug,
-  Tv,
-  Wifi,
-  Power,
-  ToggleRight,
-  Shuffle,
-  CircleDot,
-  ArrowDownToLine,
-  Server,
-  Box as BoxIcon,
-  Bell,
-  Volume2,
-  Thermometer,
-  Flashlight,
-  Siren,
-  Sun,
-  Phone,
-  Video as VideoIcon,
-  Activity,
-  Info,
-  Notebook
+  ChevronRight
 } from "lucide-react";
 import { TEMPLATES } from "../data/templates";
 import { TemplatePreview } from "./TemplatePreview";
-import { getBIMSymbolEntities } from "./CADCanvas";
-
-const BIM_SYSTEMS_DICTIONARY: Record<string, { label: string; system: 'elettrico' | 'idraulico' }> = {
-  // Elettrico
-  'punto_luce': { label: 'Punto Luce', system: 'elettrico' },
-  'presa_standard': { label: 'Presa Standard 10/16A', system: 'elettrico' },
-  'presa_schuko': { label: 'Presa Schuko 16A', system: 'elettrico' },
-  'presa_tv': { label: 'Presa TV', system: 'elettrico' },
-  'presa_dati': { label: 'Presa Dati/LAN', system: 'elettrico' },
-  'interruttore': { label: 'Interruttore', system: 'elettrico' },
-  'interruttore_bipolare': { label: 'Interruttore Bipolare', system: 'elettrico' },
-  'deviatore': { label: 'Deviatore', system: 'elettrico' },
-  'invertitore': { label: 'Invertitore', system: 'elettrico' },
-  'pulsante': { label: 'Pulsante', system: 'elettrico' },
-  'pulsante_tirante': { label: 'Pulsante con Tirante', system: 'elettrico' },
-  'quadro': { label: 'Quadro Elettrico', system: 'elettrico' },
-  'scatola_derivazione': { label: 'Scatola Derivazione', system: 'elettrico' },
-  'suoneria': { label: 'Suoneria Campanello', system: 'elettrico' },
-  'ronzatore': { label: 'Ronzatore', system: 'elettrico' },
-  'termostato': { label: 'Termostato Ambiente', system: 'elettrico' },
-  'faretto': { label: 'Faretto Incasso', system: 'elettrico' },
-  'lampada_emergenza': { label: 'Lampada d\'Emergenza', system: 'elettrico' },
-  'applique': { label: 'Applique da Muro', system: 'elettrico' },
-  'citofono': { label: 'Citofono', system: 'elettrico' },
-  'videocitofono': { label: 'Videocitofono', system: 'elettrico' },
-
-  // Idraulico
-  'carico_af': { label: 'Carico Acqua Fredda (AF)', system: 'idraulico' },
-  'carico_ac': { label: 'Carico Acqua Calda (AC)', system: 'idraulico' },
-  'scarico_idr': { label: 'Scarico Idrico', system: 'idraulico' },
-  'caldaia': { label: 'Caldaia / Boiler', system: 'idraulico' },
-  'collettore': { label: 'Collettore Impianto', system: 'idraulico' }
-};
-
-const SYSTEM_ICONS: Record<string, React.FC<any>> = {
-  'punto_luce': Lightbulb,
-  'presa_standard': Plug,
-  'presa_schuko': Zap,
-  'presa_tv': Tv,
-  'presa_dati': Wifi,
-  'interruttore': Power,
-  'interruttore_bipolare': ToggleRight,
-  'deviatore': Repeat,
-  'invertitore': Shuffle,
-  'pulsante': CircleDot,
-  'pulsante_tirante': ArrowDownToLine,
-  'quadro': Server,
-  'scatola_derivazione': BoxIcon,
-  'suoneria': Bell,
-  'ronzatore': Volume2,
-  'termostato': Thermometer,
-  'faretto': Flashlight,
-  'lampada_emergenza': Siren,
-  'applique': Sun,
-  'citofono': Phone,
-  'videocitofono': VideoIcon,
-  'carico_af': Droplet,
-  'carico_ac': Droplet,
-  'scarico_idr': Droplet,
-  'caldaia': Volume2,
-  'collettore': Layers
-};
 
 interface BIMWorkspacePanelProps {
   entities: Entity[];
@@ -136,8 +50,6 @@ interface BIMWorkspacePanelProps {
   onOpenElettrico?: () => void;
   onOpenIdraulico?: () => void;
   onOpenFiniture?: () => void;
-  onEditArea?: (id: string) => void;
-  onOpen3DView?: () => void;
 }
 
 // Shoelace formula helper
@@ -184,368 +96,11 @@ export function BIMWorkspacePanel({
   onOpenSanitari,
   onOpenElettrico,
   onOpenIdraulico,
-  onOpenFiniture,
-  onEditArea,
-  onOpen3DView
+  onOpenFiniture
 }: BIMWorkspacePanelProps) {
   const [customRoomName, setCustomRoomName] = useState<string>("");
   const [open2DSection, setOpen2DSection] = useState<boolean>(false);
   const [active2DCat, setActive2DCat] = useState<string>('Verde');
-
-  // Live grouped symbols counting for UI rendering
-  const activeSymbolsSummary = React.useMemo(() => {
-    const uniqueMap = new Map<string, { name: string; count: number; system: 'elettrico' | 'idraulico'; label: string }>();
-    const visited = new Set<string>();
-
-    entities.forEach(ent => {
-      if (ent.isBIM && (ent.bimType === 'electrical_symbol' || ent.bimType === 'hydraulic_symbol')) {
-        const grp = ent.groupId;
-        const name = ent.bimName || 'unknown';
-        if (grp) {
-          if (!visited.has(grp)) {
-            visited.add(grp);
-            const info = BIM_SYSTEMS_DICTIONARY[name] || {
-              label: name.replace('_', ' ').toUpperCase(),
-              system: ent.bimType === 'electrical_symbol' ? 'elettrico' : 'idraulico'
-            };
-            const current = uniqueMap.get(name) || {
-              name,
-              count: 0,
-              system: info.system,
-              label: info.label
-            };
-            current.count += 1;
-            uniqueMap.set(name, current);
-          }
-        } else {
-          const info = BIM_SYSTEMS_DICTIONARY[name] || {
-            label: name.replace('_', ' ').toUpperCase(),
-            system: ent.bimType === 'electrical_symbol' ? 'elettrico' : 'idraulico'
-          };
-          const current = uniqueMap.get(name) || {
-            name,
-            count: 0,
-            system: info.system,
-            label: info.label
-          };
-          current.count += 1;
-          uniqueMap.set(name, current);
-        }
-      }
-    });
-
-    const list = Array.from(uniqueMap.values());
-    return {
-      all: list,
-      electric: list.filter(item => item.system === 'elettrico'),
-      hydraulic: list.filter(item => item.system === 'idraulico')
-    };
-  }, [entities]);
-
-  const [legendInsertingState, setLegendInsertingState] = useState<string>("default");
-  const [legendScale, setLegendScale] = useState<number>(2.0);
-
-  const handleInsertLegendToDrawing = () => {
-    const symbolList = activeSymbolsSummary.all;
-    if (symbolList.length === 0) {
-      alert("Nessun simbolo d'impianto posizionato sul disegno. Inserisci prima dei simboli dal menu superiore!");
-      return;
-    }
-
-    setLegendInsertingState("inserting");
-
-    // Default start position
-    let startX = 300;
-    let startY = 30;
-    let maxX = -999999;
-    let minY = 999999;
-    let foundEntities = false;
-
-    // Check if a previous legend already exists to maintain its custom position if moved
-    const existingLegend = entities.find(e => e.layer === 'BIM_Legenda' && e.type === 'image') as any;
-    if (existingLegend && existingLegend.point) {
-      startX = existingLegend.point.x;
-      startY = existingLegend.point.y;
-    } else {
-      entities.forEach(e => {
-        if (e.layer === 'BIM_Legenda') return;
-        if (e.type === 'line' && (e as any).start && (e as any).end) {
-          maxX = Math.max(maxX, (e as any).start.x, (e as any).end.x);
-          minY = Math.min(minY, (e as any).start.y, (e as any).end.y);
-          foundEntities = true;
-        } else if (e.type === 'circle' && (e as any).center) {
-          const rad = (e as any).radius || 0;
-          maxX = Math.max(maxX, (e as any).center.x + rad);
-          minY = Math.min(minY, (e as any).center.y - rad);
-          foundEntities = true;
-        } else if (e.type === 'rectangle' && (e as any).p1 && (e as any).p2) {
-          maxX = Math.max(maxX, (e as any).p1.x, (e as any).p2.x);
-          minY = Math.min(minY, (e as any).p1.y, (e as any).p2.y);
-          foundEntities = true;
-        } else if (e.type === 'arc' && (e as any).center) {
-          const rad = (e as any).radius || 0;
-          maxX = Math.max(maxX, (e as any).center.x + rad);
-          minY = Math.min(minY, (e as any).center.y - rad);
-          foundEntities = true;
-        }
-      });
-
-      if (foundEntities && maxX !== -999999 && minY !== 999999) {
-        startX = maxX + 40;
-        startY = minY;
-      }
-    }
-
-    const scale = legendScale;
-    const tableWidth = 160 * scale;
-    const col1Width = 35 * scale;
-    const col2Width = 95 * scale;
-    const col3Width = 30 * scale;
-
-    const titleH = 22 * scale;
-    const rowH = 18 * scale;
-    const layerId = 'BIM_Legenda';
-
-    const electrics = activeSymbolsSummary.electric;
-    const hydraulics = activeSymbolsSummary.hydraulic;
-
-    // First simulated layout pass to calculate exact total table height
-    let totalHeight = 0;
-    totalHeight += titleH; // Title bar height
-    totalHeight += 12 * scale; // Columns header height
-
-    if (electrics.length > 0) {
-      totalHeight += 12 * scale; // Electric section header height
-      electrics.forEach(() => {
-        totalHeight += rowH;
-      });
-    }
-
-    if (hydraulics.length > 0) {
-      totalHeight += 12 * scale; // Hydraulic section header height
-      hydraulics.forEach(() => {
-        totalHeight += rowH;
-      });
-    }
-
-    // Bottom border offset
-    totalHeight += 2; // minor spacing padding safe zone
-
-    // Create a high-DPI offscreen HTML5 Canvas
-    const canvas = document.createElement('canvas');
-    const resolutionScale = 4.0; // High resolution rendering for printing & scaling
-    canvas.width = tableWidth * resolutionScale;
-    canvas.height = totalHeight * resolutionScale;
-    
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      setLegendInsertingState("default");
-      return;
-    }
-
-    ctx.save();
-    ctx.scale(resolutionScale, resolutionScale);
-
-    // Render solid paper-white background
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, tableWidth, totalHeight);
-
-    // Drawing helpers
-    const drawLine = (x1: number, y1: number, x2: number, y2: number, lineWidth = 0.5, color = '#1e293b') => {
-      ctx.beginPath();
-      ctx.strokeStyle = color;
-      ctx.lineWidth = lineWidth * Math.sqrt(scale);
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.stroke();
-    };
-
-    const drawText = (text: string, x: number, y: number, fontSize = 7.5, fontWeight = 'normal', align: 'left' | 'center' | 'right' = 'left', color = '#1e3a8a') => {
-      ctx.save();
-      ctx.fillStyle = color;
-      ctx.font = `${fontWeight === 'bold' ? 'bold ' : ''}${fontSize * scale}px sans-serif`;
-      ctx.textAlign = align;
-      ctx.textBaseline = 'top';
-      ctx.fillText(text, x, y);
-      ctx.restore();
-    };
-
-    const drawHatch = (fillColor: string, opacity: number, y: number, heightVal: number) => {
-      ctx.save();
-      ctx.globalAlpha = opacity;
-      ctx.fillStyle = fillColor;
-      ctx.fillRect(0, y, tableWidth, heightVal);
-      ctx.restore();
-    };
-
-    let drawY = 0;
-
-    // Main Table header line (double horizontal accent line)
-    drawLine(0, drawY, tableWidth, drawY, 1.2, '#1e293b');
-    drawLine(0, drawY + 1.2 * scale, tableWidth, drawY + 1.2 * scale, 0.6, '#1e293b');
-
-    // Title and sub-title
-    drawText("LEGENDA IMPIANTI", tableWidth / 2, drawY + 4.5 * scale, 9, 'bold', 'center', '#0f172a');
-    drawText("Sincronizzazione BIM Realtime", tableWidth / 2, drawY + 13.5 * scale, 5.5, 'normal', 'center', '#475569');
-
-    drawY += titleH;
-    drawLine(0, drawY, tableWidth, drawY, 0.8, '#475569');
-
-    // Section headers columns
-    drawText("SIMBOLO", col1Width / 2, drawY + 3.5 * scale, 7, 'bold', 'center', '#1e293b');
-    drawText("DESCRIZIONE COMPONENTE", col1Width + 4 * scale, drawY + 3.5 * scale, 7, 'bold', 'left', '#1e293b');
-    drawText("QTY", col1Width + col2Width + col3Width / 2, drawY + 3.5 * scale, 7, 'bold', 'center', '#1e293b');
-
-    drawY += 12 * scale;
-    drawLine(0, drawY, tableWidth, drawY, 0.8, '#475569');
-
-    // Section 1: ELETTRICO
-    if (electrics.length > 0) {
-      drawHatch('#fef08a', 0.18, drawY, 12 * scale);
-      drawText("⚡ IMPIANTO ELETTRICO STANDARD CEI / BIM", 4 * scale, drawY + 3.0 * scale, 6.5, 'bold', 'left', '#854d0e');
-      drawY += 12 * scale;
-      drawLine(0, drawY, tableWidth, drawY, 0.6, '#cbd5e1');
-
-      electrics.forEach(sym => {
-        const symbolCenter = { x: col1Width / 2, y: drawY + rowH / 2 };
-        const geometries = getBIMSymbolEntities(sym.name, 0.65 * scale);
-        
-        ctx.save();
-        geometries.forEach(geo => {
-          if (geo.type === 'line' && geo.start && geo.end) {
-            ctx.beginPath();
-            ctx.strokeStyle = '#334155';
-            ctx.lineWidth = 0.65 * Math.sqrt(scale);
-            ctx.moveTo(symbolCenter.x + geo.start.x, symbolCenter.y + geo.start.y);
-            ctx.lineTo(symbolCenter.x + geo.end.x, symbolCenter.y + geo.end.y);
-            ctx.stroke();
-          } else if (geo.type === 'circle' && geo.center && geo.radius) {
-            ctx.beginPath();
-            ctx.strokeStyle = '#334155';
-            ctx.lineWidth = 0.65 * Math.sqrt(scale);
-            ctx.arc(symbolCenter.x + geo.center.x, symbolCenter.y + geo.center.y, geo.radius, 0, Math.PI * 2);
-            ctx.stroke();
-          } else if (geo.type === 'arc' && geo.center && geo.radius) {
-            ctx.beginPath();
-            ctx.strokeStyle = '#334155';
-            ctx.lineWidth = 0.65 * Math.sqrt(scale);
-            ctx.arc(symbolCenter.x + geo.center.x, symbolCenter.y + geo.center.y, geo.radius, (geo.startAngle || 0) * Math.PI / 180, (geo.endAngle || 360) * Math.PI / 180);
-            ctx.stroke();
-          } else if (geo.type === 'text' && geo.center && geo.text) {
-            ctx.save();
-            ctx.fillStyle = '#1e293b';
-            ctx.font = `600 ${5.5 * scale}px sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(geo.text, symbolCenter.x + geo.center.x, symbolCenter.y + geo.center.y);
-            ctx.restore();
-          }
-        });
-        ctx.restore();
-
-        drawText(sym.label, col1Width + 4 * scale, symbolCenter.y - 4 * scale, 6.5, 'normal', 'left', '#334155');
-        drawText(sym.count.toString(), col1Width + col2Width + col3Width / 2, symbolCenter.y - 4.5 * scale, 8, 'bold', 'center', '#0f172a');
-
-        drawY += rowH;
-        drawLine(0, drawY, tableWidth, drawY, 0.4, '#e2e8f0');
-      });
-    }
-
-    // Section 2: IDRAULICO
-    if (hydraulics.length > 0) {
-      drawHatch('#e0f2fe', 0.18, drawY, 12 * scale);
-      drawText("💧 IMPIANTO IDRAULICO & TERMICO", 4 * scale, drawY + 3.0 * scale, 6.5, 'bold', 'left', '#0369a1');
-      drawY += 12 * scale;
-      drawLine(0, drawY, tableWidth, drawY, 0.6, '#cbd5e1');
-
-      hydraulics.forEach(sym => {
-        const symbolCenter = { x: col1Width / 2, y: drawY + rowH / 2 };
-        const geometries = getBIMSymbolEntities(sym.name, 0.65 * scale);
-        
-        ctx.save();
-        geometries.forEach(geo => {
-          if (geo.type === 'line' && geo.start && geo.end) {
-            ctx.beginPath();
-            ctx.strokeStyle = '#0284c7';
-            ctx.lineWidth = 0.65 * Math.sqrt(scale);
-            ctx.moveTo(symbolCenter.x + geo.start.x, symbolCenter.y + geo.start.y);
-            ctx.lineTo(symbolCenter.x + geo.end.x, symbolCenter.y + geo.end.y);
-            ctx.stroke();
-          } else if (geo.type === 'circle' && geo.center && geo.radius) {
-            ctx.beginPath();
-            ctx.strokeStyle = '#0284c7';
-            ctx.lineWidth = 0.65 * Math.sqrt(scale);
-            ctx.arc(symbolCenter.x + geo.center.x, symbolCenter.y + geo.center.y, geo.radius, 0, Math.PI * 2);
-            ctx.stroke();
-          } else if (geo.type === 'arc' && geo.center && geo.radius) {
-            ctx.beginPath();
-            ctx.strokeStyle = '#0284c7';
-            ctx.lineWidth = 0.65 * Math.sqrt(scale);
-            ctx.arc(symbolCenter.x + geo.center.x, symbolCenter.y + geo.center.y, geo.radius, (geo.startAngle || 0) * Math.PI / 180, (geo.endAngle || 360) * Math.PI / 180);
-            ctx.stroke();
-          } else if (geo.type === 'text' && geo.center && geo.text) {
-            ctx.save();
-            ctx.fillStyle = '#0369a1';
-            ctx.font = `600 ${5.5 * scale}px sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(geo.text, symbolCenter.x + geo.center.x, symbolCenter.y + geo.center.y);
-            ctx.restore();
-          }
-        });
-        ctx.restore();
-
-        drawText(sym.label, col1Width + 4 * scale, symbolCenter.y - 4 * scale, 6.5, 'normal', 'left', '#334155');
-        drawText(sym.count.toString(), col1Width + col2Width + col3Width / 2, symbolCenter.y - 4.5 * scale, 8, 'bold', 'center', '#0f172a');
-
-        drawY += rowH;
-        drawLine(0, drawY, tableWidth, drawY, 0.4, '#e2e8f0');
-      });
-    }
-
-    // Table outer borders
-    drawLine(0, drawY, tableWidth, drawY, 1.2, '#1e293b'); // bottom outer
-    drawLine(0, 0, 0, drawY, 1.2, '#1e293b'); // left outer
-    drawLine(col1Width, titleH, col1Width, drawY, 0.6, '#94a3b8'); // internal left divider
-    drawLine(col1Width + col2Width, titleH, col1Width + col2Width, drawY, 0.6, '#94a3b8'); // internal right divider
-    drawLine(tableWidth, 0, tableWidth, drawY, 1.2, '#1e293b'); // right outer
-
-    ctx.restore();
-
-    // Export offscreen canvas as high-fidelity PNG image
-    const dataUrl = canvas.toDataURL('image/png');
-
-    // Create the single responsive ImageEntity
-    const newLegendEntity: Entity = {
-      id: 'legenda_img_' + Date.now().toString(),
-      type: 'image',
-      layer: layerId,
-      point: { x: startX, y: startY },
-      width: tableWidth,
-      height: totalHeight,
-      src: dataUrl,
-      mediaType: 'image',
-      name: 'Legenda Impianti',
-      angle: 0,
-      opacity: 1.0,
-      brightness: 100,
-      contrast: 100,
-      blendMode: 'normal'
-    } as any;
-
-    if (typeof setEntities === 'function') {
-      (setEntities as any)((prev: Entity[]) => {
-        const clean = prev.filter(e => e.layer !== 'BIM_Legenda');
-        onCommitHistory?.([...clean, newLegendEntity]);
-        return [...clean, newLegendEntity];
-      });
-    }
-
-    setLegendInsertingState("success");
-    setTimeout(() => {
-      setLegendInsertingState("default");
-    }, 2000);
-  };
 
   // Filter BIM entities
   const bimRooms = entities.filter(e => e.isBIM && e.bimType === 'room');
@@ -708,13 +263,143 @@ export function BIMWorkspacePanel({
         <p className="text-[11px] leading-relaxed text-slate-300">
           Traccia elementi strutturali avanzati su layer automatici dedicati, configura impianti, arredi, e pavimenti per calcoli metrici in tempo reale.
         </p>
-        <button 
-          onClick={onOpen3DView}
-          className="mt-4 w-full bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black py-2.5 rounded-lg flex items-center justify-center gap-2 text-xs tracking-widest uppercase transition-all shadow-[0_10px_20px_rgba(34,211,238,0.2)]"
+      </div>
+
+      {/* Scansione Automatica Solver */}
+      <div className="bg-cyan-50 shadow-sm border border-cyan-200 p-4 rounded-xl space-y-2.5">
+        <span className="text-[10px] font-black uppercase tracking-wider text-cyan-800 block font-mono">
+          Scansione Automatica ⚡
+        </span>
+        <button
+          onClick={() => cadCanvasRef?.current?.autoScanBIM()}
+          className="w-full bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-700 hover:to-cyan-600 text-white font-bold py-2 px-4 rounded-lg text-xs flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer"
         >
-          <BoxIcon size={16} />
-          Visualizzazione 3D BIM
+          <Sparkles size={14} className="animate-pulse" />
+          Scansione Geometrica Planimetria 🤖
         </button>
+      </div>
+
+      {/* BIM SOTTOMENU PORTAL */}
+      <div className="space-y-2.5">
+        <span className="text-[10.5px] font-black uppercase tracking-wider text-slate-400 block border-b border-slate-100 pb-1 font-mono">
+          🗂️ Sottomenu BIM di Struttura
+        </span>
+
+        <div className="grid grid-cols-2 gap-2">
+          {/* MURI SUBMENU */}
+          <button
+            onClick={onOpenMuri}
+            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-cyan-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
+          >
+            <Building className="text-slate-600 group-hover:text-cyan-600 transition duration-300 mb-1" size={20} />
+            <span className="text-[11px] font-black text-slate-800">🧱 Muri BIM</span>
+            <span className="text-[8px] opacity-60 font-mono text-slate-500">spessore/altezza</span>
+            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-cyan-500"></span>
+          </button>
+
+          {/* PORTE SUBMENU */}
+          <button
+            onClick={onOpenPorte}
+            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-rose-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
+          >
+            <div className="w-5.5 h-5.5 flex items-center justify-center border border-dashed border-rose-500 rounded text-rose-500 font-black text-[10px] mb-1 group-hover:bg-rose-50 transition duration-300">D</div>
+            <span className="text-[11px] font-black text-slate-800">🚪 Porte BIM</span>
+            <span className="text-[8px] opacity-60 font-mono text-slate-500">larghezz./swing</span>
+            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+          </button>
+
+          {/* FINESTRE SUBMENU */}
+          <button
+            onClick={onOpenFinestre}
+            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-blue-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
+          >
+            <Maximize2 className="text-slate-600 group-hover:text-blue-600 transition mb-1" size={18} />
+            <span className="text-[11px] font-black text-slate-800">🪟 Finestre</span>
+            <span className="text-[8px] opacity-60 font-mono text-slate-500 font-semibold text-slate-400">luce/aerazione</span>
+            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+          </button>
+
+          {/* ARREDI SUBMENU */}
+          <button
+            onClick={onOpenArredi}
+            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-indigo-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
+          >
+            <Home className="text-slate-600 group-hover:text-indigo-600 transition mb-1" size={18} />
+            <span className="text-[11px] font-black text-slate-800">🛋️ Arredi</span>
+            <span className="text-[8px] opacity-60 font-mono text-slate-500">mobili di pianta</span>
+            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+          </button>
+
+          {/* SANITARI SUBMENU */}
+          <button
+            onClick={onOpenSanitari}
+            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-emerald-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
+          >
+            <Droplet className="text-slate-600 group-hover:text-emerald-600 transition mb-1" size={18} />
+            <span className="text-[11px] font-black text-slate-800">🚿 Sanitari</span>
+            <span className="text-[8px] opacity-60 font-mono text-slate-500">disegno bagno</span>
+            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+          </button>
+
+          {/* IMPIANTI ELETTRICI SUBMENU */}
+          <button
+            onClick={onOpenElettrico}
+            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-amber-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
+          >
+            <Zap className="text-slate-600 group-hover:text-amber-500 transition mb-1" size={18} />
+            <span className="text-[11px] font-black text-slate-800">⚡ Elettrico</span>
+            <span className="text-[8px] opacity-60 font-mono text-slate-500">prese, luci, QE</span>
+            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+          </button>
+
+          {/* IMPIANTI IDRAULICI SUBMENU */}
+          <button
+            onClick={onOpenIdraulico}
+            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-blue-500 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
+          >
+            <Droplet className="text-slate-600 group-hover:text-blue-500 transition mb-1" size={18} />
+            <span className="text-[11px] font-black text-slate-800">🚰 Idraulico</span>
+            <span className="text-[8px] opacity-60 font-mono text-slate-500">tubi, caldaie</span>
+            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+          </button>
+
+          {/* FINITURE SUBMENU */}
+          <button
+            onClick={onOpenFiniture}
+            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:border-rose-400 hover:bg-slate-50 transition duration-300 transform active:scale-95 text-center cursor-pointer shadow-sm"
+          >
+            <Grid className="text-slate-600 group-hover:text-rose-500 transition mb-1" size={18} />
+            <span className="text-[11px] font-black text-slate-800">🎨 Finiture</span>
+            <span className="text-[8px] opacity-60 font-mono text-slate-500 font-semibold">pavimentazione</span>
+            <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+          </button>
+        </div>
+
+        {/* AREA TRACING GENERAL TOOLS */}
+        <div className="grid grid-cols-2 gap-2 mt-2">
+          <button
+            onClick={() => setSelectedTool("BIM_RilevaStanza")}
+            className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border text-[10.5px] font-bold tracking-tight transition duration-150 cursor-pointer ${
+              selectedTool === "BIM_RilevaStanza"
+                ? "bg-cyan-50 border-cyan-500 text-cyan-950 font-black shadow-inner"
+                : "bg-white border-slate-250 text-slate-700 hover:bg-slate-100"
+            }`}
+          >
+            <Sparkles size={13} className="text-cyan-600" />
+            Rileva Locale
+          </button>
+          <button
+            onClick={() => setSelectedTool("BIM_DisegnaStanza")}
+            className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border text-[10.5px] font-bold tracking-tight transition duration-150 cursor-pointer ${
+              selectedTool === "BIM_DisegnaStanza"
+                ? "bg-emerald-50 border-emerald-500 text-emerald-950 font-black shadow-inner"
+                : "bg-white border-slate-250 text-slate-700 hover:bg-slate-100"
+            }`}
+          >
+            <Square size={13} className="text-emerald-600" />
+            Traccia Locale
+          </button>
+        </div>
       </div>
 
       {/* 2D SYMBOLS COMPONENT RECONCILIATION */}
@@ -846,80 +531,14 @@ export function BIMWorkspacePanel({
                     className="w-full border rounded px-1.5 py-1 text-xs bg-white"
                   />
                 </div>
+                <div className="bg-white/80 border p-1 rounded-md flex flex-col justify-center items-center text-center">
+                  <span className="text-[9px] text-slate-400 font-mono">Volume Loc.</span>
+                  <span className="text-[11px] font-bold text-slate-700">
+                    {((getRoomAreaMq((selectedEntity as any).bimPoints || (selectedEntity as any).points)) * (selectedEntity.bimHeight || 2.70)).toFixed(1)} m³
+                  </span>
+                </div>
               </div>
             )}
-            
-            {/* Generic BIM Fields for all BIM entities */}
-            <div className="space-y-2 border-t pt-2 mt-2">
-              <div>
-                <label className="text-[10px] text-slate-500 block mb-0.5 font-bold">
-                  Tipo Elemento/Area
-                </label>
-                <select
-                  value={selectedEntity.bimAreaType || 'stanza'}
-                  onChange={(e) => updateSelectedBIMField("bimAreaType", e.target.value)}
-                  className="w-full border rounded px-1.5 py-1 text-xs bg-white text-slate-800"
-                >
-                  <option value="stanza">Stanza/Locale</option>
-                  <option value="muro">Muro Portante</option>
-                  <option value="tramezzo">Tramezzo Interno</option>
-                  <option value="giardino">Giardino/Esterno</option>
-                  <option value="tetto">Tetto/Copertura</option>
-                  <option value="altro">Altro/Specifica</option>
-                </select>
-              </div>
-              
-              <div>
-                <label className="text-[10px] text-slate-500 block mb-0.5 font-bold">
-                  Trasmittanza (U)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={selectedEntity.bimTrasmittanza || 0}
-                  onChange={(e) => updateSelectedBIMField("bimTrasmittanza", parseFloat(e.target.value) || 0)}
-                  className="w-full border rounded px-1.5 py-1 text-xs bg-white text-slate-800"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] text-slate-500 block mb-0.5 font-bold">
-                  Voce Prezzario
-                </label>
-                <input
-                  type="text"
-                  value={selectedEntity.bimDescription || ""}
-                  onChange={(e) => updateSelectedBIMField("bimDescription", e.target.value)}
-                  className="w-full border rounded px-1.5 py-1 text-xs bg-white text-slate-800"
-                />
-              </div>
-
-              <div className="pt-2">
-                <button
-                  onClick={() => updateSelectedBIMField("hideIn2D", !(selectedEntity as any).hideIn2D)}
-                  className={`w-full py-1.5 px-2 rounded font-bold text-[10px] transition-colors border ${
-                    (selectedEntity as any).hideIn2D 
-                    ? 'bg-rose-100 text-rose-700 border-rose-300 hover:bg-rose-200' 
-                    : 'bg-white hover:bg-neutral-50 text-slate-700 border-slate-300'
-                  }`}
-                >
-                  {(selectedEntity as any).hideIn2D ? '🚫 Oggetto non visibile in pianta' : '👁️ Nascondi in pianta (Solo 3D Sfumato)'}
-                </button>
-              </div>
-
-              <div className="pt-2">
-                <label className="text-[10px] text-slate-500 font-bold block mb-1">
-                  Inizio (Offset - cm)
-                </label>
-                <input
-                  type="number"
-                  value={(selectedEntity as any).bimOffset || 0}
-                  onChange={(e) => updateSelectedBIMField("bimOffset", parseFloat(e.target.value) || 0)}
-                  placeholder="Es: 10"
-                  className="w-full border rounded px-2 py-1 bg-white text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                />
-              </div>
-            </div>
 
             {(selectedEntity.bimType === 'door' || selectedEntity.bimType === 'window') && (
               <div className="space-y-3">
@@ -983,33 +602,6 @@ export function BIMWorkspacePanel({
                   </button>
                 </div>
 
-                {/* Description field for price list */}
-                <div className="pt-2">
-                  <label className="text-[10px] text-slate-500 font-bold block mb-1">
-                    Descrizione Prezzario
-                  </label>
-                  <textarea
-                    value={selectedEntity.bimDescription || ""}
-                    onChange={(e) => updateSelectedBIMField("bimDescription", e.target.value)}
-                    placeholder="Inserisci descrizione prezzario..."
-                    className="w-full border rounded px-2 py-1 bg-white text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                    rows={3}
-                  />
-                </div>
-
-                <div className="pt-2">
-                  <label className="text-[10px] text-slate-500 font-bold block mb-1">
-                    Opere in Marmo (Soglie)
-                  </label>
-                  <input
-                    type="text"
-                    value={selectedEntity.bimMarmo || ""}
-                    onChange={(e) => updateSelectedBIMField("bimMarmo", e.target.value)}
-                    placeholder="Es: Marmo bianco, 3cm"
-                    className="w-full border rounded px-2 py-1 bg-white text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                  />
-                </div>
-
                 <button
                     onClick={() => {
                         const width = (selectedEntity as any).bimWidth || 80;
@@ -1070,7 +662,7 @@ export function BIMWorkspacePanel({
         {bimRooms.length > 0 ? (
           <div className="border border-neutral-200 rounded-lg overflow-hidden bg-white">
             <div className="p-1 px-2.5 bg-neutral-100 text-[9.5px] font-bold uppercase tracking-wider text-slate-500 border-b flex justify-between">
-              <span>Aree Funzionali</span>
+              <span>Locale</span>
               <span>Sup. (mq)</span>
             </div>
             <div className="divide-y max-h-40 overflow-y-auto">
@@ -1078,7 +670,6 @@ export function BIMWorkspacePanel({
                 const pts = (r as any).bimPoints || (r as any).points;
                 const area = getRoomAreaMq(pts);
                 const isSelected = r.id === selectedId;
-                const dotColor = (r as any).backgroundColor || (r as any).color || '#10b981';
                 return (
                   <div
                     key={r.id}
@@ -1088,28 +679,12 @@ export function BIMWorkspacePanel({
                     }`}
                   >
                     <span className="truncate pr-4 max-w-[130px] flex items-center gap-1">
-                      <span className="w-2.5 h-2.5 rounded-full border border-black/10 shadow-inner shrink-0" style={{ backgroundColor: dotColor }}></span>
-                      <div className="flex flex-col min-w-0">
-                        <span className="truncate font-bold text-slate-700">{(r as any).bimName || "Unlabeled"}</span>
-                        <div className="flex items-center gap-1">
-                          {(r as any).bimAreaType && (
-                            <span className="text-[7.5px] opacity-60 uppercase font-bold tracking-tighter leading-none">{(r as any).bimAreaType}</span>
-                          )}
-                          {(r as any).bimHatchPattern && (
-                             <span className="text-[7.5px] opacity-40 uppercase font-black tracking-tighter leading-none border-l pl-0.5 border-slate-300">{(r as any).bimHatchPattern}</span>
-                          )}
-                        </div>
-                      </div>
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                      {r.bimName || "Unlabeled"}
                     </span>
-                    <span className="font-mono text-[10px] font-bold text-emerald-600">
+                    <span className="font-mono text-[10px]">
                       {area.toFixed(2)}
                     </span>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); onEditArea?.(r.id); }}
-                      className="ml-1 p-1 text-slate-400 hover:text-cyan-500 hover:bg-cyan-50 rounded transition-colors"
-                    >
-                      <Edit size={10} />
-                    </button>
                   </div>
                 );
               })}
@@ -1143,119 +718,6 @@ export function BIMWorkspacePanel({
             )}
           </div>
         )}
-
-        {/* 📋 LEGENDA AUTOMATICA IMPIANTI */}
-        <div className="border border-neutral-200 rounded-lg bg-white overflow-hidden p-3 space-y-3">
-          <div className="flex items-center justify-between border-b pb-1.5">
-            <div className="flex items-center gap-1.5">
-              <Notebook size={14} className="text-cyan-600" />
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
-                Legenda Impianti
-              </span>
-            </div>
-            <span className="text-[9px] bg-cyan-100 text-cyan-800 font-extrabold px-1.5 py-0.5 rounded-full uppercase">
-              BIM Live
-            </span>
-          </div>
-
-          {activeSymbolsSummary.all.length > 0 ? (
-            <div className="space-y-3">
-              {/* Elettrici */}
-              {activeSymbolsSummary.electric.length > 0 && (
-                <div className="space-y-1.5">
-                  <span className="text-[9px] font-black uppercase text-amber-600 flex items-center gap-1">
-                    ⚡ Impianto Elettrico ({activeSymbolsSummary.electric.reduce((sum, item) => sum + item.count, 0)} p.ti)
-                  </span>
-                  <div className="divide-y border rounded-md overflow-hidden bg-slate-50/50">
-                    {activeSymbolsSummary.electric.map(sym => {
-                      const IconComponent = SYSTEM_ICONS[sym.name] || Lightbulb;
-                      return (
-                        <div key={sym.name} className="flex justify-between items-center p-2 py-1.5 text-[11px] text-slate-700">
-                          <span className="flex items-center gap-2 truncate">
-                            <span className="p-1 bg-amber-50 rounded text-amber-600 border border-amber-100">
-                              <IconComponent size={12} />
-                            </span>
-                            <span className="truncate font-medium">{sym.label}</span>
-                          </span>
-                          <span className="font-mono font-bold bg-slate-200 text-slate-800 px-1.5 py-0.5 rounded text-[10px]">
-                            {sym.count} u.
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Idraulici */}
-              {activeSymbolsSummary.hydraulic.length > 0 && (
-                <div className="space-y-1.5">
-                  <span className="text-[9px] font-black uppercase text-sky-600 flex items-center gap-1">
-                    💧 Impianto Idraulico e Termico ({activeSymbolsSummary.hydraulic.reduce((sum, item) => sum + item.count, 0)} p.ti)
-                  </span>
-                  <div className="divide-y border rounded-md overflow-hidden bg-slate-50/50">
-                    {activeSymbolsSummary.hydraulic.map(sym => {
-                      const IconComponent = SYSTEM_ICONS[sym.name] || Droplet;
-                      return (
-                        <div key={sym.name} className="flex justify-between items-center p-2 py-1.5 text-[11px] text-slate-700">
-                          <span className="flex items-center gap-2 truncate">
-                            <span className="p-1 bg-sky-50 rounded text-sky-600 border border-sky-100">
-                              <IconComponent size={12} />
-                            </span>
-                            <span className="truncate font-medium">{sym.label}</span>
-                          </span>
-                          <span className="font-mono font-bold bg-slate-200 text-slate-800 px-1.5 py-0.5 rounded text-[10px]">
-                            {sym.count} u.
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-center justify-between gap-1 border-t pt-2 mt-2">
-                <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">Scala Tabella CAD:</span>
-                <select
-                  value={legendScale}
-                  onChange={(e) => setLegendScale(parseFloat(e.target.value))}
-                  className="bg-slate-100 border border-slate-200 text-slate-700 rounded px-1.5 py-0.5 text-[10px] font-bold text-right outline-none focus:ring-1 focus:ring-cyan-500 cursor-pointer"
-                >
-                  <option value="1.0">1.0x (Piccola)</option>
-                  <option value="1.5">1.5x (Compatta)</option>
-                  <option value="2.0">2.0x (Consigliata)</option>
-                  <option value="2.5">2.5x (Grande)</option>
-                  <option value="3.0">3.0x (Molto Grande)</option>
-                  <option value="4.0">4.0x (Massima)</option>
-                </select>
-              </div>
-
-              <button
-                onClick={handleInsertLegendToDrawing}
-                className={`w-full py-2 px-3 text-[10.5px] font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.98] cursor-pointer ${
-                  legendInsertingState === 'success'
-                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white animate-pulse'
-                    : 'bg-slate-800 hover:bg-slate-900 text-white'
-                }`}
-              >
-                <Grid size={12} />
-                {legendInsertingState === 'success' ? (
-                  <span>Legenda Sincronizzata in Tavola! ✓</span>
-                ) : (
-                  <span>Disegna Tabella Legenda in CAD</span>
-                )}
-              </button>
-            </div>
-          ) : (
-            <div className="p-3 text-center border border-dashed rounded-lg bg-neutral-50 flex flex-col items-center justify-center gap-1 text-[10px] text-slate-400">
-              <Info size={16} className="text-slate-300" />
-              <span>Nessun simbolo d'impianto posizionato.</span>
-              <span className="text-[8.5px] text-slate-400 leading-tight">
-                Usa i menu superiori per inserire Punti Luce, Prese o Collettori.
-              </span>
-            </div>
-          )}
-        </div>
 
         <button
           onClick={handleExportTextReport}

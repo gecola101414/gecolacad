@@ -7,7 +7,7 @@ export interface InkPoint {
   alpha: number;
 }
 
-export type EntityType = 'line' | 'circle' | 'rectangle' | 'dimension' | 'arc' | 'point' | 'text' | 'hatch' | 'image' | 'bim-csg';
+export type EntityType = 'line' | 'circle' | 'rectangle' | 'dimension' | 'arc' | 'point' | 'text' | 'hatch' | 'image';
 
 export interface CADEntity {
   id: string;
@@ -19,7 +19,6 @@ export interface CADEntity {
   mode?: 'ink' | 'pencil' | 'CAD';
   groupId?: string;
   templateId?: string;
-  parentLineId?: string;
   opacity?: number;
   raccordoMetadata?: {
     id1: string;
@@ -28,23 +27,15 @@ export interface CADEntity {
     originalLine2: any;
     clickPt1: { x: number; y: number };
     clickPt2: { x: number; y: number };
-    config: { type: 'curvo' | 'rettilineo' | 'taglia'; value: number };
+    config: { type: 'curvo' | 'rettilineo'; value: number };
   };
   isBIM?: boolean;
-  bimType?: 'room' | 'door' | 'window' | 'wall' | 'electrical_symbol' | 'hydraulic_symbol' | 'functional_area';
-  bimAreaType?: 'stanza' | 'muro' | 'tramezzo' | 'giardino' | 'tetto' | 'altro';
+  bimType?: 'room' | 'door' | 'window' | 'wall' | 'electrical_symbol' | 'hydraulic_symbol';
   bimName?: string;
   bimHeight?: number; // e.g. 2.70
   bimWidth?: number;  // e.g. 80, 90, 120
   bimWindowHeight?: number; // e.g. 140
-  bimPoints?: Point[]; // Polygon corners For rooms/areas
-  bimOffset?: number; // Offset for positioning
-  backgroundColor?: string; // Fill color for functional areas
-  bimHatchPattern?: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE'; 
-  bimDescription?: string;
-  bimMarmo?: string;
-  bimTrasmittanza?: number;
-  hideIn2D?: boolean;
+  bimPoints?: Point[]; // Polygon corners For rooms
 }
 
 export interface LineEntity extends CADEntity {
@@ -106,7 +97,6 @@ export interface HatchEntity extends CADEntity {
   scale: number;
   angle: number; // in degrees
   points: Point[]; // Polygon boundary
-  holes?: Point[][]; // Inner boundaries (holes)
   backgroundColor?: string;
   sfumatura?: number;
 }
@@ -117,7 +107,6 @@ export interface ImageEntity extends CADEntity {
   width: number;
   height: number;
   src: string;
-  mediaType?: 'image' | 'video' | 'audio' | 'pdf';
   name?: string;
   angle?: number;
   aspectRatio?: number;
@@ -131,17 +120,7 @@ export interface ImageEntity extends CADEntity {
   traceSmooth?: boolean; // smooth contours vs sharp
 }
 
-export interface CSGMeshEntity extends CADEntity {
-  type: 'bim-csg';
-  geometryData: {
-    positions: Float32Array | number[];
-    normals: Float32Array | number[];
-    uvs?: Float32Array | number[];
-    indices?: Uint32Array | Uint16Array | number[];
-  };
-}
-
-export type Entity = LineEntity | CircleEntity | RectEntity | DimensionEntity | ArcEntity | PointEntity | TextEntity | HatchEntity | ImageEntity | CSGMeshEntity;
+export type Entity = LineEntity | CircleEntity | RectEntity | DimensionEntity | ArcEntity | PointEntity | TextEntity | HatchEntity | ImageEntity;
 
 export interface Measurement {
   id: string;

@@ -1,6 +1,6 @@
 {
-  "name": "Gecolacad 20_2 3d perfetto_versione funzioannte",
-  "description": "1. all\u0027inizio devono apparire dei menu definiti piu funzioannti e gia ai lati   disegno copia ecc",
+  "name": "gecolacad 8.0  perfezione stampa",
+  "description": "A minimalist, fast 2D CAD application for the browser.",
   "requestFramePermissions": [
     "microphone"
   ],
