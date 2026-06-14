@@ -30,7 +30,9 @@ import {
   Siren,
   Sun,
   Phone,
-  Video
+  Video,
+  Cuboid,
+  Square
 } from 'lucide-react';
 import { TEMPLATES, Template } from '../data/templates';
 
@@ -61,6 +63,7 @@ interface BIMTopBarControlsProps {
   bimSymbolScale?: number;
   setBimSymbolScale?: (val: number) => void;
   setIsBIMFinestreOpen: (val: boolean) => void;
+  onOpen3DView?: () => void;
 }
 
 export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
@@ -87,11 +90,12 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
   setBimWindowHeight,
   bimSymbolScale = 1,
   setBimSymbolScale,
-  setIsBIMFinestreOpen
+  setIsBIMFinestreOpen,
+  onOpen3DView
 }) => {
-  const [activeDropdown, setActiveDropdown] = useState<
-    'porte' | 'finestre' | 'arredi' | 'sanitari' | 'elettrico' | 'idraulico' | 'finiture' | null
-  >(null);
+   const [activeDropdown, setActiveDropdown] = useState<
+     'porte' | 'finestre' | 'arredi' | 'sanitari' | 'elettrico' | 'idraulico' | 'finiture' | 'vani' | null
+   >(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -189,6 +193,74 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
   return (
     <div ref={containerRef} className="flex items-center gap-1.5 w-full text-neutral-800">
       
+
+      {/* 1. ROOMS (VANI) BUTTON & DROPDOWN */}
+      <div className="relative flex items-center">
+        <button
+          onClick={() => {
+            setSelectedTool('BIM_RilevaStanza');
+          }}
+          className={`px-2 py-0.5 rounded-l flex items-center gap-1 text-xs border border-r-0 transition ${
+            selectedTool === 'BIM_RilevaStanza' || selectedTool === 'BIM_DisegnaStanza'
+              ? 'bg-cyan-100 text-cyan-950 font-bold border-cyan-300 shadow-sm' 
+              : 'hover:bg-neutral-100 border-neutral-300 bg-white'
+          }`}
+          title="Rilevamento e Tracciamento dei vani/locali"
+        >
+          <span className="text-cyan-600 font-bold text-[10px]">📐</span>
+          <span>
+            {selectedTool === 'BIM_DisegnaStanza' ? 'Traccia Volume' : 'Rileva Volume'}
+          </span>
+        </button>
+        <button
+          onClick={() => toggleDropdown('vani')}
+          className={`px-1 py-1 rounded-r border transition text-neutral-500 hover:text-neutral-900 ${
+            activeDropdown === 'vani' ? 'bg-cyan-50 border-cyan-300 pointer-events-auto' : 'hover:bg-neutral-100 border-neutral-300 bg-white'
+          }`}
+          title="Seleziona modalità rilevamento volumi"
+        >
+          <ChevronDown size={11} />
+        </button>
+
+        {activeDropdown === 'vani' && (
+          <div className="absolute top-7 left-0 w-52 bg-white rounded-lg shadow-xl border border-neutral-200 p-2 z-50 animate-fade-in text-xs space-y-1">
+            <span className="font-semibold text-[10px] uppercase text-neutral-400 block px-2 py-1 border-b">Modalità Rilievo Volumi</span>
+            
+            <button
+              onClick={() => {
+                setSelectedTool('BIM_RilevaStanza');
+                setActiveDropdown(null);
+              }}
+              className={`w-full text-left px-2 py-1.5 hover:bg-neutral-50 transition rounded text-[11px] font-medium flex items-center gap-2 ${
+                selectedTool === 'BIM_RilevaStanza' ? 'bg-cyan-50 text-cyan-800 font-bold' : 'text-neutral-700'
+              }`}
+            >
+              <Sparkles size={13} className="text-cyan-600" />
+              <div className="flex flex-col text-left">
+                <span>Rileva con punto interno</span>
+                <span className="text-[9px] text-neutral-400 font-normal">Sotto-muro automatico con 1 click</span>
+              </div>
+            </button>
+
+            <button
+              onClick={() => {
+                setSelectedTool('BIM_DisegnaStanza');
+                setActiveDropdown(null);
+              }}
+              className={`w-full text-left px-2 py-1.5 hover:bg-neutral-50 transition rounded text-[11px] font-medium flex items-center gap-2 ${
+                selectedTool === 'BIM_DisegnaStanza' ? 'bg-indigo-50 text-indigo-800 font-bold' : 'text-neutral-700'
+              }`}
+            >
+              <Square size={13} className="text-indigo-600" />
+              <div className="flex flex-col text-left">
+                <span>Traccia punti esterni</span>
+                <span className="text-[9px] text-neutral-400 font-normal">Disegno manuale vertici</span>
+              </div>
+            </button>
+          </div>
+        )}
+      </div>
+
 
       {/* 2. DOORS BUTTON & DROPDOWN */}
       <div className="relative flex items-center">
@@ -617,16 +689,13 @@ export const BIMTopBarControls: React.FC<BIMTopBarControlsProps> = ({
 
       <div className="h-4 w-[1px] bg-neutral-300 mx-1" />
 
-      {/* 9. THE SCANSIONE PLANIMETRICA INTEGRATION */}
+      {/* 9. THE 3D VISUALIZATION INTEGRATION */}
       <button
-        onClick={() => {
-          cadCanvasRef?.current?.autoScanBIM();
-        }}
-        className="px-3 py-0.5 rounded bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-700 hover:to-cyan-600 text-white font-extrabold text-xs flex items-center gap-1 shadow-xs transition hover:scale-[1.02] cursor-pointer"
-        title="Software scansione automatica: Trova spazi chiusi per calcolare locali e generare etichette BIM"
+        onClick={onOpen3DView}
+        className="w-7 h-7 rounded-lg bg-gradient-to-br from-cyan-600 to-cyan-500 hover:from-cyan-700 hover:to-cyan-600 text-white font-extrabold flex justify-center items-center shadow-md transition hover:scale-105 cursor-pointer ml-2"
+        title="Apri Visualizzazione 3D BIM"
       >
-        <Sparkles size={11} className="text-yellow-200 animate-pulse" />
-        <span>Scansione Planimetria 🤖</span>
+        <Cuboid size={14} className="text-white drop-shadow-sm" />
       </button>
 
     </div>

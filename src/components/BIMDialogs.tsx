@@ -31,7 +31,8 @@ import {
   Siren,
   Sun,
   Phone,
-  Video
+  Video,
+  Trash2
 } from "lucide-react";
 import { Point, Entity } from '../types';
 import { TEMPLATES, Template } from '../data/templates';
@@ -120,12 +121,12 @@ export const MuriDialog: React.FC<MuriDialogProps> = ({
 
   return (
     <div 
-      className="fixed z-[100] select-none animate-fade-in bg-slate-950 border border-slate-800 p-5 rounded-xl shadow-2xl max-w-sm w-full text-white"
+      className="fixed z-[100] select-none animate-fade-in bg-slate-950 border border-slate-800 p-5 rounded-xl shadow-2xl max-w-sm w-full text-white max-h-[85vh] flex flex-col"
       style={{ left: `${position.x}px`, top: `${position.y}px` }}
       onClick={(e) => e.stopPropagation()}
     >
       <div 
-        className="flex justify-between items-center border-b border-slate-800 pb-3 mb-4 cursor-grab active:cursor-grabbing"
+        className="flex justify-between items-center border-b border-slate-800 pb-3 mb-3 cursor-grab active:cursor-grabbing shrink-0"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -137,7 +138,7 @@ export const MuriDialog: React.FC<MuriDialogProps> = ({
         <button type="button" onClick={onClose} className="text-slate-500 hover:text-white font-mono text-xs font-bold leading-none p-1">✕</button>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4 overflow-y-auto pr-2 pb-2">
         <div>
           <label className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1.5">
             Spessore del Muro (cm)
@@ -233,13 +234,15 @@ interface PorteDialogProps {
   lastDoorWidth: number;
   lastDoorHeight: number;
   onConfirmDoor: (width: number, height: number, type: string, flip: boolean) => void;
+  onDelete?: () => void;
 }
 export const PorteDialog: React.FC<PorteDialogProps> = ({
   isOpen,
   onClose,
   lastDoorWidth,
   lastDoorHeight,
-  onConfirmDoor
+  onConfirmDoor,
+  onDelete
 }) => {
   const { position, handlePointerDown, handlePointerMove, handlePointerUp } = useDraggableDialog(isOpen, { x: 300, y: 120 });
   const [width, setWidth] = useState<number>(lastDoorWidth || 80);
@@ -258,12 +261,12 @@ export const PorteDialog: React.FC<PorteDialogProps> = ({
 
   return (
     <div 
-      className="fixed z-[100] bg-slate-950 border border-slate-800 p-5 rounded-xl shadow-2xl max-w-sm w-full text-white"
+      className="fixed z-[100] bg-slate-950 border border-slate-800 p-5 rounded-xl shadow-2xl max-w-sm w-full text-white max-h-[85vh] flex flex-col"
       style={{ left: `${position.x}px`, top: `${position.y}px` }}
       onClick={(e) => e.stopPropagation()}
     >
       <div 
-        className="flex justify-between items-center border-b border-slate-800 pb-3 mb-4 cursor-grab active:cursor-grabbing"
+        className="flex justify-between items-center border-b border-slate-800 pb-3 mb-3 cursor-grab active:cursor-grabbing shrink-0"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -275,7 +278,7 @@ export const PorteDialog: React.FC<PorteDialogProps> = ({
         <button type="button" onClick={onClose} className="text-slate-500 hover:text-white font-mono text-xs font-bold leading-none p-1">✕</button>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4 overflow-y-auto pr-2 pb-2">
         <div>
           <label className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1.5">Larghezza Porta (cm)</label>
           <div className="grid grid-cols-5 gap-1.5 mb-2">
@@ -341,12 +344,24 @@ export const PorteDialog: React.FC<PorteDialogProps> = ({
           </label>
         </div>
 
-        <button
-          type="submit"
-          className="w-full bg-rose-600 hover:bg-rose-500 text-white font-black py-2.5 rounded-lg text-xs tracking-wider transition shadow-md cursor-pointer"
-        >
-          ATTIVA PORTA IN LOCAZIONE 🚪
-        </button>
+        <div className="flex gap-2">
+          {onDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="bg-red-600/10 hover:bg-red-600/20 text-red-500 font-black px-4 py-2.5 rounded-lg text-xs tracking-wider transition cursor-pointer flex items-center justify-center border border-red-500/20"
+              title="Cancella Oggetto"
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
+          <button
+            type="submit"
+            className="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-black py-2.5 rounded-lg text-xs tracking-wider transition shadow-md cursor-pointer uppercase"
+          >
+            ATTIVA PORTA IN LOCAZIONE 🚪
+          </button>
+        </div>
       </form>
     </div>
   );
@@ -360,13 +375,15 @@ interface FinestreDialogProps {
   lastWindowWidth: number;
   lastWindowHeight: number;
   onConfirmWindow: (width: number, height: number, type: string, trasmittanza: number, prezzario: string) => void;
+  onDelete?: () => void;
 }
 export const FinestreDialog: React.FC<FinestreDialogProps> = ({
   isOpen,
   onClose,
   lastWindowWidth,
   lastWindowHeight,
-  onConfirmWindow
+  onConfirmWindow,
+  onDelete
 }) => {
   const { position, handlePointerDown, handlePointerMove, handlePointerUp } = useDraggableDialog(isOpen, { x: 300, y: 120 });
   const [width, setWidth] = useState<number>(lastWindowWidth || 120);
@@ -387,12 +404,12 @@ export const FinestreDialog: React.FC<FinestreDialogProps> = ({
 
   return (
     <div 
-      className="fixed z-[100] bg-slate-950 border border-slate-800 p-5 rounded-xl shadow-2xl max-w-sm w-full text-white"
+      className="fixed z-[100] bg-slate-950 border border-slate-800 p-5 rounded-xl shadow-2xl max-w-sm w-full text-white max-h-[85vh] flex flex-col"
       style={{ left: `${position.x}px`, top: `${position.y}px` }}
       onClick={(e) => e.stopPropagation()}
     >
       <div 
-        className="flex justify-between items-center border-b border-slate-800 pb-3 mb-4 cursor-grab active:cursor-grabbing"
+        className="flex justify-between items-center border-b border-slate-800 pb-3 mb-3 cursor-grab active:cursor-grabbing shrink-0"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -404,7 +421,7 @@ export const FinestreDialog: React.FC<FinestreDialogProps> = ({
         <button type="button" onClick={onClose} className="text-slate-500 hover:text-white font-mono text-xs font-bold leading-none p-1">✕</button>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4 overflow-y-auto pr-2 pb-2">
         <div>
           <label className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1.5">Larghezza Infisso (cm)</label>
           <div className="grid grid-cols-6 gap-1 mb-2">
@@ -478,12 +495,24 @@ export const FinestreDialog: React.FC<FinestreDialogProps> = ({
           </div>
         </div>
 
-        <button
-          type="submit"
-          className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-2.5 rounded-lg text-xs tracking-wider transition shadow-md cursor-pointer"
-        >
-          CONFERMA E POSIZIONA
-        </button>
+        <div className="flex gap-2">
+          {onDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="bg-red-600/10 hover:bg-red-600/20 text-red-500 font-black px-4 py-2.5 rounded-lg text-xs tracking-wider transition cursor-pointer flex items-center justify-center border border-red-500/20"
+              title="Cancella Oggetto"
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
+          <button
+            type="submit"
+            className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-black py-2.5 rounded-lg text-xs tracking-wider transition shadow-md cursor-pointer uppercase"
+          >
+            CONFERMA E POSIZIONA
+          </button>
+        </div>
       </form>
     </div>
   );
@@ -512,12 +541,12 @@ export const ArrediDialog: React.FC<ArrediDialogProps> = ({
 
   return (
     <div 
-      className="fixed z-[100] bg-slate-950 border border-slate-800 p-5 rounded-xl shadow-2xl max-w-sm w-full text-white"
+      className="fixed z-[100] bg-slate-950 border border-slate-800 p-5 rounded-xl shadow-2xl max-w-sm w-full text-white max-h-[85vh] flex flex-col"
       style={{ left: `${position.x}px`, top: `${position.y}px` }}
       onClick={(e) => e.stopPropagation()}
     >
       <div 
-        className="flex justify-between items-center border-b border-slate-800 pb-3 mb-3 cursor-grab active:cursor-grabbing"
+        className="flex justify-between items-center border-b border-slate-800 pb-3 mb-3 cursor-grab active:cursor-grabbing shrink-0"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -529,7 +558,7 @@ export const ArrediDialog: React.FC<ArrediDialogProps> = ({
         <button type="button" onClick={onClose} className="text-slate-500 hover:text-white font-mono text-xs font-bold leading-none p-1">✕</button>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-3 overflow-y-auto pr-2 pb-2">
         <input
           type="text"
           placeholder="Cerca arredo..."
@@ -586,12 +615,12 @@ export const SanitariDialog: React.FC<SanitariDialogProps> = ({
 
   return (
     <div 
-      className="fixed z-[100] bg-slate-950 border border-slate-800 p-5 rounded-xl shadow-2xl max-w-sm w-full text-white"
+      className="fixed z-[100] bg-slate-950 border border-slate-800 p-5 rounded-xl shadow-2xl max-w-sm w-full text-white max-h-[85vh] flex flex-col"
       style={{ left: `${position.x}px`, top: `${position.y}px` }}
       onClick={(e) => e.stopPropagation()}
     >
       <div 
-        className="flex justify-between items-center border-b border-slate-800 pb-3 mb-3 cursor-grab active:cursor-grabbing"
+        className="flex justify-between items-center border-b border-slate-800 pb-3 mb-3 cursor-grab active:cursor-grabbing shrink-0"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -603,7 +632,7 @@ export const SanitariDialog: React.FC<SanitariDialogProps> = ({
         <button type="button" onClick={onClose} className="text-slate-500 hover:text-white font-mono text-xs font-bold leading-none p-1">✕</button>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-3 overflow-y-auto pr-2 pb-2">
         <div className="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1">
           {items.map(t => (
             <button
@@ -672,12 +701,12 @@ export const ElettricoDialog: React.FC<ElettricoDialogProps> = ({
 
   return (
     <div 
-      className="fixed z-[100] bg-slate-950 border border-slate-800 p-5 rounded-xl shadow-2xl max-w-sm w-full text-white"
+      className="fixed z-[100] bg-slate-950 border border-slate-800 p-5 rounded-xl shadow-2xl max-w-sm w-full text-white max-h-[85vh] flex flex-col"
       style={{ left: `${position.x}px`, top: `${position.y}px` }}
       onClick={(e) => e.stopPropagation()}
     >
       <div 
-        className="flex justify-between items-center border-b border-slate-800 pb-3 mb-3 cursor-grab active:cursor-grabbing"
+        className="flex justify-between items-center border-b border-slate-800 pb-3 mb-3 cursor-grab active:cursor-grabbing shrink-0"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -689,7 +718,7 @@ export const ElettricoDialog: React.FC<ElettricoDialogProps> = ({
         <button type="button" onClick={onClose} className="text-slate-500 hover:text-white font-mono text-xs font-bold leading-none p-1">✕</button>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-2 overflow-y-auto pr-2 pb-2">
         <span className="text-[9px] text-slate-400 font-bold block uppercase pb-1 border-b border-slate-900 tracking-widest">Procedi al posizionamento</span>
         <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
           {symbols.map(sym => (
@@ -747,12 +776,12 @@ export const IdraulicoDialog: React.FC<IdraulicoDialogProps> = ({
 
   return (
     <div 
-      className="fixed z-[100] bg-slate-950 border border-slate-800 p-5 rounded-xl shadow-2xl max-w-sm w-full text-white"
+      className="fixed z-[100] bg-slate-950 border border-slate-800 p-5 rounded-xl shadow-2xl max-w-sm w-full text-white max-h-[85vh] flex flex-col"
       style={{ left: `${position.x}px`, top: `${position.y}px` }}
       onClick={(e) => e.stopPropagation()}
     >
       <div 
-        className="flex justify-between items-center border-b border-slate-800 pb-3 mb-3 cursor-grab active:cursor-grabbing"
+        className="flex justify-between items-center border-b border-slate-800 pb-3 mb-3 cursor-grab active:cursor-grabbing shrink-0"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -764,7 +793,7 @@ export const IdraulicoDialog: React.FC<IdraulicoDialogProps> = ({
         <button type="button" onClick={onClose} className="text-slate-500 hover:text-white font-mono text-xs font-bold leading-none p-1">✕</button>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-2 overflow-y-auto pr-2 pb-2">
         <span className="text-[9px] text-slate-400 font-bold block uppercase pb-1 border-b border-slate-900 tracking-widest">Procedi al posizionamento</span>
         <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
           {symbols.map(sym => (
@@ -838,12 +867,12 @@ export const FinitureDialog: React.FC<FinitureDialogProps> = ({
 
   return (
     <div 
-      className="fixed z-[100] bg-slate-950 border border-slate-800 p-5 rounded-xl shadow-2xl max-w-sm w-full text-white"
+      className="fixed z-[100] bg-slate-950 border border-slate-800 p-5 rounded-xl shadow-2xl max-w-sm w-full text-white max-h-[85vh] flex flex-col"
       style={{ left: `${position.x}px`, top: `${position.y}px` }}
       onClick={(e) => e.stopPropagation()}
     >
       <div 
-        className="flex justify-between items-center border-b border-slate-800 pb-3 mb-3 cursor-grab active:cursor-grabbing"
+        className="flex justify-between items-center border-b border-slate-800 pb-3 mb-3 cursor-grab active:cursor-grabbing shrink-0"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -855,7 +884,7 @@ export const FinitureDialog: React.FC<FinitureDialogProps> = ({
         <button type="button" onClick={onClose} className="text-slate-500 hover:text-white font-mono text-xs font-bold leading-none p-1">✕</button>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4 overflow-y-auto pr-2 pb-2">
         <div>
           <label className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Pattern della Pavimentazione</label>
           <select
@@ -950,6 +979,7 @@ interface AreaFunzionaleDialogProps {
     objectHeight: number;
     hatch: 'SOLID' | 'ANSI31' | 'CROSS' | 'NONE';
   };
+  onDelete?: () => void;
 }
 
 const AREA_COLORS = [
@@ -982,7 +1012,8 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
   onClose,
   onConfirm,
   points,
-  initialData
+  initialData,
+  onDelete
 }) => {
   const { position, handlePointerDown, handlePointerMove, handlePointerUp } = useDraggableDialog(isOpen, { x: 300, y: 130 });
   const [areaType, setAreaType] = useState<'stanza' | 'muro' | 'tramezzo' | 'giardino' | 'tetto' | 'altro'>('stanza');
@@ -1042,7 +1073,7 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
 
   return (
     <div 
-      className="fixed z-[200] bg-slate-950 border-2 border-cyan-500/50 p-5 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.6)] max-w-sm w-full text-white backdrop-blur-2xl"
+      className="fixed z-[200] bg-slate-950 border-2 border-cyan-500/50 p-5 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.6)] max-w-sm w-full text-white backdrop-blur-2xl max-h-[85vh] flex flex-col"
       style={{ left: `${position.x}px`, top: `${position.y}px` }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -1064,7 +1095,7 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
         </button>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4 overflow-y-auto pr-2 pb-2">
         <div>
           <label className="block text-[9px] text-slate-400 font-black uppercase tracking-widest mb-1.5 font-mono">Tipo di Funzione</label>
           <div className="grid grid-cols-2 gap-1.5">
@@ -1167,12 +1198,24 @@ export const AreaFunzionaleDialog: React.FC<AreaFunzionaleDialogProps> = ({
           </div>
         </div>
 
-        <button
-          type="submit"
-          className="w-full bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-black py-3.5 rounded-lg text-xs tracking-widest transition-all shadow-lg cursor-pointer uppercase active:scale-[0.97]"
-        >
-          {initialData ? 'SALVA MODIFICHE ✅' : 'GENERA AREA FUNZIONALE ✅'}
-        </button>
+        <div className="flex gap-2 mt-4">
+          {onDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="bg-red-600/10 hover:bg-red-600/20 text-red-500 font-black px-4 py-3.5 rounded-lg text-xs tracking-widest transition-all cursor-pointer flex items-center justify-center border border-red-500/20 active:scale-[0.97]"
+              title="Cancella Oggetto"
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
+          <button
+            type="submit"
+            className="flex-1 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-black py-3.5 rounded-lg text-xs tracking-widest transition-all shadow-lg cursor-pointer uppercase active:scale-[0.97]"
+          >
+            {initialData ? 'SALVA MODIFICHE ✅' : 'GENERA AREA FUNZIONALE ✅'}
+          </button>
+        </div>
       </form>
     </div>
   );

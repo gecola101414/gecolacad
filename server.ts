@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import cors from "cors";
 import { createServer as createViteServer } from "vite";
 import { fileURLToPath } from 'url';
 import { GoogleGenAI } from "@google/genai";
@@ -8,7 +9,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function startServer() {
   const app = express();
+  app.use(cors());
   app.use(express.json());
+
   const PORT = 3000;
 
   const ai = new GoogleGenAI({

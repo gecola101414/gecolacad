@@ -717,58 +717,6 @@ export function BIMWorkspacePanel({
         </button>
       </div>
 
-      {/* Rilevamento e Tracciamento Locali */}
-      <div className="bg-gradient-to-br from-slate-50 to-cyan-50 border border-cyan-200/80 p-4 rounded-xl space-y-3 shadow-sm">
-        <span className="text-[10px] font-black uppercase tracking-wider text-cyan-800 block font-mono">
-          Rilevamento & Tracciamento Vani 📐
-        </span>
-        <div className="space-y-2">
-          {/* Button 1: Rilievo locale con punto interno */}
-          <button
-            onClick={() => setSelectedTool("BIM_RilevaStanza")}
-            className={`w-full flex items-start gap-3 p-3 rounded-lg border text-left transition duration-150 cursor-pointer ${
-              selectedTool === "BIM_RilevaStanza"
-                ? "bg-cyan-500 border-cyan-600 text-white shadow-md font-medium"
-                : "bg-white border-slate-200 text-slate-800 hover:border-cyan-300 hover:bg-slate-50/50"
-            }`}
-          >
-            <div className={`mt-0.5 p-1 rounded-md ${selectedTool === 'BIM_RilevaStanza' ? 'bg-cyan-600/50 text-white' : 'bg-cyan-50 text-cyan-600 border border-cyan-100'}`}>
-              <Sparkles size={16} className={selectedTool === 'BIM_RilevaStanza' ? 'animate-pulse' : ''} />
-            </div>
-            <div className="flex-1">
-              <div className={`text-xs font-bold leading-tight ${selectedTool === 'BIM_RilevaStanza' ? 'text-white' : 'text-slate-900'}`}>
-                Rilievo locale con punto interno
-              </div>
-              <div className={`text-[10px] mt-0.5 leading-tight ${selectedTool === 'BIM_RilevaStanza' ? 'text-cyan-100' : 'text-slate-500 font-medium'}`}>
-                Rileva le pareti della stanza cliccando in un punto interno
-              </div>
-            </div>
-          </button>
-
-          {/* Button 2: Rilievo locale per punti esterni */}
-          <button
-            onClick={() => setSelectedTool("BIM_DisegnaStanza")}
-            className={`w-full flex items-start gap-3 p-3 rounded-lg border text-left transition duration-150 cursor-pointer ${
-              selectedTool === "BIM_DisegnaStanza"
-                ? "bg-indigo-550 border-indigo-650 text-white shadow-md font-medium"
-                : "bg-white border-slate-200 text-slate-800 hover:border-indigo-300 hover:bg-slate-50/50"
-            }`}
-          >
-            <div className={`mt-0.5 p-1 rounded-md ${selectedTool === 'BIM_DisegnaStanza' ? 'bg-indigo-600/50 text-white' : 'bg-indigo-50 text-indigo-600 border border-indigo-100'}`}>
-              <Square size={16} />
-            </div>
-            <div className="flex-1">
-              <div className={`text-xs font-bold leading-tight ${selectedTool === 'BIM_DisegnaStanza' ? 'text-white' : 'text-slate-900'}`}>
-                Rilievo locale per punti esterni
-              </div>
-              <div className={`text-[10px] mt-0.5 leading-tight ${selectedTool === 'BIM_DisegnaStanza' ? 'text-indigo-100' : 'text-slate-500 font-medium'}`}>
-                Definisci il locale cliccando manualmente sui vertici esterni
-              </div>
-            </div>
-          </button>
-        </div>
-      </div>
-
       {/* 2D SYMBOLS COMPONENT RECONCILIATION */}
       <div className="border border-slate-200 bg-slate-50/50 rounded-xl overflow-hidden shadow-sm">
         <button
@@ -944,6 +892,19 @@ export function BIMWorkspacePanel({
                   onChange={(e) => updateSelectedBIMField("bimDescription", e.target.value)}
                   className="w-full border rounded px-1.5 py-1 text-xs bg-white text-slate-800"
                 />
+              </div>
+
+              <div className="pt-2">
+                <button
+                  onClick={() => updateSelectedBIMField("hideIn2D", !(selectedEntity as any).hideIn2D)}
+                  className={`w-full py-1.5 px-2 rounded font-bold text-[10px] transition-colors border ${
+                    (selectedEntity as any).hideIn2D 
+                    ? 'bg-rose-100 text-rose-700 border-rose-300 hover:bg-rose-200' 
+                    : 'bg-white hover:bg-neutral-50 text-slate-700 border-slate-300'
+                  }`}
+                >
+                  {(selectedEntity as any).hideIn2D ? '🚫 Oggetto non visibile in pianta' : '👁️ Nascondi in pianta (Solo 3D Sfumato)'}
+                </button>
               </div>
 
               <div className="pt-2">

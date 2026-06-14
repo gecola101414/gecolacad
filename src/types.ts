@@ -7,7 +7,7 @@ export interface InkPoint {
   alpha: number;
 }
 
-export type EntityType = 'line' | 'circle' | 'rectangle' | 'dimension' | 'arc' | 'point' | 'text' | 'hatch' | 'image';
+export type EntityType = 'line' | 'circle' | 'rectangle' | 'dimension' | 'arc' | 'point' | 'text' | 'hatch' | 'image' | 'bim-csg';
 
 export interface CADEntity {
   id: string;
@@ -44,6 +44,7 @@ export interface CADEntity {
   bimDescription?: string;
   bimMarmo?: string;
   bimTrasmittanza?: number;
+  hideIn2D?: boolean;
 }
 
 export interface LineEntity extends CADEntity {
@@ -130,7 +131,17 @@ export interface ImageEntity extends CADEntity {
   traceSmooth?: boolean; // smooth contours vs sharp
 }
 
-export type Entity = LineEntity | CircleEntity | RectEntity | DimensionEntity | ArcEntity | PointEntity | TextEntity | HatchEntity | ImageEntity;
+export interface CSGMeshEntity extends CADEntity {
+  type: 'bim-csg';
+  geometryData: {
+    positions: Float32Array | number[];
+    normals: Float32Array | number[];
+    uvs?: Float32Array | number[];
+    indices?: Uint32Array | Uint16Array | number[];
+  };
+}
+
+export type Entity = LineEntity | CircleEntity | RectEntity | DimensionEntity | ArcEntity | PointEntity | TextEntity | HatchEntity | ImageEntity | CSGMeshEntity;
 
 export interface Measurement {
   id: string;

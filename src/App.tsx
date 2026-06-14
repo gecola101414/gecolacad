@@ -143,9 +143,23 @@ const OrthoIcon = ({ size = 16 }: { size?: number }) => (
   </svg>
 );
 
+const PolylineIcon = ({ size = 16, className = "" }: { size?: number, className?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <polyline points="3,17 9,7 16,13 21,5" />
+    <circle cx="3" cy="17" r="2.5" fill="currentColor" stroke="none" />
+    <circle cx="9" cy="7" r="2.5" fill="currentColor" stroke="none" />
+    <circle cx="16" cy="13" r="2.5" fill="currentColor" stroke="none" />
+    <circle cx="21" cy="5" r="2.5" fill="currentColor" stroke="none" />
+  </svg>
+);
+
 export default function App() {
   const [selectedTool, setSelectedTool] = useState<string | null>(() => localStorage.getItem('selectedTool') || 'Select');
   const [entities, setEntities] = useState<Entity[]>([]);
+  const appEntitiesRef = useRef<Entity[]>(entities);
+  useEffect(() => {
+    appEntitiesRef.current = entities;
+  }, [entities]);
   const [layers, setLayers] = useState<Layer[]>(() => {
     const saved = localStorage.getItem('layers');
     return saved ? JSON.parse(saved) : [
@@ -190,10 +204,21 @@ export default function App() {
   });
   const [eraserRadius, setEraserRadius] = useState(() => Number(localStorage.getItem('eraserRadius')) || 4);
   const [eraserType, setEraserType] = useState<'pencil' | 'all'>(() => (localStorage.getItem('eraserType') as 'pencil' | 'all') || 'pencil');
-  const [favoritePanels, setFavoritePanels] = useState<Array<{ id: string; tools: string[]; x: number; y: number; isDocked: 'left' | 'right' | null }>>(() => {
+  const [favoritePanels, setFavoritePanels] = useState<Array<{ id: string; tools: string[]; x: number; y: number; isDocked: 'left' | 'right' | 'top' | null }>>(() => {
     const saved = localStorage.getItem('favoritePanels');
-    return saved ? JSON.parse(saved) : [
-      { id: "fav-1", tools: ["Line", "Circle", "Hatch", "Eraser"], x: 180, y: 120, isDocked: null }
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.some((p: any) => p.id === 'fav-left' || p.id === 'fav-right' || p.id === 'fav-top')) {
+          return parsed;
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+    return [
+      { id: "fav-left", tools: ["Line", "Raccordo", "Orto", "Tecnigrafo", "Polilinea"], x: 10, y: 150, isDocked: 'left' },
+      { id: "fav-right", tools: ["Trim", "Eraser", "Cancella", "Move", "Copy", "Join"], x: 1200, y: 150, isDocked: 'right' }
     ];
   });
   const [activeDraggingId, setActiveDraggingId] = useState<string | null>(null);
@@ -280,6 +305,9 @@ const MASONRY_TYPES = [
   const [orthoMode, setOrthoMode] = useState(() => localStorage.getItem('orthoMode') === 'true');
   const [isTecnigrafoActive, setIsTecnigrafoActive] = useState(false);
   const [isContinuousMode, setIsContinuousMode] = useState(false);
+  const [isShiftOrFDown, setIsShiftOrFDown] = useState(false);
+  const effectiveOrthoMode = orthoMode !== isShiftOrFDown;
+  
   const [cancelTrigger, setCancelTrigger] = useState(0);
   const [parallelTrigger, setParallelTrigger] = useState(0);
   const [showProperties, setShowProperties] = useState(() => localStorage.getItem('showProperties') === 'true');
@@ -920,6 +948,12 @@ const MASONRY_TYPES = [
                 if (ent.points) {
                   updated.points = ent.points.map((p: any) => ({ x: p.x + dx, y: p.y + dy }));
                 }
+                if (ent.bimPoints) {
+                  updated.bimPoints = ent.bimPoints.map((p: any) => ({ x: p.x + dx, y: p.y + dy }));
+                }
+                if (ent.holes) {
+                  updated.holes = ent.holes.map((hole: any[]) => hole.map((p: any) => ({ x: p.x + dx, y: p.y + dy })));
+                }
                 return updated;
               });
 
@@ -1120,6 +1154,26 @@ const MASONRY_TYPES = [
       if (selectedTool === 'Template') {
         setSelectedTool('Select');
       }
+    } else if (tool === "Orto") {
+      setOrthoMode(prev => !prev);
+    } else if (tool === "Tecnigrafo") {
+      const next = !isTecnigrafoActive;
+      setIsTecnigrafoActive(next);
+      if (next) {
+        const event = new KeyboardEvent('keydown', { key: 'q', bubbles: true });
+        document.dispatchEvent(event);
+      } else {
+        const event = new KeyboardEvent('keyup', { key: 'q', bubbles: true });
+        document.dispatchEvent(event);
+      }
+    } else if (tool === "Polilinea") {
+      const next = !isContinuousMode;
+      setIsContinuousMode(next);
+      if (next) {
+        setOrthoMode(true);
+        setSelectedTool('Line');
+      }
+      setCancelTrigger(prev => prev + 1);
     } else {
       setSelectedTool(tool);
       // Ensure the correct sidebar tab opens for specific tools as requested
@@ -1192,20 +1246,9 @@ const MASONRY_TYPES = [
         { name: "Penne", icon: Pen },
         { name: "Maschere", icon: Square },
         { name: "Cancella", icon: Trash2 },
-      ],
-    },
-    {
-      name: "BIM",
-      icon: Building,
-      tools: [
-        { name: "BIM_Porta", icon: Type },
-        { name: "BIM_Finestra", icon: Maximize2 },
-        { name: "BIM_Arredi", icon: Home },
-        { name: "BIM_Sanitari", icon: Droplet },
-        { name: "BIM_Elettrico", icon: Zap },
-        { name: "BIM_Idraulico", icon: Crosshair },
-        { name: "BIM_Finitura", icon: Grid },
-        { name: "BIM_Scansione", icon: Sparkles }
+        { name: "Orto", icon: OrthoIcon },
+        { name: "Tecnigrafo", icon: DraftingCompass },
+        { name: "Polilinea", icon: PolylineIcon },
       ],
     },
   ];
@@ -1247,13 +1290,15 @@ const MASONRY_TYPES = [
       const targetX = refData.posX + dx;
       const targetY = refData.posY + dy;
 
-      let isDocked: 'left' | 'right' | null = null;
+      let isDocked: 'left' | 'right' | 'top' | null = null;
 
       // Docking thresholds based on screen borders
       if (targetX < 45) {
         isDocked = 'left';
       } else if (window.innerWidth - moveEvent.clientX < 240) {
         isDocked = 'right';
+      } else if (moveEvent.clientY < 180) {
+        isDocked = 'top';
       }
 
       setFavoritePanels(prev => prev.map(p => {
@@ -1326,9 +1371,32 @@ const MASONRY_TYPES = [
         clearTimeout(historyTimeoutRef.current);
         historyTimeoutRef.current = null;
     }
-    if (historyIndex > 0) {
-      setHistoryIndex((prev) => prev - 1);
-      setEntities(history[historyIndex - 1]);
+    
+    let currentIdx = historyIndexRef.current;
+    let currentHistory = historyRef.current;
+
+    // Check if there are active uncommitted changes on the canvas
+    if (!areEntitiesEqual(appEntitiesRef.current, currentHistory[currentIdx])) {
+        // Push the uncommitted changes so Redo can bring them back
+        const newHistory = currentHistory.slice(0, currentIdx + 1);
+        newHistory.push(appEntitiesRef.current);
+        historyRef.current = newHistory;
+        setHistory(newHistory);
+        
+        // Now our history has the uncommitted state at currentIdx + 1.
+        // A normal undo would step back to currentIdx.
+        appEntitiesRef.current = currentHistory[currentIdx]; // Sync ref immediately
+        setHistoryIndex(currentIdx);
+        setEntities(currentHistory[currentIdx]);
+        return;
+    }
+
+    if (currentIdx > 0) {
+      const nextIdx = currentIdx - 1;
+      historyIndexRef.current = nextIdx; // Update ref synchronously to prevent rapid click issues
+      appEntitiesRef.current = currentHistory[nextIdx]; // Sync ref immediately
+      setHistoryIndex(nextIdx);
+      setEntities(currentHistory[nextIdx]);
     }
   };
 
@@ -1337,9 +1405,14 @@ const MASONRY_TYPES = [
         clearTimeout(historyTimeoutRef.current);
         historyTimeoutRef.current = null;
     }
-    if (historyIndex < history.length - 1) {
-      setHistoryIndex((prev) => prev + 1);
-      setEntities(history[historyIndex + 1]);
+    const currentIdx = historyIndexRef.current;
+    const currentHistory = historyRef.current;
+    if (currentIdx < currentHistory.length - 1) {
+      const nextIdx = currentIdx + 1;
+      historyIndexRef.current = nextIdx; // Update ref synchronously
+      appEntitiesRef.current = currentHistory[nextIdx]; // Sync ref immediately
+      setHistoryIndex(nextIdx);
+      setEntities(currentHistory[nextIdx]);
     }
   };
 
@@ -1370,8 +1443,10 @@ const MASONRY_TYPES = [
     setHistory((prevHistory) => {
       const newHistory = prevHistory.slice(0, currentIdx + 1);
       newHistory.push(targetSnapshot);
+      historyRef.current = newHistory;
       return newHistory;
     });
+    historyIndexRef.current = currentIdx + 1;
     setHistoryIndex((prevIndex) => prevIndex + 1);
   };
 
@@ -1398,8 +1473,10 @@ const MASONRY_TYPES = [
         setHistory((prevHistory) => {
           const newHistory = prevHistory.slice(0, currentIdx + 1);
           newHistory.push(next);
+          historyRef.current = newHistory;
           return newHistory;
         });
+        historyIndexRef.current = currentIdx + 1;
         setHistoryIndex((prevIndex) => prevIndex + 1);
         historyTimeoutRef.current = null;
       }, 50);
@@ -1439,16 +1516,16 @@ const MASONRY_TYPES = [
         setCancelTrigger(prev => prev + 1);
       }
 
-      // Shift or F for Bloc Fn (Hold to activate)
+      // Shift or F for temporarily toggling ortho Mode
       if (e.key === 'Shift' || key === 'f') {
-        setIsContinuousMode(true);
+        setIsShiftOrFDown(true);
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
       if (e.key === 'Shift' || key === 'f') {
-        setIsContinuousMode(false);
+        setIsShiftOrFDown(false);
       }
     };
 
@@ -1730,6 +1807,7 @@ const MASONRY_TYPES = [
               localStorage.setItem('lastBIMSymbolScale', val.toString());
             }}
             setIsBIMFinestreOpen={setIsBIMFinestreOpen}
+            onOpen3DView={() => setIs3DViewOpen(true)}
           />
         ) : (
           selectedCategoryTools.map((tool) => (
@@ -1847,11 +1925,11 @@ const MASONRY_TYPES = [
           <button
             onClick={() => {
               handleGuideClick("Modo Orto");
-              setOrthoMode(!orthoMode);
+              setOrthoMode(!orthoMode); // explicitly toggle the stored state, not the effective one
             }}
             onMouseEnter={() => handleGuideHover("Modo Orto")}
             className={`px-2 py-0.5 rounded flex items-center gap-1 text-xs transition ${
-              orthoMode 
+              effectiveOrthoMode 
                 ? "bg-indigo-100 text-indigo-900 border border-indigo-300" 
                 : "hover:bg-neutral-200"
             }`}
@@ -1897,7 +1975,7 @@ const MASONRY_TYPES = [
                 : "hover:bg-neutral-200"
             }`}
           >
-            <PenTool size={12} className={isContinuousMode ? "text-amber-600" : ""} />
+            <PolylineIcon size={12} className={isContinuousMode ? "text-amber-600" : ""} />
             <span>Polilinea</span>
           </button>
           <div className="flex gap-1 rounded bg-neutral-200 p-0.5">
@@ -1974,7 +2052,7 @@ const MASONRY_TYPES = [
             const y = e.clientY - rect.top;
 
             if (toolName) {
-              let isDocked: 'left' | 'right' | null = null;
+              let isDocked: 'left' | 'right' | 'top' | null = null;
               let finalX = x;
 
               if (x < 50) {
@@ -1983,6 +2061,8 @@ const MASONRY_TYPES = [
               } else if (window.innerWidth - e.clientX < 240) {
                 isDocked = 'right';
                 finalX = window.innerWidth - 60;
+              } else if (e.clientY < 185) {
+                isDocked = 'top';
               }
 
               const newPanelId = `fav-${Date.now()}`;
@@ -2092,7 +2172,9 @@ const MASONRY_TYPES = [
                 type: (e as any).bimAreaType || 'stanza',
                 name: (e as any).bimName || '',
                 color: (e as any).backgroundColor || e.color,
-                height: (e as any).height || 2.70,
+                zPlane: (e as any).zPlane || 0,
+                zElevation: (e as any).zElevation || 0,
+                objectHeight: (e as any).objectHeight || (e as any).height || 2.70,
                 hatch: (e as any).bimHatchPattern || 'SOLID'
               };
             })() : undefined}
@@ -2115,6 +2197,7 @@ const MASONRY_TYPES = [
             <BIM3DViewer 
               entities={entities} 
               onClose={() => setIs3DViewOpen(false)} 
+              setEntities={updateEntitiesWithHistory}
             />
           )}
           
@@ -2326,15 +2409,17 @@ const MASONRY_TYPES = [
               </div>
             </div>
           )}
-                 {/* Dynamic Floating/Docked Favorites Toolbars / Menu Speciali Preferiti */}
+          {/* Dynamic Floating/Docked Favorites Toolbars / Menu Speciali Preferiti */}
           {(() => {
             const leftDockedPanels = favoritePanels.filter(p => p.isDocked === 'left');
             const rightDockedPanels = favoritePanels.filter(p => p.isDocked === 'right');
+            const topDockedPanels = favoritePanels.filter(p => p.isDocked === 'top');
 
             return favoritePanels.map((panel) => {
               const isDocked = panel.isDocked;
               const leftIndex = leftDockedPanels.findIndex(p => p.id === panel.id);
               const rightIndex = rightDockedPanels.findIndex(p => p.id === panel.id);
+              const topIndex = topDockedPanels.findIndex(p => p.id === panel.id);
               const isDraggingThis = activeDraggingId === panel.id;
               
               // Dynamic placement coordinates with dampening transitions for satisfying dragging glide effect
@@ -2348,7 +2433,7 @@ const MASONRY_TYPES = [
 
               if (isDocked === 'left' && !isDraggingThis) {
                 placementStyle = {
-                  left: leftIndex * 58,
+                  left: leftIndex * 72,
                   top: '15%',
                   height: '70%',
                   maxHeight: '520px',
@@ -2356,10 +2441,18 @@ const MASONRY_TYPES = [
                 };
               } else if (isDocked === 'right' && !isDraggingThis) {
                 placementStyle = {
-                  right: rightIndex * 58,
+                  right: rightIndex * 72,
                   top: '15%',
                   height: '70%',
                   maxHeight: '520px',
+                  transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+                };
+              } else if (isDocked === 'top' && !isDraggingThis) {
+                placementStyle = {
+                  left: `calc(50% - ${110 + topIndex * 76}px)`,
+                  top: topIndex * 76 + 64,
+                  height: '72px',
+                  width: `${panel.tools.length * 64 + 58}px`,
                   transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
                 };
               }
@@ -2368,7 +2461,9 @@ const MASONRY_TYPES = [
                 <div
                   key={panel.id}
                   style={placementStyle}
-                  className={`absolute z-30 select-none bg-white/80 backdrop-blur-md border border-neutral-200/80 shadow-[0_12px_40px_rgba(0,0,0,0.06)] overflow-hidden flex flex-col pointer-events-auto ${
+                  className={`absolute z-30 select-none bg-white/80 backdrop-blur-md border border-neutral-200/80 shadow-[0_12px_40px_rgba(0,0,0,0.06)] overflow-hidden flex pointer-events-auto ${
+                    isDocked === 'top' ? 'flex-row items-center max-h-[72px]' : 'flex-col'
+                  } ${
                     isDraggingThis
                       ? "ring-2 ring-indigo-500/30 shadow-indigo-500/10 scale-[1.01] z-40" 
                       : ""
@@ -2377,7 +2472,9 @@ const MASONRY_TYPES = [
                       ? 'rounded-r-xl border-l-0' 
                       : isDocked === 'right' 
                         ? 'rounded-l-xl border-r-0' 
-                        : 'rounded-xl max-w-[70px]'
+                        : isDocked === 'top'
+                          ? 'rounded-b-xl border-t-0 max-w-none'
+                          : 'rounded-xl max-w-[85px]'
                   }`}
                 onDragOver={(e) => {
                   e.preventDefault();
@@ -2413,10 +2510,14 @@ const MASONRY_TYPES = [
                   }
                 }}
               >
-                {/* Vertical discrete drag handle at top or side */}
+                {/* Horizontal or vertical discrete drag handle at top or side */}
                 <div
                   onMouseDown={(e) => handleFavoritesMouseDown(e, panel.id)}
-                  className={`px-2 py-1.5 bg-neutral-100/90 hover:bg-neutral-200/50 text-neutral-600 flex items-center justify-between cursor-move text-[9px] uppercase font-mono font-bold tracking-wider border-b border-neutral-200/60 ${isDocked ? 'flex-col gap-1' : ''}`}
+                  className={`px-2 text-neutral-600 flex items-center justify-between cursor-move text-[9px] uppercase font-mono font-bold tracking-wider ${
+                    isDocked === 'top' 
+                      ? 'flex-col py-1 border-r border-neutral-200/60 h-full justify-center gap-1.5 min-w-[42px]' 
+                      : `py-1.5 border-b border-neutral-200/60 ${isDocked ? 'flex-col gap-1' : ''}`
+                  }`}
                   title="Trascina per spostare o sganciare"
                 >
                   <div className="flex flex-col items-center gap-0.5 pointer-events-none">
@@ -2443,8 +2544,12 @@ const MASONRY_TYPES = [
                   </button>
                 </div>
 
-                {/* Vertical list of tools */}
-                <div className={`p-1.5 flex flex-col gap-1.5 bg-white items-center min-w-[54px] justify-start overflow-y-auto ${isDocked ? 'h-full' : 'max-h-[360px]'}`}>
+                {/* Horizontal or Vertical list of tools */}
+                <div className={`p-1.5 flex bg-white items-center justify-start ${
+                  isDocked === 'top' 
+                    ? 'flex-row gap-1.5 h-full overflow-x-auto px-2' 
+                    : `flex-col gap-1.5 min-w-[72px] overflow-y-auto ${isDocked ? 'h-full' : 'max-h-[360px]'}`
+                }`}>
                   {panel.tools.length === 0 ? (
                     <div className="text-[8px] text-neutral-400 text-center w-full p-2">
                        Vuoto
@@ -2452,6 +2557,12 @@ const MASONRY_TYPES = [
                   ) : (
                     panel.tools.map((toolName) => {
                       const IconComp = getToolIcon(toolName);
+                      const isToolActive = 
+                        selectedTool === toolName ||
+                        (toolName === "Orto" && effectiveOrthoMode) ||
+                        (toolName === "Tecnigrafo" && isTecnigrafoActive) ||
+                        (toolName === "Polilinea" && isContinuousMode);
+
                       return (
                         <div
                           key={toolName}
@@ -2464,13 +2575,15 @@ const MASONRY_TYPES = [
                         >
                           <button
                             onClick={() => handleToolClick(toolName)}
-                            className={`p-2 rounded-lg bg-neutral-50 border border-neutral-200/50 text-neutral-700 transition-all flex flex-col items-center justify-center gap-0.5 w-11 h-11 cursor-grab active:cursor-grabbing hover:bg-indigo-50/70 hover:text-indigo-950 hover:border-indigo-400/50 ${
-                              selectedTool === toolName ? "bg-indigo-50 border-indigo-400 text-indigo-950 font-bold shadow-xs" : ""
+                            className={`p-1 rounded-lg transition-all flex flex-col items-center justify-center gap-0.5 w-[58px] h-[58px] cursor-grab active:cursor-grabbing hover:scale-105 ${
+                              isToolActive 
+                                ? "bg-indigo-600 border-2 border-indigo-500 text-white font-bold shadow-[0_0_15px_rgba(79,70,229,0.6)] scale-[1.03]" 
+                                : "bg-neutral-50 border border-neutral-200/50 text-neutral-700 hover:bg-indigo-50/70 hover:text-indigo-950 hover:border-indigo-400/50"
                             }`}
                             title={`${toolName} - Trascina per spostare o rimuovere`}
                           >
-                            {IconComp ? <IconComp size={15} className="text-neutral-600 group-hover:text-indigo-600 transition-colors" /> : null}
-                            <span className="text-[7.5px] font-sans font-medium text-neutral-500 truncate w-full text-center tracking-tight leading-none">
+                            {IconComp ? <IconComp size={20} className={`${isToolActive ? "text-white" : "text-neutral-600 group-hover:text-indigo-600"} transition-colors`} /> : null}
+                            <span className={`text-[8.5px] font-sans font-semibold truncate w-full text-center tracking-tight leading-none ${isToolActive ? "text-white font-black" : "text-neutral-500"}`}>
                               {toolName}
                             </span>
                           </button>
@@ -2506,11 +2619,11 @@ const MASONRY_TYPES = [
 
 
           {/* Minimalist centered transparent watermark */}
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex flex-col items-center justify-center pointer-events-none select-none text-center z-10 opacity-35 hover:opacity-75 transition-opacity duration-300">
-            <span className="text-[9.5px] font-sans tracking-wider text-neutral-600 font-medium">
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex flex-col items-center justify-center pointer-events-none select-none text-center z-10 opacity-100 transition-opacity duration-300">
+            <span className="text-[10px] font-sans tracking-wider text-black font-thin">
               Copyright © 2026 Domenico Gimondo
             </span>
-            <span className="text-[8.5px] font-mono tracking-[0.3em] text-neutral-500 font-bold mt-0.5 uppercase">
+            <span className="text-[9px] font-mono tracking-[0.3em] text-black/80 font-normal mt-0.5 uppercase">
               AETERNA
             </span>
           </div>

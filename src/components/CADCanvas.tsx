@@ -64,6 +64,88 @@ const normalizeAngle = (a: number) => {
   return deg;
 };
 
+const projectCADVertex = (entity: any, p: Point, localH: number = 0): Point => {
+  const rx = (entity.rotationX || 0) * Math.PI / 180;
+  const ry = (entity.rotationY || 0) * Math.PI / 180;
+  const rz = (entity.rotationZ || 0) * Math.PI / 180;
+  
+  if (rx === 0 && ry === 0 && rz === 0) {
+    return p;
+  }
+  
+  const pivotIdx = entity.selectedPivotIndex !== undefined ? entity.selectedPivotIndex : 0;
+  const pts = entity.points || entity.bimPoints;
+  const pCAD = (pts && pts[pivotIdx]) || pts?.[0] || entity.point || entity.start || { x: 0, y: 0 };
+  const baseElevation = (entity.bimZPlane || 0) + (entity.bimZElevation || 0);
+  
+  const dx = (p.x - pCAD.x) / 100;
+  const dy = localH / 100;
+  const dz = -(p.y - pCAD.y) / 100;
+  
+  const x1 = dx;
+  const y1 = dy * Math.cos(rx) - dz * Math.sin(rx);
+  const z1 = dy * Math.sin(rx) + dz * Math.cos(rx);
+  
+  const x2 = x1 * Math.cos(ry) + z1 * Math.sin(ry);
+  const y2 = y1;
+  const z2 = -x1 * Math.sin(ry) + z1 * Math.cos(ry);
+  
+  const x3 = x2 * Math.cos(rz) - y2 * Math.sin(rz);
+  const y3 = x2 * Math.sin(rz) + y2 * Math.cos(rz);
+  const z3 = z2;
+  
+  const worldX = (pCAD.x / 100) + x3;
+  const worldZ = (-pCAD.y / 100) + z3;
+  
+  return {
+    x: worldX * 100,
+    y: -worldZ * 100
+  };
+};
+
+const getProjectedEntity = (entity: any): any => {
+  if (!entity) return entity;
+  const rx = (entity.rotationX || 0);
+  const rz = (entity.rotationZ || 0);
+  const ry = (entity.rotationY || 0);
+  
+  if (rx === 0 && rz === 0 && ry === 0) {
+    return entity;
+  }
+  
+  const cloned = { ...entity };
+  if (cloned.point) {
+    cloned.point = projectCADVertex(entity, cloned.point, 0);
+  }
+  if (cloned.start) {
+    cloned.start = projectCADVertex(entity, cloned.start, 0);
+  }
+  if (cloned.end) {
+    cloned.end = projectCADVertex(entity, cloned.end, 0);
+  }
+  if (cloned.p1) {
+    cloned.p1 = projectCADVertex(entity, cloned.p1, 0);
+  }
+  if (cloned.p2) {
+    cloned.p2 = projectCADVertex(entity, cloned.p2, 0);
+  }
+  if (cloned.center) {
+    cloned.center = projectCADVertex(entity, cloned.center, 0);
+  }
+  
+  if (cloned.points) {
+    cloned.points = cloned.points.map((p: any) => projectCADVertex(entity, p, 0));
+  }
+  if (cloned.bimPoints) {
+    cloned.bimPoints = cloned.bimPoints.map((p: any) => projectCADVertex(entity, p, 0));
+  }
+  if (cloned.holes) {
+    cloned.holes = cloned.holes.map((hole: any[]) => hole.map((p: any) => projectCADVertex(entity, p, 0)));
+  }
+  
+  return cloned;
+};
+
 const AREA_TYPE_COLORS: Record<string, string> = {
   'stanza': 'rgba(16, 185, 129, 0.12)',
   'muro': 'rgba(107, 114, 128, 0.2)',
@@ -1199,13 +1281,15 @@ const findBoundaryPolygon = (
   oCtx.scale(view.zoom, view.zoom);
 
   oCtx.strokeStyle = '#000000';
-  oCtx.lineWidth = Math.max(5.0, 5.0 / view.zoom); // Increased lineWidth
+  const physicalStrokeWidth = 2.0;
+  oCtx.lineWidth = physicalStrokeWidth / view.zoom; 
   oCtx.lineJoin = 'round';
   oCtx.lineCap = 'round';
 
   entities.forEach(ent => {
     const layer = layers.find(l => l.id === ent.layer);
     if (layer && (!layer.visible || layer.frozen)) return;
+    if (ent.hideIn2D) return;
     if (
       ent.type === 'dimension' ||
       ent.type === 'text' ||
@@ -1218,12 +1302,22 @@ const findBoundaryPolygon = (
     }
 
     if (ent.isBIM) {
-      if (ent.bimType !== 'door' && ent.bimType !== 'window') {
+      if (ent.bimType !== 'door' && ent.bimType !== 'window' && ent.bimType !== 'wall') {
         return;
       }
     }
 
     oCtx.beginPath();
+    let didChangeWidth = false;
+    if (ent.isBIM && ent.bimType === 'wall') {
+      const thickness = (ent as any).bimWidth || 15;
+      oCtx.save();
+      oCtx.lineWidth = thickness;
+      oCtx.lineJoin = 'round';
+      oCtx.lineCap = 'round';
+      didChangeWidth = true;
+    }
+
     if (ent.type === 'line') {
       if (ent.inkPoints && ent.inkPoints.length > 0) {
         oCtx.moveTo(ent.inkPoints[0].x, ent.inkPoints[0].y);
@@ -1242,6 +1336,9 @@ const findBoundaryPolygon = (
       oCtx.rect(ent.p1.x, ent.p1.y, ent.p2.x - ent.p1.x, ent.p2.y - ent.p1.y);
     }
     oCtx.stroke();
+    if (didChangeWidth) {
+      oCtx.restore();
+    }
   });
   oCtx.restore();
 
@@ -1284,7 +1381,6 @@ const findBoundaryPolygon = (
 
     if (cx === 0 || cx === width - 1 || cy === 0 || cy === height - 1) {
       touchesBorder = true;
-      break;
     }
 
     const neighbors = [[cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]];
@@ -1298,7 +1394,12 @@ const findBoundaryPolygon = (
     }
   }
 
-  if (touchesBorder) return null;
+  // If the flood-fill touched the edge of the viewport, check if it filled a massive percentage of the viewport
+  // (which means it's likely an open boundary/exterior area). If so, we reject it.
+  // Otherwise, we allow it (meaning a closed room that is partially offscreen can still be detected!).
+  if (touchesBorder && queue.length > (width * height * 0.70)) {
+    return null;
+  }
 
   // Use d3-contour to find the multi-boundary of the filled region
   const gridValues = new Float32Array(width * height);
@@ -1318,18 +1419,28 @@ const findBoundaryPolygon = (
 
   // multiPoly.coordinates is [ Polygon, Polygon, ... ]
   // Each Polygon is [ Ring, Ring, ... ] where the first Ring is outer and subsequent are holes
-  // We'll take the first non-empty MultiPolygon part
   
   let bestPoints: Point[] = [];
   let bestHoles: Point[][] = [];
+  let maxArea = -1;
 
-  // Find the polygon that contains our click point (there should be only one since it's a connected component)
+  // Find the largest polygon by area (since it's a single connected flood-fill, the largest is the main area)
   for (const polygon of multiPoly.coordinates) {
+    if (!polygon[0] || polygon[0].length < 3) continue;
+    
     const outerRing = polygon[0].map((p: any) => ({ x: p[0], y: p[1] }));
-    if (isPointInPolygon(clickPoint, outerRing)) {
+    
+    // Calculate area
+    let area = 0;
+    for (let i = 0, j = outerRing.length - 1; i < outerRing.length; j = i++) {
+      area += (outerRing[j].x + outerRing[i].x) * (outerRing[j].y - outerRing[i].y);
+    }
+    area = Math.abs(area / 2);
+
+    if (area > maxArea) {
+      maxArea = area;
       bestPoints = outerRing;
       bestHoles = polygon.slice(1).map((ring: any) => ring.map((p: any) => ({ x: p[0], y: p[1] })));
-      break;
     }
   }
 
@@ -1341,12 +1452,12 @@ const findBoundaryPolygon = (
     for (let i = 0; i < loop.length; i += step) downsampled.push(loop[i]);
     if (downsampled.length > 0) downsampled.push(downsampled[0]);
 
-    const simplified = simplifyPolygon(downsampled, 0.05);
+    const simplified = simplifyPolygon(downsampled, 0.5);
     if (simplified.length > 1) {
       const p1 = simplified[0], pE = simplified[simplified.length - 1];
       if (Math.sqrt((p1.x - pE.x)**2 + (p1.y - pE.y)**2) < 1e-3) simplified.pop();
     }
-    const expanded = expandPolygon(simplified, 1.2);
+    const expanded = expandPolygon(simplified, 1.0);
     const canvasPts = expanded.map(pt => screenToCanvas(pt.x, pt.y));
     const snapped = snapPolygonToGeometry(canvasPts, entities, layers);
     return cleanSnappedPolygon(snapped);
@@ -1365,7 +1476,8 @@ function snapPolygonToGeometry(polyPoints: Point[], entities: Entity[], layers: 
   
   // Exclude BIM elements, hatches, texts, and dimensions since they are not physical wall lines
   const physicalEntities = entities.filter(ent => {
-    if (ent.isBIM || ent.type === 'hatch' || ent.type === 'text' || ent.type === 'dimension') return false;
+    if (ent.type === 'hatch' || ent.type === 'text' || ent.type === 'dimension') return false;
+    if (ent.isBIM && ent.bimType !== 'wall' && ent.bimType !== 'window' && ent.bimType !== 'door') return false;
     const layer = layers.find(l => l.id === ent.layer);
     return !(layer && (!layer.visible || layer.frozen));
   });
@@ -2455,7 +2567,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
         return;
       }
-      if (e.key === 'Shift') {
+      if (e.key === 'Shift' || e.key.toLowerCase() === 'f') {
         setIsShiftPressed(false);
         isShiftPressedRef.current = false;
       }
@@ -2508,7 +2620,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         return;
       }
       handleArrowsLine(e);
-      if (e.key === 'Shift') {
+      if (e.key === 'Shift' || e.key.toLowerCase() === 'f') {
         setIsShiftPressed(true);
         isShiftPressedRef.current = true;
       }
@@ -3073,17 +3185,20 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     const snaps: {point: Point, type: 'CAD' | 'smart', refPoint?: Point, refEntityId?: string, constraintAxis?: 'x' | 'y'}[] = [];
     const keyPoints: Point[] = [];
     
+    // Project input entities so snap coordinates precisely match actual 2D projected/slanted geometry
+    const projectedEntities = entities.map(getProjectedEntity);
+
     // Only snap to visible and non-frozen layers
     const layerMapForVisible = new Map<string, Layer>(layers.map(l => [l.id, l]));
-    const visibleEntities = entities.filter(ent => {
+    const visibleEntities = projectedEntities.filter(ent => {
         const layer = layerMapForVisible.get(ent.layer);
         // Exclude BIM doors and windows from snap references to avoid interference as requested
         const isBIMDoorWindow = ent.isBIM && (ent.bimType === 'door' || ent.bimType === 'window');
-        return !(layer && (!layer.visible || layer.frozen)) && !isBIMDoorWindow;
+        return !(layer && (!layer.visible || layer.frozen)) && !isBIMDoorWindow && !ent.hideIn2D;
     });
 
     // Pre-calculate wall connections for snapping
-    const allWallsFull = entities.filter(e => e.type === 'line' && e.isBIM && e.bimType === 'wall') as LineEntity[];    const snapSearchRadius = 150 / view.zoom;
+    const allWallsFull = projectedEntities.filter(e => e.type === 'line' && e.isBIM && e.bimType === 'wall') as LineEntity[];    const snapSearchRadius = 150 / view.zoom;
     const nearEntities = visibleEntities.filter(ent => {
         if (ent.type === 'line' || ent.type === 'dimension') {
             const minX = Math.min(ent.start.x, ent.end.x) - snapSearchRadius;
@@ -3357,7 +3472,10 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     const clickThreshold = customThreshold !== undefined ? (customThreshold / view.zoom) : (10 / view.zoom);
     const layerMapForSelection = new Map<string, Layer>(layers.map(l => [l.id, l]));
 
-    for (const ent of entitiesRef.current) {
+    // Project entities on-the-fly for correct hit selection of 3D-rotated entities
+    const projected = entitiesRef.current.map(getProjectedEntity);
+
+    for (const ent of projected) {
       const layer = layerMapForSelection.get(ent.layer);
       if (layer && (!layer.visible || layer.frozen)) continue;
 
@@ -3638,26 +3756,52 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     const intersectY = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / denom;
     const I = { x: intersectX, y: intersectY };
 
-    // 2. Determine ray directions V1 and V2 starting from I along the lines, away from I
-    const dStart1 = Math.sqrt((line1.start.x - I.x) ** 2 + (line1.start.y - I.y) ** 2);
-    const dEnd1 = Math.sqrt((line1.end.x - I.x) ** 2 + (line1.end.y - I.y) ** 2);
-    const farEndpoint1 = dStart1 > dEnd1 ? line1.start : line1.end;
-    const len1 = Math.max(dStart1, dEnd1);
+    // 2. Determine ray directions V1 and V2 starting from I exactly along the lines, towards the click points
+    const L1x = line1.end.x - line1.start.x;
+    const L1y = line1.end.y - line1.start.y;
+    const lenL1 = Math.sqrt(L1x * L1x + L1y * L1y);
+    const dir1x = L1x / lenL1;
+    const dir1y = L1y / lenL1;
+    
+    let dot1 = dir1x * (clickPt1.x - I.x) + dir1y * (clickPt1.y - I.y);
+    if (Math.abs(dot1) < 1e-6) {
+      const dS = dir1x * (line1.start.x - I.x) + dir1y * (line1.start.y - I.y);
+      const dE = dir1x * (line1.end.x - I.x) + dir1y * (line1.end.y - I.y);
+      dot1 = Math.abs(dS) > Math.abs(dE) ? dS : dE;
+    }
+    const V1 = { x: dot1 > 0 ? dir1x : -dir1x, y: dot1 > 0 ? dir1y : -dir1y };
 
-    const dStart2 = Math.sqrt((line2.start.x - I.x) ** 2 + (line2.start.y - I.y) ** 2);
-    const dEnd2 = Math.sqrt((line2.end.x - I.x) ** 2 + (line2.end.y - I.y) ** 2);
-    const farEndpoint2 = dStart2 > dEnd2 ? line2.start : line2.end;
-    const len2 = Math.max(dStart2, dEnd2);
+    const L2x = line2.end.x - line2.start.x;
+    const L2y = line2.end.y - line2.start.y;
+    const lenL2 = Math.sqrt(L2x * L2x + L2y * L2y);
+    const dir2x = L2x / lenL2;
+    const dir2y = L2y / lenL2;
+    
+    let dot2 = dir2x * (clickPt2.x - I.x) + dir2y * (clickPt2.y - I.y);
+    if (Math.abs(dot2) < 1e-6) {
+      const dS = dir2x * (line2.start.x - I.x) + dir2y * (line2.start.y - I.y);
+      const dE = dir2x * (line2.end.x - I.x) + dir2y * (line2.end.y - I.y);
+      dot2 = Math.abs(dS) > Math.abs(dE) ? dS : dE;
+    }
+    const V2 = { x: dot2 > 0 ? dir2x : -dir2x, y: dot2 > 0 ? dir2y : -dir2y };
 
-    if (len1 < 1e-3 || len2 < 1e-3) {
+    // Find the endpoint of the original line that is on the positive side of V1 relative to I
+    const dotS1 = (line1.start.x - I.x) * V1.x + (line1.start.y - I.y) * V1.y;
+    const dotE1 = (line1.end.x - I.x) * V1.x + (line1.end.y - I.y) * V1.y;
+    const farEndpoint1 = dotS1 > dotE1 ? line1.start : line1.end;
+    const maxLen1 = Math.max(dotS1, dotE1);
+
+    const dotS2 = (line2.start.x - I.x) * V2.x + (line2.start.y - I.y) * V2.y;
+    const dotE2 = (line2.end.x - I.x) * V2.x + (line2.end.y - I.y) * V2.y;
+    const farEndpoint2 = dotS2 > dotE2 ? line2.start : line2.end;
+    const maxLen2 = Math.max(dotS2, dotE2);
+
+    if (maxLen1 < 1e-3 || maxLen2 < 1e-3) {
       if (!existingRaccordoId) {
         alert("Geometria di uno dei segmenti non valida.");
       }
       return;
     }
-
-    const V1 = { x: (farEndpoint1.x - I.x) / len1, y: (farEndpoint1.y - I.y) / len1 };
-    const V2 = { x: (farEndpoint2.x - I.x) / len2, y: (farEndpoint2.y - I.y) / len2 };
 
     // 3. Compute angle theta between V1 and V2
     const cosTheta = Math.max(-1, Math.min(1, V1.x * V2.x + V1.y * V2.y));
@@ -3683,17 +3827,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     } else {
       T = pVal;
     }
-
-    // 4. Determine endpoints that lie on the rays pointing away from I
-    const dot1 = (x1 - I.x) * V1.x + (y1 - I.y) * V1.y;
-    const dot2 = (x2 - I.x) * V1.x + (y2 - I.y) * V1.y;
-    const farEndpoint1_proj = dot1 > dot2 ? line1.start : line1.end;
-    const maxLen1 = Math.max(dot1, dot2);
-
-    const dot3 = (x3 - I.x) * V2.x + (y3 - I.y) * V2.y;
-    const dot4 = (x4 - I.x) * V2.x + (y4 - I.y) * V2.y;
-    const farEndpoint2_proj = dot3 > dot4 ? line2.start : line2.end;
-    const maxLen2 = Math.max(dot3, dot4);
 
     // Check if configuration parameter is too large
     if (T > maxLen1 || T > maxLen2) {
@@ -3845,45 +3978,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       return (shouldAddConnector ? updated.concat(newConnector) : updated) as Entity[];
     });
 
-    // Smooth cinematic camera transition to the focal point of the raccordo
-    const canvas = canvasRef.current;
-    if (canvas) {
-      // Calculate a target zoom that puts the intersection point comfortably in view
-      // We aim for a zoom level that feels like a "macro" shot of the detail
-      const targetZoom = Math.min(2.5, 1.2); 
-      const targetPan = {
-          x: (canvas.width / 2) - I.x * targetZoom,
-          y: (canvas.height / 2) - I.y * targetZoom
-      };
-      
-      const startZoom = view.zoom;
-      const startPan = { ...view.pan };
-      const duration = 850; // Elegant, deliberate transition
-      const startTime = performance.now();
-      
-      const animate = (time: number) => {
-        const elapsed = time - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        
-        // Cinematic Ease Out Quint for smooth landing
-        const ease = 1 - Math.pow(1 - progress, 5);
-        
-        const currentZoom = startZoom + (targetZoom - startZoom) * ease;
-        const currentPan = {
-          x: startPan.x + (targetPan.x - startPan.x) * ease,
-          y: startPan.y + (targetPan.y - startPan.y) * ease
-        };
-        
-        setView({ zoom: currentZoom, pan: currentPan });
-        
-        if (progress < 1) {
-          requestAnimationFrame(animate);
-        }
-      };
-      
-      requestAnimationFrame(animate);
-    }
-
     // Automatically trigger edit if it's a new raccordo or has onEditRaccordo
     if (onEditRaccordo) {
         onEditRaccordo(newConnector);
@@ -3918,6 +4012,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       const ctx = canvas.getContext('2d');
       if (!ctx || !canvas.width || !canvas.height) return;
       ctx.imageSmoothingEnabled = false;
+
+      // Map entities to their projected counterparts for precise 2D drawing of 3D rotations
+      const projectedEntities = entities.map(getProjectedEntity);
 
       // Always reset global state to prevent carry-over from previous frame
       ctx.globalAlpha = 1.0;
@@ -3955,7 +4052,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
 
       // --- Performance Optimization: Pre-calculate Data for the loop ---
       const layerMap = new Map<string, Layer>(layers.map(l => [l.id, l]));
-      const bimWalls = entities.filter(e => e.type === 'line' && e.isBIM && e.bimType === 'wall') as LineEntity[];
+      const bimWalls = projectedEntities.filter(e => e.type === 'line' && e.isBIM && e.bimType === 'wall') as LineEntity[];
       
       // Viewport bounds in canvas space
       const vOffsetX = 50 / view.zoom; // padding
@@ -3969,7 +4066,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
       const hatches: Entity[] = [];
       const others: Entity[] = [];
       
-      for (const entity of entities) {
+      for (const entity of projectedEntities) {
+        if (entity.hideIn2D) continue;
         const layer = layerMap.get(entity.layer);
         if (layer && !layer.visible) continue;
 
@@ -4651,6 +4749,30 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
           }
           
           ctx.restore();
+        } else if (entity.type === 'bim-csg') {
+          const positions = (entity as any).geometryData?.positions;
+          const indices = (entity as any).geometryData?.indices;
+          if (positions && indices && indices.length > 0) {
+            ctx.beginPath();
+            for (let idx = 0; idx < indices.length; idx += 3) {
+              const i1 = indices[idx] * 3;
+              const i2 = indices[idx+1] * 3;
+              const i3 = indices[idx+2] * 3;
+              
+              ctx.moveTo(positions[i1] * 100, -positions[i1+2] * 100);
+              ctx.lineTo(positions[i2] * 100, -positions[i2+2] * 100);
+              ctx.lineTo(positions[i3] * 100, -positions[i3+2] * 100);
+              ctx.lineTo(positions[i1] * 100, -positions[i1+2] * 100);
+            }
+            if (isHighlighted) {
+              ctx.strokeStyle = highlightColor;
+              ctx.lineWidth = 2 / view.zoom;
+            } else {
+              ctx.strokeStyle = (entity as any).color || '#3b82f6';
+              ctx.lineWidth = 1 / view.zoom;
+            }
+            ctx.stroke();
+          }
         }
         ctx.stroke();
 
@@ -5730,82 +5852,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             ctx.lineWidth = 1.5 / view.zoom;
             ctx.stroke();
 
-            // Calculate Centroid (average points of outer boundary)
-            let cx = 0, cy = 0;
-            roomPoints.forEach((p: Point) => {
-              cx += p.x;
-              cy += p.y;
-            });
-            cx /= roomPoints.length;
-            cy /= roomPoints.length;
-
-            // Compute Area using shoelace formula (subtract holes if present)
-            let area = 0;
-            const len = roomPoints.length;
-            for (let i = 0; i < len; i++) {
-              const p1 = roomPoints[i];
-              const p2 = roomPoints[(i + 1) % len];
-              area += p1.x * p2.y - p2.x * p1.y;
-            }
-            area = Math.abs(area) / 2;
-            
-            if (roomHoles) {
-                roomHoles.forEach((hole: Point[]) => {
-                    let holeArea = 0;
-                    for (let i = 0; i < hole.length; i++) {
-                        const p1 = hole[i];
-                        const p2 = hole[(i + 1) % hole.length];
-                        holeArea += p1.x * p2.y - p2.x * p1.y;
-                    }
-                    area -= Math.abs(holeArea) / 2;
-                });
-            }
-
-            const areaMq = Math.max(0, area / 10000);
-            const perimeterM = roomPoints.reduce((acc: number, p: Point, idx: number) => {
-              const nextP = roomPoints[(idx + 1) % len];
-              const dist = Math.sqrt((nextP.x - p.x)**2 + (nextP.y - p.y)**2);
-              return acc + dist;
-            }, 0) / 100; // Assuming 1 unit = 1 cm
-
-            const textSz = Math.max(8, Math.min(13, 11 / view.zoom));
-            const padding = 6 / view.zoom;
-
-            ctx.font = `bold ${textSz}px sans-serif`;
-            const nameLabel = `${entity.bimName || 'Stanza'}`;
-            const areaLabel = `${areaMq.toFixed(2)} mq`;
-            const perimeterLabel = `P: ${perimeterM.toFixed(2)} m`;
-            const volLabel = entity.bimHeight ? `V: ${(areaMq * entity.bimHeight).toFixed(1)} mc` : '';
-
-            const nameW = ctx.measureText(nameLabel).width;
-            const areaW = ctx.measureText(areaLabel).width;
-            const perW = ctx.measureText(perimeterLabel).width;
-            const maxW = Math.max(nameW, areaW, perW);
-            
-            const lineCount = entity.bimHeight ? 4 : 3;
-            const boxH = lineCount * textSz + 2 * padding;
-            const boxW = maxW + 2 * padding;
-
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-            ctx.strokeStyle = '#10b981';
-            ctx.lineWidth = 1 / view.zoom;
-            
-            ctx.fillRect(cx - boxW/2, cy - boxH/2, boxW, boxH);
-            ctx.strokeRect(cx - boxW/2, cy - boxH/2, boxW, boxH);
-
-            ctx.fillStyle = '#065f46';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'top';
-            
-            ctx.fillText(nameLabel, cx, cy - boxH/2 + padding);
-            ctx.fillStyle = '#111827';
-            ctx.font = `${textSz * 0.9}px sans-serif`;
-            ctx.fillText(areaLabel, cx, cy - boxH/2 + padding + textSz * 1.1);
-            ctx.fillStyle = '#4b5563';
-            ctx.fillText(perimeterLabel, cx, cy - boxH/2 + padding + textSz * 2.1);
-            if (entity.bimHeight) {
-              ctx.fillText(volLabel, cx, cy - boxH/2 + padding + textSz * 3.1);
-            }
             ctx.restore();
           }
         }
@@ -5857,12 +5903,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             ctx.arc(start.x, start.y, doorWidth, baseAngle, leafAngle, (entity as any).bimFlip || false);
             ctx.stroke();
 
-            ctx.fillStyle = '#dc2626';
-            ctx.font = `bold ${9 / view.zoom}px sans-serif`;
-            ctx.textBaseline = 'middle';
-            ctx.textAlign = 'center';
-            const labelOffset = (entity as any).bimFlip ? -10 : 10;
-            ctx.fillText(`P. ${entity.bimWidth || Math.round(len)}`, (start.x + end.x)/2 + px * labelOffset / view.zoom, (start.y + end.y)/2 + py * labelOffset / view.zoom);
             ctx.restore();
           }
         }
@@ -5897,12 +5937,6 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             ctx.lineTo(end.x + nx * wWidth/2, end.y + ny * wWidth/2);
             ctx.stroke();
 
-            ctx.fillStyle = '#2563eb';
-            ctx.font = `bold ${9 / view.zoom}px sans-serif`;
-            ctx.textBaseline = 'middle';
-            ctx.textAlign = 'center';
-            const hText = entity.bimWindowHeight ? `x${entity.bimWindowHeight}` : '';
-            ctx.fillText(`F. ${entity.bimWidth || Math.round(len)}${hText}`, (start.x + end.x)/2 + nx * 12 / view.zoom, (start.y + end.y)/2 + ny * 12 / view.zoom);
             ctx.restore();
           }
         }
@@ -6262,12 +6296,13 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Calculate the ideal center based on existing entities
+    // Calculate the ideal center based on existing entities (using projection for rotated objects)
     const getIdealCenter = () => {
-        if (entities.length === 0) return { x: 0, y: 0 };
+        const projected = entities.map(getProjectedEntity);
+        if (projected.length === 0) return { x: 0, y: 0 };
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         
-        entities.forEach(ent => {
+        projected.forEach(ent => {
              if (ent.type === 'line') {
                  minX = Math.min(minX, ent.start.x, ent.end.x);
                  maxX = Math.max(maxX, ent.start.x, ent.end.x);
@@ -7729,9 +7764,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                     setIsMovingTecnigrafo(true);
                     movingTecnigrafoStartRef.current = { mouse: { ...rawPoint }, origin: { ...tecnigrafoOrigin } };
                     
-                    // Force the tecnigrafo style (Line + Ink + No Ortho)
+                    // Force the tecnigrafo style (Line + No Ortho)
                     setActiveTool?.('Line');
-                    setDefaultLineStyle(prev => ({ ...prev, mode: 'ink' }));
                     setOrthoMode?.(false);
                     return; 
                 }
@@ -7740,14 +7774,9 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     }
 
     if (e.button === 2) {
-        // RIGHT CLICK: Toggle between Pencil and Ink mode when tecnigrafo is active
+        // RIGHT CLICK (handled mostly by context menu)
         if (tecnigrafoOrigin && !drawing) {
             e.preventDefault();
-            setDefaultLineStyle(prev => ({
-                ...prev,
-                mode: prev.mode === 'pencil' ? 'ink' : (prev.mode === 'ink' ? 'CAD' : 'pencil')
-            }));
-            renderRef.current?.();
             return;
         }
         // Let handleContextMenu take care of toggling if NOT in tecnigrafo mode OR if drawing
@@ -9454,13 +9483,53 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         return;
     }
 
-    if (positioningGroupId && positioningGroupStartPos) {
-        const dx = rawPoint.x - positioningGroupStartPos.x;
-        const dy = rawPoint.y - positioningGroupStartPos.y;
-        setPositioningGroupStartPos(rawPoint);
+    if ((positioningGroupId && positioningGroupStartPos) || (positioningEntityId && positioningEntityStartPos)) {
+        const isGroup = !!positioningGroupId;
+        const startPos = isGroup ? positioningGroupStartPos! : positioningEntityStartPos!;
+        let dx = rawPoint.x - startPos.x;
+        let dy = rawPoint.y - startPos.y;
+        
+        if (isGroup) {
+            setPositioningGroupStartPos(rawPoint);
+        } else {
+            setPositioningEntityStartPos(rawPoint);
+        }
+
+        const targetIds = isGroup 
+            ? entities.filter(e => e.groupId === positioningGroupId).map(e => e.id)
+            : [positioningEntityId!];
+
+        // Snapping logic (Smart Snap during Move)
+        const threshold = 15 / view.zoom;
+        const movedEntities = entities.filter(e => targetIds.includes(e.id));
+        const staticEntities = entities.filter(e => !targetIds.includes(e.id));
+        const bgSnaps = getSnapPoints(rawPoint, staticEntities, 'Move', null).filter(s => s.type === 'CAD');
+
+        let bestAdj = { x: 0, y: 0 };
+        let minSnapSq = Infinity;
+        let snapFound: Point | null = null;
+
+        for (const ent of movedEntities) {
+            const kps = getEntityKeyPoints(ent);
+            for (const kp of kps) {
+                const translatedKp = { x: kp.x + dx, y: kp.y + dy };
+                for (const snap of bgSnaps) {
+                    const distSq = (translatedKp.x - snap.point.x) ** 2 + (translatedKp.y - snap.point.y) ** 2;
+                    if (distSq < threshold * threshold && distSq < minSnapSq) {
+                        minSnapSq = distSq;
+                        bestAdj = { x: snap.point.x - translatedKp.x, y: snap.point.y - translatedKp.y };
+                        snapFound = snap.point;
+                    }
+                }
+            }
+        }
+
+        dx += bestAdj.x;
+        dy += bestAdj.y;
+        setActiveMoveSnapPoint(snapFound);
 
         const updater = (prev: Entity[]) => prev.map(ent => {
-            if (ent.groupId === positioningGroupId) {
+            if (targetIds.includes(ent.id)) {
                 if (ent.type === 'line' || ent.type === 'dimension') {
                     return {
                         ...ent,
@@ -9484,7 +9553,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                         ...ent,
                         points: h.points ? h.points.map((p: Point) => ({ x: p.x + dx, y: p.y + dy })) : []
                     };
-                } else if (ent.type === 'point' || ent.type === 'text') {
+                } else if (ent.type === 'point' || ent.type === 'text' || ent.type === 'image') {
                     return {
                         ...ent,
                         point: { x: ent.point.x + dx, y: ent.point.y + dy }
@@ -9493,50 +9562,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             }
             return ent;
         });
-        if (setEntitiesSilent) setEntitiesSilent(updater);
-        else setEntities(updater);
-        return;
-    }
-
-    if (positioningEntityId && positioningEntityStartPos) {
-        const dx = rawPoint.x - positioningEntityStartPos.x;
-        const dy = rawPoint.y - positioningEntityStartPos.y;
-        setPositioningEntityStartPos(rawPoint);
-
-        const updater = (prev: Entity[]) => prev.map(ent => {
-            if (ent.id === positioningEntityId) {
-                if (ent.type === 'line' || ent.type === 'dimension') {
-                    return {
-                        ...ent,
-                        start: { x: ent.start.x + dx, y: ent.start.y + dy },
-                        end: { x: ent.end.x + dx, y: ent.end.y + dy }
-                    };
-                } else if (ent.type === 'circle' || ent.type === 'arc') {
-                    return {
-                        ...ent,
-                        center: { x: ent.center.x + dx, y: ent.center.y + dy }
-                    };
-                } else if (ent.type === 'rectangle') {
-                    return {
-                        ...ent,
-                        p1: { x: ent.p1.x + dx, y: ent.p1.y + dy },
-                        p2: { x: ent.p2.x + dx, y: ent.p2.y + dy }
-                    };
-                } else if (ent.type === 'hatch') {
-                    const h = ent as any;
-                    return {
-                        ...ent,
-                        points: h.points ? h.points.map((p: Point) => ({ x: p.x + dx, y: p.y + dy })) : []
-                    };
-                } else if (ent.type === 'point') {
-                    return {
-                        ...ent,
-                        point: { x: ent.point.x + dx, y: ent.point.y + dy }
-                    };
-                }
-            }
-            return ent;
-        });
+        
         if (setEntitiesSilent) setEntitiesSilent(updater);
         else setEntities(updater);
         return;
@@ -9774,34 +9800,48 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     if (Math.abs(deltaX) > 1e-6 || Math.abs(deltaY) > 1e-6) {
         const updater = (prev: Entity[]) => prev.map(ent => {
             if (targetIds.includes(ent.id)) {
+                let updated = { ...ent };
+                
                 if (ent.type === 'line') {
-                    const movedEntity = { 
-                        ...ent, 
+                    updated = { 
+                        ...updated, 
                         start: { x: ent.start.x + deltaX, y: ent.start.y + deltaY }, 
                         end: { x: ent.end.x + deltaX, y: ent.end.y + deltaY } 
-                    };
+                    } as any;
                     if (ent.isFreehand && ent.inkPoints) {
-                        movedEntity.inkPoints = ent.inkPoints.map(p => ({ ...p, x: p.x + deltaX, y: p.y + deltaY }));
+                        (updated as any).inkPoints = ent.inkPoints.map(p => ({ ...p, x: p.x + deltaX, y: p.y + deltaY }));
                     }
-                    return movedEntity;
-                }
-                if (ent.type === 'circle') return { ...ent, center: { x: ent.center.x + deltaX, y: ent.center.y + deltaY } };
-                if (ent.type === 'rectangle') return { ...ent, p1: { x: ent.p1.x + deltaX, y: ent.p1.y + deltaY }, p2: { x: ent.p2.x + deltaX, y: ent.p2.y + deltaY } };
-                if (ent.type === 'hatch') {
+                } else if (ent.type === 'circle') {
+                    updated = { ...updated, center: { x: ent.center.x + deltaX, y: ent.center.y + deltaY } } as any;
+                } else if (ent.type === 'rectangle') {
+                    updated = { ...updated, p1: { x: ent.p1.x + deltaX, y: ent.p1.y + deltaY }, p2: { x: ent.p2.x + deltaX, y: ent.p2.y + deltaY } } as any;
+                } else if (ent.type === 'hatch') {
                     const h = ent as any;
-                    return { ...ent, points: h.points ? h.points.map((p: Point) => ({ x: p.x + deltaX, y: p.y + deltaY })) : [] };
-                }
-                if (ent.type === 'point') return { ...ent, point: { x: ent.point.x + deltaX, y: ent.point.y + deltaY } };
-                if (ent.type === 'text') return { ...ent, point: { x: ent.point.x + deltaX, y: ent.point.y + deltaY } };
-                if (ent.type === 'image') return { ...ent, point: { x: ent.point.x + deltaX, y: ent.point.y + deltaY } };
-                if (ent.type === 'arc') return { ...ent, center: { x: ent.center.x + deltaX, y: ent.center.y + deltaY } };
-                if (ent.type === 'dimension') {
-                    return { 
-                        ...ent, 
+                    updated = { ...updated, points: h.points ? h.points.map((p: Point) => ({ x: p.x + deltaX, y: p.y + deltaY })) : [] } as any;
+                } else if (ent.type === 'point' || ent.type === 'text' || ent.type === 'image') {
+                    updated = { ...updated, point: { x: ent.point.x + deltaX, y: ent.point.y + deltaY } } as any;
+                } else if (ent.type === 'arc') {
+                    updated = { ...updated, center: { x: ent.center.x + deltaX, y: ent.center.y + deltaY } } as any;
+                } else if (ent.type === 'dimension') {
+                    updated = { 
+                        ...updated, 
                         start: { x: ent.start.x + deltaX, y: ent.start.y + deltaY }, 
                         end: { x: ent.end.x + deltaX, y: ent.end.y + deltaY } 
-                    };
+                    } as any;
                 }
+
+                // Generic check for points, bimPoints and holes (e.g. rooms, custom elements shape translation)
+                if ((ent as any).bimPoints) {
+                    (updated as any).bimPoints = (ent as any).bimPoints.map((p: Point) => ({ x: p.x + deltaX, y: p.y + deltaY }));
+                }
+                if ((ent as any).points && (ent as any).type !== 'hatch') {
+                    (updated as any).points = (ent as any).points.map((p: Point) => ({ x: p.x + deltaX, y: p.y + deltaY }));
+                }
+                if ((ent as any).holes) {
+                    (updated as any).holes = (ent as any).holes.map((hole: Point[]) => hole.map((p: Point) => ({ x: p.x + deltaX, y: p.y + deltaY })));
+                }
+
+                return updated;
             }
             return ent;
         });
@@ -10153,13 +10193,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
         return;
     }
 
-    // --- TECNIGRAFO SPECIAL TOGGLE ---
+    // --- TECNIGRAFO SPECIAL MENU ---
     if (tecnigrafoOrigin) {
-        setDefaultLineStyle(prev => {
-            const nextMode = prev.mode === 'pencil' ? 'ink' : (prev.mode === 'ink' ? 'CAD' : 'pencil');
-            return { ...prev, mode: nextMode 
-            };
-        });
         return;
     }
 
@@ -10238,8 +10273,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
             isSKeyPressedRef.current = e.type === 'keydown';
         }
         
-        // Se Shift è premuto aggiorniamo anche il ref dedicato per coerenza
-        if (e.key === 'Shift') {
+        // Se Shift o F sono premuti aggiorniamo anche il ref dedicato per coerenza
+        if (e.key === 'Shift' || e.key.toLowerCase() === 'f') {
             isShiftPressedRef.current = e.type === 'keydown';
         }
 
@@ -10335,9 +10370,8 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
                 setLockedFocalPoint({ ...origin });
                 setTecnigrafoLock(null); 
 
-                // Automatic setup: Line tool with Ink mode and NO Ortho
+                // Automatic setup: Line tool with NO Ortho
                 setActiveTool?.('Line');
-                setDefaultLineStyle(prev => ({ ...prev, mode: 'ink' }));
                 setOrthoMode?.(false);
             }
         } else if (e.key === 'Enter') {
@@ -10384,7 +10418,7 @@ export const CADCanvas = React.forwardRef<CADCanvasAPI, CADCanvasProps>(({ entit
     
     const handleKeyUp = (e: KeyboardEvent) => {
         updateJolly(e);
-        if (e.key === 'Shift') isShiftPressedRef.current = false;
+        if (e.key === 'Shift' || e.key.toLowerCase() === 'f') isShiftPressedRef.current = false;
 
         if (e.key.toLowerCase() === 'q') {
             setTecnigrafoLock(null);
