@@ -1,22 +1,9 @@
 import React, { useEffect, useRef } from 'react';
-import { Entity } from '../types';
+import { Entity, Tavola } from '../types';
 
 interface CanvasPDFPreviewProps {
   entities: Entity[];
-  tavola: {
-    id: string;
-    name: string;
-    format: 'A0' | 'A1' | 'A2' | 'A3' | 'A4';
-    scale: number;
-    unit: 'm' | 'cm' | 'mm';
-    position: { x: number; y: number };
-    datiCartiglio: {
-      progetto?: string;
-      titolo?: string;
-      autore?: string;
-      data?: string;
-    };
-  };
+  tavola: Tavola;
 }
 
 export const CanvasPDFPreview: React.FC<CanvasPDFPreviewProps> = ({ entities, tavola }) => {
@@ -437,7 +424,7 @@ export const CanvasPDFPreview: React.FC<CanvasPDFPreviewProps> = ({ entities, ta
     ctx.fillText("PROGETTO:", cartX + 2.5, cartY + 3);
     
     ctx.font = 'bold 2.8px sans-serif';
-    let projText = tavola.datiCartiglio?.progetto || "GECOLA CAD";
+    let projText = tavola.datiCartiglio?.progetto || "GECOLA BIM";
     if (projText.length > 35) projText = projText.substring(0, 35) + "...";
     ctx.fillText(projText, cartX + 2.5, cartY + 7);
 
@@ -500,6 +487,60 @@ export const CanvasPDFPreview: React.FC<CanvasPDFPreviewProps> = ({ entities, ta
     // Translate origin of world to the sheet template standard coordinate positioning
     ctx.translate(-tavola.position.x, -tavola.position.y);
 
+    // Support printable grid overlay (retino) in PDF export
+    if (tavola.gridType && tavola.gridType !== 'none') {
+      let spacingVal = 10;
+      if (tavola.gridType === '1cm') {
+        if (tavola.unit === 'm') spacingVal = 0.01;
+        else if (tavola.unit === 'cm') spacingVal = 1;
+        else if (tavola.unit === 'mm') spacingVal = 10;
+      } else if (tavola.gridType === '10cm') {
+        if (tavola.unit === 'm') spacingVal = 0.1;
+        else if (tavola.unit === 'cm') spacingVal = 10;
+        else if (tavola.unit === 'mm') spacingVal = 100;
+      } else if (tavola.gridType === '100cm') {
+        if (tavola.unit === 'm') spacingVal = 1.0;
+        else if (tavola.unit === 'cm') spacingVal = 100;
+        else if (tavola.unit === 'mm') spacingVal = 1000;
+      }
+
+      ctx.save();
+      
+      const pSizeGrid = getPaperSizeMm(tavola.format);
+      const wVal = pSizeGrid.w / cadToMm;
+      const hVal = pSizeGrid.h / cadToMm;
+
+      // Clip grid inside the sheet boundaries
+      ctx.beginPath();
+      ctx.rect(tavola.position.x, tavola.position.y, wVal, hVal);
+      ctx.clip();
+
+      ctx.strokeStyle = tavola.gridColor || 'rgba(99, 102, 241, 0.15)';
+      ctx.lineWidth = 0.08 / cadToMm; // Very thin, elegant printable line width
+      ctx.setLineDash([]);
+
+      const startX = Math.floor(tavola.position.x / spacingVal) * spacingVal;
+      const endX = Math.ceil((tavola.position.x + wVal) / spacingVal) * spacingVal;
+      const startY = Math.floor(tavola.position.y / spacingVal) * spacingVal;
+      const endY = Math.ceil((tavola.position.y + hVal) / spacingVal) * spacingVal;
+
+      ctx.beginPath();
+      for (let x = startX; x <= endX; x += spacingVal) {
+        if (x >= tavola.position.x && x <= tavola.position.x + wVal) {
+          ctx.moveTo(x, tavola.position.y);
+          ctx.lineTo(x, tavola.position.y + hVal);
+        }
+      }
+      for (let y = startY; y <= endY; y += spacingVal) {
+        if (y >= tavola.position.y && y <= tavola.position.y + hVal) {
+          ctx.moveTo(tavola.position.x, y);
+          ctx.lineTo(tavola.position.x + wVal, y);
+        }
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Set basic rendering configurations
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -508,14 +549,28 @@ export const CanvasPDFPreview: React.FC<CanvasPDFPreviewProps> = ({ entities, ta
       ctx.save();
 
       // Configure draw stroke colors, width, styling
-      ctx.strokeStyle = ent.color || '#000000';
-      ctx.fillStyle = ent.color || '#000000';
+      const isBIMSymbol = ent.isBIM && (ent.bimType === 'electrical_symbol' || ent.bimType === 'hydraulic_symbol');
+      ctx.strokeStyle = isBIMSymbol ? '#000000' : (ent.color || '#000000');
+      ctx.fillStyle = isBIMSymbol ? '#000000' : (ent.color || '#000000');
       
       const baseLw = typeof ent.lineWidth === 'number' ? ent.lineWidth : 1.0;
       // Convert typical screen unit thickness to proper paper millimeters scale representation
-      ctx.lineWidth = Math.max(0.1, baseLw * 0.2) / cadToMm;
+      ctx.lineWidth = isBIMSymbol ? (0.08 / cadToMm) : (Math.max(0.1, baseLw * 0.2) / cadToMm);
 
-      if (ent.dashed) {
+      const lineType = (ent as any).lineType;
+      if (lineType) {
+        if (lineType === 'dashed') {
+          ctx.setLineDash([8 / cadToMm, 4 / cadToMm]);
+        } else if (lineType === 'dotted') {
+          ctx.setLineDash([2 / cadToMm, 3 / cadToMm]);
+        } else if (lineType === 'dashdot') {
+          ctx.setLineDash([12 / cadToMm, 4 / cadToMm, 2 / cadToMm, 4 / cadToMm]);
+        } else if (lineType === 'dashdash') {
+          ctx.setLineDash([15 / cadToMm, 4 / cadToMm, 4 / cadToMm, 4 / cadToMm]);
+        } else {
+          ctx.setLineDash([]);
+        }
+      } else if (ent.dashed) {
         ctx.setLineDash([5 / cadToMm, 5 / cadToMm]);
       } else {
         ctx.setLineDash([]);
@@ -544,6 +599,30 @@ export const CanvasPDFPreview: React.FC<CanvasPDFPreviewProps> = ({ entities, ta
           ctx.moveTo(ent.start.x, ent.start.y);
           ctx.lineTo(ent.end.x, ent.end.y);
           ctx.stroke();
+
+          if ((ent as any).isFilo) {
+            ctx.save();
+            ctx.fillStyle = ent.color || '#ff5500';
+            ctx.beginPath();
+            ctx.arc(ent.start.x, ent.start.y, 4 / cadToMm, 0, Math.PI * 2);
+            ctx.arc(ent.end.x, ent.end.y, 4 / cadToMm, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1 / cadToMm;
+            ctx.beginPath();
+            ctx.moveTo(ent.start.x - 3 / cadToMm, ent.start.y);
+            ctx.lineTo(ent.start.x + 3 / cadToMm, ent.start.y);
+            ctx.moveTo(ent.start.x, ent.start.y - 3 / cadToMm);
+            ctx.lineTo(ent.start.x, ent.start.y + 3 / cadToMm);
+
+            ctx.moveTo(ent.end.x - 3 / cadToMm, ent.end.y);
+            ctx.lineTo(ent.end.x + 3 / cadToMm, ent.end.y);
+            ctx.moveTo(ent.end.x, ent.end.y - 3 / cadToMm);
+            ctx.lineTo(ent.end.x, ent.end.y + 3 / cadToMm);
+            ctx.stroke();
+            ctx.restore();
+          }
         }
       } else if (ent.type === 'circle') {
         ctx.beginPath();
@@ -584,8 +663,8 @@ export const CanvasPDFPreview: React.FC<CanvasPDFPreviewProps> = ({ entities, ta
           ctx.stroke();
 
           // Extensions/legislative elements
-          const legBehind = (20 * scaleFactor) / cadToMm;
-          const legAhead = (8 * scaleFactor) / cadToMm;
+          const legBehind = 20 * scaleFactor;
+          const legAhead = 8 * scaleFactor;
           const offsetDir = ent.offset >= 0 ? 1 : -1;
 
           ctx.beginPath();
@@ -596,7 +675,7 @@ export const CanvasPDFPreview: React.FC<CanvasPDFPreviewProps> = ({ entities, ta
           ctx.stroke();
 
           // Slashes
-          const slashSize = (5 * scaleFactor) / cadToMm;
+          const slashSize = 5 * scaleFactor;
           ctx.beginPath();
           ctx.moveTo(p1.x - nx * slashSize - ny * slashSize, p1.y - ny * slashSize + nx * slashSize);
           ctx.lineTo(p1.x + nx * slashSize + ny * slashSize, p1.y + ny * slashSize - nx * slashSize);
@@ -606,7 +685,7 @@ export const CanvasPDFPreview: React.FC<CanvasPDFPreviewProps> = ({ entities, ta
 
           // Dimension text
           ctx.fillStyle = '#000000';
-          const size = (12 * scaleFactor) / cadToMm;
+          const size = 12 * scaleFactor;
           ctx.font = `${size}px monospace`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'bottom';
@@ -619,8 +698,8 @@ export const CanvasPDFPreview: React.FC<CanvasPDFPreviewProps> = ({ entities, ta
           if (angle >= Math.PI / 2 - 0.01) angle -= Math.PI;
           else if (angle < -Math.PI / 2 - 0.01) angle += Math.PI;
 
-          const textX = (p1.x + p2.x) / 2 + (3 * scaleFactor / cadToMm) * Math.sin(angle);
-          const textY = (p1.y + p2.y) / 2 - (3 * scaleFactor / cadToMm) * Math.cos(angle);
+          const textX = (p1.x + p2.x) / 2 + (3 * scaleFactor) * Math.sin(angle);
+          const textY = (p1.y + p2.y) / 2 - (3 * scaleFactor) * Math.cos(angle);
 
           ctx.save();
           ctx.translate(textX, textY);
@@ -629,10 +708,11 @@ export const CanvasPDFPreview: React.FC<CanvasPDFPreviewProps> = ({ entities, ta
           ctx.restore();
         }
       } else if (ent.type === 'text') {
-        const textFontSize = (ent.fontSize || 14) / cadToMm;
+        const textFontSize = ent.fontSize || 14;
         ctx.font = `${ent.fontWeight || 'normal'} ${textFontSize}px ${ent.fontFamily || 'sans-serif'}`;
-        ctx.fillStyle = ent.color || '#000000';
-        ctx.textAlign = ent.textAlign || 'left';
+        const isBIMSymbol = ent.isBIM && (ent.bimType === 'electrical_symbol' || ent.bimType === 'hydraulic_symbol');
+        ctx.fillStyle = isBIMSymbol ? '#000000' : (ent.color || '#000000');
+        ctx.textAlign = (ent.textAlign as CanvasTextAlign) || 'left';
         ctx.textBaseline = 'top';
 
         const lines = ent.text.split('\n');

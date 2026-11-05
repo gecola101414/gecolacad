@@ -7,7 +7,35 @@ export interface InkPoint {
   alpha: number;
 }
 
-export type EntityType = 'line' | 'circle' | 'rectangle' | 'dimension' | 'arc' | 'point' | 'text' | 'hatch' | 'image';
+export type BIMRenderingStyle = 'none' | 'calcestruzzo' | 'mattone_portante' | 'tramezzo' | 'solaio_pignatte' | 'ponteggio' | 'mantovana';
+
+export interface BIMObject {
+  guid: string;
+  ifc_class: string;
+  identity: {
+    name: string;
+    description: string;
+  };
+  geometry_parameters: Record<string, any>;
+  properties: {
+    dimensions: Record<string, any>;
+    analytical: Record<string, any>;
+    cost_5d: {
+      prezzarioCodice?: string;
+      prezzarioDescrizione?: string;
+      prezzarioUnita?: string;
+      prezzarioPrezzo?: number;
+      incidenzaManodopera?: number;
+      prezzarioNome?: string;
+      [key: string]: any;
+    };
+    facility_7d: Record<string, any>;
+  };
+  relations: string[];
+  renderingStyle?: BIMRenderingStyle;
+}
+
+export type EntityType = 'line' | 'circle' | 'rectangle' | 'dimension' | 'arc' | 'point' | 'text' | 'hatch' | 'image' | 'bim-csg' | 'camera';
 
 export interface CADEntity {
   id: string;
@@ -16,9 +44,12 @@ export interface CADEntity {
   lineWidth: number;
   layer: string;
   dashed?: boolean;
+  lineType?: 'continuous' | 'dashed' | 'dotted' | 'dashdot' | 'dashdash';
+  isFilo?: boolean;
   mode?: 'ink' | 'pencil' | 'CAD';
   groupId?: string;
   templateId?: string;
+  parentLineId?: string;
   opacity?: number;
   raccordoMetadata?: {
     id1: string;
@@ -27,15 +58,62 @@ export interface CADEntity {
     originalLine2: any;
     clickPt1: { x: number; y: number };
     clickPt2: { x: number; y: number };
-    config: { type: 'curvo' | 'rettilineo'; value: number };
+    config: { type: 'curvo' | 'rettilineo' | 'taglia'; value: number };
   };
+  // BIM-specific
+  bimData?: BIMObject;
+  renderingStyle?: BIMRenderingStyle;
   isBIM?: boolean;
-  bimType?: 'room' | 'door' | 'window' | 'wall' | 'electrical_symbol' | 'hydraulic_symbol';
+  isVisible?: boolean;  // BIM-specific visibility state
+  isFrozen?: boolean;   // BIM-specific frozen state
+  width?: number;
+  height?: number;
+  parentEntityId?: string;
+
+  /** @deprecated Use bimData instead */
+  bimType?: 'room' | 'door' | 'window' | 'wall' | 'electrical_symbol' | 'hydraulic_symbol' | 'functional_area' | 'bim_element' | 'element';
+  /** @deprecated Use bimData instead */
+  bimAreaType?: string;
+  /** @deprecated Use bimData instead */
+  bimFamily?: string;
+  /** @deprecated Use bimData instead */
+  bimSubFamily?: string;
+  /** @deprecated Use bimData instead */
   bimName?: string;
-  bimHeight?: number; // e.g. 2.70
-  bimWidth?: number;  // e.g. 80, 90, 120
-  bimWindowHeight?: number; // e.g. 140
-  bimPoints?: Point[]; // Polygon corners For rooms
+  /** @deprecated Use bimData instead */
+  bimHeight?: number;
+  /** @deprecated Use bimData instead */
+  bimWidth?: number;
+  /** @deprecated Use bimData instead */
+  bimWindowHeight?: number;
+  /** @deprecated Use bimData instead */
+  bimPoints?: Point[];
+  /** @deprecated Use bimData instead */
+  bimOffset?: number;
+  /** @deprecated Use bimData instead */
+  backgroundColor?: string;
+  /** @deprecated Use bimData instead */
+  bimHatchPattern?: string; 
+  /** @deprecated Use bimData instead */
+  bimRenderMode?: 'solid' | 'transparent' | 'parete_verticale' | 'parete_orizzontale';
+  /** @deprecated Use bimData instead */
+  bimDescription?: string;
+  /** @deprecated Use bimData instead */
+  bimMarmo?: string;
+  /** @deprecated Use bimData instead */
+  bimTrasmittanza?: number;
+  /** @deprecated Use bimData instead */
+  hideIn2D?: boolean;
+  isLinear?: boolean;
+  isFaceAligned?: boolean;
+  rotationX?: number;
+  rotationY?: number;
+  rotationZ?: number;
+  hasMantovana?: boolean;
+  mantovanaAngle?: number;
+  mantovanaHeight?: number;
+  teloLato?: 'none' | 'esterno' | 'interno' | 'entrambi';
+  tavoleFermapiedeCount?: number;
 }
 
 export interface LineEntity extends CADEntity {
@@ -79,6 +157,16 @@ export interface DimensionEntity extends CADEntity {
   style: number;
   customText?: string;
   rotation?: number; // In degrees
+  scale?: number;     // specific scale if overridden
+  decimals?: number;  // custom decimal digits
+  extAhead?: number;  // custom extension line ahead length (beyond dimension line)
+  extBehind?: number; // custom extension line behind length (gap from snap points)
+  includeInComputo?: boolean;
+  prezzarioCodice?: string;
+  prezzarioDescrizione?: string;
+  prezzarioUnita?: string;
+  prezzarioPrezzo?: number;
+  moltiplicatore?: number;
 }
 
 export interface TextEntity extends CADEntity {
@@ -97,8 +185,10 @@ export interface HatchEntity extends CADEntity {
   scale: number;
   angle: number; // in degrees
   points: Point[]; // Polygon boundary
+  holes?: Point[][]; // Inner boundaries (holes)
   backgroundColor?: string;
   sfumatura?: number;
+  isLinear?: boolean;
 }
 
 export interface ImageEntity extends CADEntity {
@@ -107,6 +197,7 @@ export interface ImageEntity extends CADEntity {
   width: number;
   height: number;
   src: string;
+  mediaType?: 'image' | 'video' | 'audio' | 'pdf';
   name?: string;
   angle?: number;
   aspectRatio?: number;
@@ -120,7 +211,23 @@ export interface ImageEntity extends CADEntity {
   traceSmooth?: boolean; // smooth contours vs sharp
 }
 
-export type Entity = LineEntity | CircleEntity | RectEntity | DimensionEntity | ArcEntity | PointEntity | TextEntity | HatchEntity | ImageEntity;
+export interface CSGMeshEntity extends CADEntity {
+  type: 'bim-csg';
+  geometryData: {
+    positions: Float32Array | number[];
+    normals: Float32Array | number[];
+    uvs?: Float32Array | number[];
+    indices?: Uint32Array | Uint16Array | number[];
+  };
+}
+
+export interface CameraEntity extends CADEntity {
+  type: 'camera';
+  point: Point;
+  angle: number;
+}
+
+export type Entity = LineEntity | CircleEntity | RectEntity | DimensionEntity | ArcEntity | PointEntity | TextEntity | HatchEntity | ImageEntity | CSGMeshEntity | CameraEntity;
 
 export interface Measurement {
   id: string;
@@ -152,4 +259,25 @@ export interface Tavola {
   visible: boolean;
   datiCartiglio: TavolaData;
   measuredCalibrationMm?: number;
+  gridType?: 'none' | '1cm' | '10cm' | '100cm';
+  gridColor?: string;
+}
+
+export interface PrezzarioItem {
+  codice: string;
+  descrizione: string;
+  unita: string;
+  prezzo: number;
+  categoria: string;
+  incidenzaManodopera?: number;
+  prezzario?: string;
+  bimFamilyId?: string; // Links this item to a specific BIM Family's mini-listino
+}
+
+export interface Floor {
+  id: string;
+  name: string;
+  elevation: number; // in centimeters (Z Base)
+  type: 'fuori_terra' | 'interrato';
+  visibleInPlan?: boolean;
 }

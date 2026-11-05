@@ -1,0 +1,101 @@
+            if (styleToUse === 3) {
+                dx = origDx;
+                dy = 0;
+                L = Math.abs(dx);
+                nx = 0;
+                ny = entity.offset >= 0 ? 1 : -1;
+            } else if (styleToUse === 4) {
+                dx = 0;
+                dy = origDy;
+                L = Math.abs(dy);
+                nx = entity.offset >= 0 ? 1 : -1;
+                ny = 0;
+            }
+            if (L <= 0.001) L = 0.001;
+            
+            // Define a uniform scale factor independent of length
+            const scaleFactor = entity.scale || dimensionScale || 1.0;
+
+            // Thinner line for dimensions
+            ctx.lineWidth = (0.5 / view.zoom) * (Math.max(1, scaleFactor * 0.5));
+            
+            // Dimension line
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+
+            // Extension lines (reference lines) from the dimension line (with a small overshoot of legAhead)
+            // going down to a constant gap from the original points.
+            const legAhead = 4 * scaleFactor;
+            const gap = 12 * scaleFactor;
+            const absOffset = Math.abs(entity.offset);
+            const offsetSign = entity.offset >= 0 ? 1 : -1;
+            
+            if (absOffset > gap) {
+                const maxExtLength = 15 * scaleFactor;
+                const extLength = Math.min(absOffset - gap, maxExtLength);
+
+                if (styleToUse === 3) {
+                    // Vertical constraint
+                    // Cap the extension line to a maximum short length from the dimension line back towards the point
+                    ctx.moveTo(p1.x, p1.y + legAhead * offsetSign);
+                    ctx.lineTo(p1.x, p1.y - offsetSign * extLength);
+                    ctx.moveTo(p2.x, p2.y + legAhead * offsetSign);
+                    ctx.lineTo(p2.x, p2.y - offsetSign * extLength);
+                } else if (styleToUse === 4) {
+                    // Horizontal constraint
+                    // Cap the extension line to a maximum short length from the dimension line back towards the point
+                    ctx.moveTo(p1.x + legAhead * offsetSign, p1.y);
+                    ctx.lineTo(p1.x - offsetSign * extLength, p1.y);
+                    ctx.moveTo(p2.x + legAhead * offsetSign, p2.y);
+                    ctx.lineTo(p2.x - offsetSign * extLength, p2.y);
+                } else {
+                    // Aligned/Linear/Auto-Ortho
+                    // Cap the extension line to a maximum short length from the dimension line back towards the point
+                    ctx.moveTo(p1.x + nx * legAhead * offsetSign, p1.y + ny * legAhead * offsetSign);
+                    ctx.lineTo(p1.x - nx * extLength * offsetSign, p1.y - ny * extLength * offsetSign);
+                    ctx.moveTo(p2.x + nx * legAhead * offsetSign, p2.y + ny * legAhead * offsetSign);
+                    ctx.lineTo(p2.x - nx * extLength * offsetSign, p2.y - ny * extLength * offsetSign);
+                }
+            } else {
+                // If offset is smaller than gap, just draw standard short ticks
+                if (styleToUse === 3) {
+                    ctx.moveTo(p1.x, p1.y + legAhead * offsetSign);
+                    ctx.lineTo(p1.x, p1.y - legAhead * 2 * offsetSign);
+                    ctx.moveTo(p2.x, p2.y + legAhead * offsetSign);
+                    ctx.lineTo(p2.x, p2.y - legAhead * 2 * offsetSign);
+                } else if (styleToUse === 4) {
+                    ctx.moveTo(p1.x + legAhead * offsetSign, p1.y);
+                    ctx.lineTo(p1.x - legAhead * 2 * offsetSign, p1.y);
+                    ctx.moveTo(p2.x + legAhead * offsetSign, p2.y);
+                    ctx.lineTo(p2.x - legAhead * 2 * offsetSign, p2.y);
+                } else {
+                    ctx.moveTo(p1.x + nx * legAhead * offsetSign, p1.y + ny * legAhead * offsetSign);
+                    ctx.lineTo(p1.x - nx * legAhead * 2 * offsetSign, p1.y - ny * legAhead * 2 * offsetSign);
+                    ctx.moveTo(p2.x + nx * legAhead * offsetSign, p2.y + ny * legAhead * offsetSign);
+                    ctx.lineTo(p2.x - nx * legAhead * 2 * offsetSign, p2.y - ny * legAhead * 2 * offsetSign);
+                }
+            }
+
+            // Inclined intersection slashes proportional to length
+            const slashSize = 5 * scaleFactor;
+            const snx = styleToUse === 3 ? 0 : (styleToUse === 4 ? 1 : nx);
+            const sny = styleToUse === 3 ? 1 : (styleToUse === 4 ? 0 : ny);
+            
+            // Slash at p1
+            ctx.moveTo(p1.x - snx * slashSize - sny * slashSize, p1.y - sny * slashSize + snx * slashSize);
+            ctx.lineTo(p1.x + snx * slashSize + sny * slashSize, p1.y + sny * slashSize - snx * slashSize);
+            // Slash at p2
+            ctx.moveTo(p2.x - snx * slashSize - sny * slashSize, p2.y - sny * slashSize + snx * slashSize);
+            ctx.lineTo(p2.x + snx * slashSize + sny * slashSize, p2.y + sny * slashSize - snx * slashSize);
+
+            ctx.stroke();
+
+            // Text
+            ctx.save();
+            ctx.fillStyle = 'black'; // Text should be black too
+            const fontSize = Math.max(2, 12 * scaleFactor);
+            ctx.font = `${fontSize}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            const midX = (p1.x + p2.x) / 2;
+            const midY = (p1.y + p2.y) / 2;

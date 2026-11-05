@@ -155,10 +155,13 @@ export const exportNativePDF = (
       // All lines black
       pdf.setDrawColor(0, 0, 0); 
       
+      const isBIMSymbol = entity.isBIM && (entity.bimType === 'electrical_symbol' || entity.bimType === 'hydraulic_symbol');
       let baseLw = entity.lineWidth && typeof entity.lineWidth === 'number' ? entity.lineWidth : 1;
       let lw = Math.max(0.1, baseLw * 0.2); // Standard mapping for CAD lines
       
-      if (entity.mode === 'ink') {
+      if (isBIMSymbol) {
+          lw = 0.08; // Super fine thin black line (0.08mm) in PDF output regardless of scale
+      } else if (entity.mode === 'ink') {
           // Special mapping for Kina pens to guarantee visible solid black
           lw = baseLw <= 0.25 ? 0.3 : baseLw <= 0.5 ? 0.5 : baseLw <= 1.0 ? 1.0 : baseLw <= 2.0 ? 2.0 : baseLw;
       }
@@ -330,7 +333,12 @@ export const exportNativePDF = (
       } else if (entity.type === 'text') {
           // Parse color
           let r = 0, g = 0, b = 0;
-          if (entity.color && entity.color.startsWith('#')) {
+          const isBIMSymbol = entity.isBIM && (entity.bimType === 'electrical_symbol' || entity.bimType === 'hydraulic_symbol');
+          if (isBIMSymbol) {
+              r = 0;
+              g = 0;
+              b = 0;
+          } else if (entity.color && entity.color.startsWith('#')) {
               const hex = entity.color.replace('#', '');
               if (hex.length === 6) {
                   r = parseInt(hex.substring(0, 2), 16);
@@ -349,7 +357,11 @@ export const exportNativePDF = (
           if (entity.textAlign === 'center') align = 'center';
           if (entity.textAlign === 'right') align = 'right';
           
-          pdf.text(entity.text, tx(entity.point.x), ty(entity.point.y), { align, baseline: 'top' });
+          const lines = entity.text.split('\n');
+          const lineHeightMm = entity.fontSize * 1.25;
+          lines.forEach((line, idx) => {
+              pdf.text(line, tx(entity.point.x), ty(entity.point.y + idx * lineHeightMm), { align, baseline: 'top' });
+          });
       } else if (entity.type === 'hatch') {
           drawHatchInPDF(pdf, entity, tx, ty, ts, scale);
       }
@@ -402,7 +414,7 @@ export const exportNativePDF = (
       
       pdf.setFontSize(8 * CALIBRATION_FACTOR);
       const MAX_PROGETTO_LEN = 35;
-      let pString = tavola.datiCartiglio?.progetto || "GECOLA CAD";
+      let pString = tavola.datiCartiglio?.progetto || "GECOLA BIM";
       if(pString.length > MAX_PROGETTO_LEN) pString = pString.substring(0, MAX_PROGETTO_LEN) + "...";
       pdf.text(pString, cartX + 2.5 * CALIBRATION_FACTOR, cartY + 10 * CALIBRATION_FACTOR);
       

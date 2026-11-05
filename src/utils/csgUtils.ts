@@ -200,20 +200,26 @@ export const performCSG = (entityA: Entity, entityB: Entity, operation: 'union' 
   return {
     type: 'bim-csg',
     isBIM: true,
+    lineWidth: 1,
     id: `csg_${Date.now()}_${Math.random().toString(36).substring(2,5)}`,
     layer: entityA.layer, 
     color: entityA.color,
-    lineWidth: 1,
-    mode: "CAD" as "2H" | "HB" | "CAD",
     bimName: baseName,
     bimType: bimType,
     bimVolume: volume,
     bimArea: area,
+    points: (entityA as any).points || (entityA as any).bimPoints,
+    holes: (entityA as any).holes,
+    bimWidth: (entityA as any).bimWidth || (entityA as any).width,
+    bimHeight: (entityA as any).bimHeight || (entityA as any).height,
+    bimZPlane: (entityA as any).bimZPlane,
+    bimZElevation: (entityA as any).bimZElevation,
+    bimRenderMode: (entityA as any).bimRenderMode,
     geometryData: {
       positions,
       normals,
       uvs,
       indices
     }
-  } as CSGMeshEntity;
+  } as any;
 };
